@@ -1,8 +1,9 @@
-// components/OwnerRegister.jsx
 import React, { useState } from "react";
 import axios from "axios";
+import { useNavigate } from "react-router-dom";
 
 const OwnerRegister = () => {
+  const navigate = useNavigate();
   const [formData, setFormData] = useState({
     arena_name: "",
     email: "",
@@ -19,16 +20,26 @@ const OwnerRegister = () => {
   const [success, setSuccess] = useState(false);
 
   const handleChange = (e) => {
-    const value =
-      e.target.type === "checkbox" ? e.target.checked : e.target.value;
-    setFormData({
-      ...formData,
-      [e.target.name]: value,
-    });
-    if (errors[e.target.name]) {
+    const { name, value, type, checked } = e.target;
+
+    if (name === "phone_number") {
+      const digitsOnly = value.replace(/\D/g, '');
+      setFormData({
+        ...formData,
+        [name]: digitsOnly,
+      });
+    } else {
+      setFormData({
+        ...formData,
+        [name]: type === "checkbox" ? checked : value,
+      });
+    }
+
+    if (errors[name] || errors.api) {
       setErrors({
         ...errors,
-        [e.target.name]: "",
+        [name]: "",
+        api: "",
       });
     }
   };
@@ -38,6 +49,7 @@ const OwnerRegister = () => {
 
     if (!formData.arena_name.trim())
       newErrors.arena_name = "Arena name is required";
+
     if (!formData.email.trim()) newErrors.email = "Email is required";
     else if (!/\S+@\S+\.\S+/.test(formData.email))
       newErrors.email = "Email is invalid";
@@ -53,6 +65,10 @@ const OwnerRegister = () => {
 
     if (!formData.phone_number.trim())
       newErrors.phone_number = "Phone number is required";
+    else if (formData.phone_number.length < 10)
+      newErrors.phone_number = "Phone number must be at least 10 digits";
+    else if (formData.phone_number.length > 15)
+      newErrors.phone_number = "Phone number is too long";
 
     if (!formData.agreed_to_terms)
       newErrors.agreed_to_terms = "You must agree to the terms";
@@ -92,7 +108,7 @@ const OwnerRegister = () => {
       setSuccess(true);
 
       setTimeout(() => {
-        window.location.href = "/owner/dashboard";
+        navigate("/owner/dashboard", { state: { registerSuccess: true } });
       }, 2000);
     } catch (error) {
       console.error("Owner registration error:", error);
@@ -107,14 +123,32 @@ const OwnerRegister = () => {
   };
 
   return (
-    <div>
+    <div className="max-w-md mx-auto p-6 bg-white rounded-lg shadow-lg">
+      <div className="mb-6">
+        <button
+          type="button"
+          onClick={() => navigate("/")}
+          className="flex items-center text-blue-600 hover:text-blue-800"
+        >
+          <span className="mr-2">←</span>
+          Back to Login Options
+        </button>
+      </div>
+
+      <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">
+        Register Arena
+      </h2>
+
       {success ? (
         <div className="text-center py-8">
           <div className="text-green-500 text-5xl mb-4">✓</div>
           <h3 className="text-xl font-bold text-green-600 mb-2">
             Registration Successful!
           </h3>
-          <p className="text-gray-600">Redirecting to owner dashboard...</p>
+          <p className="text-gray-600">Your arena has been registered.</p>
+          <div className="animate-pulse mt-4">
+            <p className="text-sm text-gray-500">Redirecting to dashboard...</p>
+          </div>
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="space-y-5">
@@ -133,9 +167,8 @@ const OwnerRegister = () => {
               name="arena_name"
               value={formData.arena_name}
               onChange={handleChange}
-              className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
-                errors.arena_name ? "border-red-500" : "border-gray-300"
-              }`}
+              className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 ${errors.arena_name ? "border-red-500" : "border-gray-300"
+                }`}
               placeholder="Enter your arena name"
             />
             {errors.arena_name && (
@@ -152,9 +185,8 @@ const OwnerRegister = () => {
               name="email"
               value={formData.email}
               onChange={handleChange}
-              className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
-                errors.email ? "border-red-500" : "border-gray-300"
-              }`}
+              className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 ${errors.email ? "border-red-500" : "border-gray-300"
+                }`}
               placeholder="Enter your email"
             />
             {errors.email && (
@@ -172,14 +204,14 @@ const OwnerRegister = () => {
                 name="password"
                 value={formData.password}
                 onChange={handleChange}
-                className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
-                  errors.password ? "border-red-500" : "border-gray-300"
-                }`}
+                className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 ${errors.password ? "border-red-500" : "border-gray-300"
+                  }`}
                 placeholder="Create a password"
               />
               {errors.password && (
                 <p className="text-red-500 text-sm mt-1">{errors.password}</p>
               )}
+              <p className="text-xs text-gray-500 mt-1">Minimum 6 characters</p>
             </div>
 
             <div>
@@ -191,9 +223,8 @@ const OwnerRegister = () => {
                 name="confirmPassword"
                 value={formData.confirmPassword}
                 onChange={handleChange}
-                className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
-                  errors.confirmPassword ? "border-red-500" : "border-gray-300"
-                }`}
+                className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 ${errors.confirmPassword ? "border-red-500" : "border-gray-300"
+                  }`}
                 placeholder="Confirm your password"
               />
               {errors.confirmPassword && (
@@ -213,11 +244,14 @@ const OwnerRegister = () => {
               name="phone_number"
               value={formData.phone_number}
               onChange={handleChange}
-              className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
-                errors.phone_number ? "border-red-500" : "border-gray-300"
-              }`}
+              className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 ${errors.phone_number ? "border-red-500" : "border-gray-300"
+                }`}
               placeholder="Enter your phone number"
+              maxLength="15"
             />
+            <p className="mt-1 text-xs text-gray-500">
+              Enter digits only (e.g., 3001234567)
+            </p>
             {errors.phone_number && (
               <p className="text-red-500 text-sm mt-1">{errors.phone_number}</p>
             )}
@@ -231,7 +265,7 @@ const OwnerRegister = () => {
               name="business_address"
               value={formData.business_address}
               onChange={handleChange}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
               placeholder="Enter your arena address"
               rows="2"
             />
@@ -247,21 +281,21 @@ const OwnerRegister = () => {
               value={formData.number_of_courts}
               onChange={handleChange}
               min="1"
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
             />
           </div>
 
-          <div className="flex items-center">
+          <div className="flex items-start">
             <input
               type="checkbox"
               name="agreed_to_terms"
               checked={formData.agreed_to_terms}
               onChange={handleChange}
-              className="h-4 w-4 text-blue-600 rounded"
+              className="h-4 w-4 text-green-600 rounded mt-1"
             />
             <label className="ml-2 text-sm text-gray-600">
               I agree to the{" "}
-              <a href="#" className="text-blue-600 hover:underline">
+              <a href="#" className="text-green-600 hover:underline">
                 Terms and Conditions
               </a>
             </label>

@@ -14,17 +14,37 @@ router.post("/register", async (req, res) => {
     return res.status(400).json({ error: "All fields are required" });
   }
 
+  // Clean phone number (remove any non-digit characters)
+  const cleanPhoneNumber = phone_number.replace(/\D/g, '');
+
+  // Validate phone number
+  if (cleanPhoneNumber.length < 10 || cleanPhoneNumber.length > 15) {
+    return res.status(400).json({ error: "Please enter a valid phone number" });
+  }
+
   try {
-    // Check if user already exists
-    const [existingUser] = await pool.query(
+    // Check if user already exists with email
+    const [existingEmailUser] = await pool.query(
       "SELECT * FROM users WHERE email = ?",
       [email]
     );
 
-    if (existingUser.length > 0) {
+    if (existingEmailUser.length > 0) {
       return res
         .status(409)
         .json({ error: "User already exists with this email" });
+    }
+
+    // Check if user already exists with phone number
+    const [existingPhoneUser] = await pool.query(
+      "SELECT * FROM users WHERE phone_number = ?",
+      [cleanPhoneNumber]
+    );
+
+    if (existingPhoneUser.length > 0) {
+      return res
+        .status(409)
+        .json({ error: "User already exists with this phone number" });
     }
 
     // Hash password
@@ -35,7 +55,7 @@ router.post("/register", async (req, res) => {
     const [result] = await pool.query(
       `INSERT INTO users (name, email, password_hash, phone_number) 
        VALUES (?, ?, ?, ?)`,
-      [name, email, passwordHash, phone_number]
+      [name, email, passwordHash, cleanPhoneNumber]
     );
 
     // Generate JWT token
@@ -56,7 +76,7 @@ router.post("/register", async (req, res) => {
       user: {
         name,
         email,
-        phone_number,
+        phone_number: cleanPhoneNumber,
       },
     });
   } catch (error) {
@@ -65,31 +85,47 @@ router.post("/register", async (req, res) => {
   }
 });
 
-// User Login
+// User Login with Email OR Phone Number
 router.post("/login", async (req, res) => {
-  const { email, password } = req.body;
+  const { email, phone_number, password } = req.body;
 
-  if (!email || !password) {
-    return res.status(400).json({ error: "Email and password are required" });
+  // Validation - accept either email or phone_number
+  if ((!email && !phone_number) || !password) {
+    return res.status(400).json({
+      error: "Either email or phone number along with password are required"
+    });
   }
 
   try {
-    // Find user by email
-    const [users] = await pool.query("SELECT * FROM users WHERE email = ?", [
-      email,
-    ]);
+    // Find user by email OR phone number
+    let user;
+    let query;
+    let params = [];
 
-    if (users.length === 0) {
-      return res.status(401).json({ error: "Invalid email or password" });
+    if (email) {
+      // Login with email
+      query = "SELECT * FROM users WHERE email = ?";
+      params = [email];
+    } else {
+      // Login with phone number - clean it first
+      const cleanPhoneNumber = phone_number.replace(/\D/g, '');
+      query = "SELECT * FROM users WHERE phone_number = ?";
+      params = [cleanPhoneNumber];
     }
 
-    const user = users[0];
+    const [users] = await pool.query(query, params);
+
+    if (users.length === 0) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    user = users[0];
 
     // Compare passwords
     const isPasswordValid = await bcrypt.compare(password, user.password_hash);
 
     if (!isPasswordValid) {
-      return res.status(401).json({ error: "Invalid email or password" });
+      return res.status(401).json({ error: "Invalid credentials" });
     }
 
     // Update last login
@@ -149,6 +185,37 @@ router.post("/logout", async (req, res) => {
   }
 
   res.json({ message: "Logged out successfully" });
+});
+
+// Optional: Get user profile
+router.get("/profile", async (req, res) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader) {
+    return res.status(401).json({ error: "No token provided" });
+  }
+
+  try {
+    const token = authHeader.split(" ")[1];
+    const decoded = jwt.verify(
+      token,
+      config.JWT_SECRET || process.env.JWT_SECRET
+    );
+
+    const [users] = await pool.query(
+      "SELECT user_id, name, email, phone_number, profile_picture_url, created_at FROM users WHERE user_id = ?",
+      [decoded.user_id]
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.json({ user: users[0] });
+  } catch (error) {
+    console.error("Profile error:", error);
+    res.status(401).json({ error: "Invalid token" });
+  }
 });
 
 module.exports = router;

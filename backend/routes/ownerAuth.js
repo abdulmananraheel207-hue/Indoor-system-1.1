@@ -21,8 +21,7 @@ router.post("/register", async (req, res) => {
   // Validation
   if (!arena_name || !email || !password || !phone_number || !agreed_to_terms) {
     return res.status(400).json({
-      error:
-        "Arena name, email, password, phone number, and terms agreement are required",
+      error: "Arena name, email, password, phone number, and terms agreement are required",
     });
   }
 
@@ -33,16 +32,24 @@ router.post("/register", async (req, res) => {
   }
 
   try {
-    // Check if owner already exists
-    const [existingOwner] = await pool.query(
+    // Check if owner already exists with email
+    const [existingEmail] = await pool.query(
       "SELECT * FROM arena_owners WHERE email = ?",
       [email]
     );
 
-    if (existingOwner.length > 0) {
-      return res
-        .status(409)
-        .json({ error: "Arena owner already exists with this email" });
+    if (existingEmail.length > 0) {
+      return res.status(409).json({ error: "Arena owner already exists with this email" });
+    }
+
+    // Check if owner already exists with phone number
+    const [existingPhone] = await pool.query(
+      "SELECT * FROM arena_owners WHERE phone_number = ?",
+      [phone_number]
+    );
+
+    if (existingPhone.length > 0) {
+      return res.status(409).json({ error: "Arena owner already exists with this phone number" });
     }
 
     // Hash password
@@ -94,39 +101,51 @@ router.post("/register", async (req, res) => {
   }
 });
 
-// Arena Owner Login
+// Arena Owner Login with Email OR Phone Number
 router.post("/login", async (req, res) => {
-  const { email, password } = req.body;
+  const { email, phone_number, password } = req.body;
 
-  if (!email || !password) {
-    return res.status(400).json({ error: "Email and password are required" });
+  // Validation - accept either email or phone_number
+  if ((!email && !phone_number) || !password) {
+    return res.status(400).json({
+      error: "Either email or phone number along with password are required"
+    });
   }
 
   try {
-    // Find owner by email
-    const [owners] = await pool.query(
-      "SELECT * FROM arena_owners WHERE email = ?",
-      [email]
-    );
+    // Find owner by email OR phone number
+    let owner;
+    let query;
+    let params = [];
 
-    if (owners.length === 0) {
-      return res.status(401).json({ error: "Invalid email or password" });
+    if (email) {
+      // Login with email
+      query = "SELECT * FROM arena_owners WHERE email = ?";
+      params = [email];
+    } else {
+      // Login with phone number
+      query = "SELECT * FROM arena_owners WHERE phone_number = ?";
+      params = [phone_number];
     }
 
-    const owner = owners[0];
+    const [owners] = await pool.query(query, params);
+
+    if (owners.length === 0) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    owner = owners[0];
 
     // Check if account is active
     if (!owner.is_active) {
-      return res
-        .status(403)
-        .json({ error: "Account is deactivated. Please contact support." });
+      return res.status(403).json({ error: "Account is deactivated. Please contact support." });
     }
 
     // Compare passwords
     const isPasswordValid = await bcrypt.compare(password, owner.password_hash);
 
     if (!isPasswordValid) {
-      return res.status(401).json({ error: "Invalid email or password" });
+      return res.status(401).json({ error: "Invalid credentials" });
     }
 
     // Generate JWT token
