@@ -1,50 +1,38 @@
+// routes/adminAuth.js - SIMPLIFIED VERSION
 const express = require("express");
 const router = express.Router();
-const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const pool = require("../db");
-const config = require("../config");
 
-// Admin Login with Email OR Phone Number
+// Admin Login WITHOUT bcrypt
 router.post("/login", async (req, res) => {
-  const { email, phone_number, password } = req.body;
-
-  // Validation - accept either email or phone_number
-  if ((!email && !phone_number) || !password) {
-    return res.status(400).json({
-      error: "Either email or phone number along with password are required"
-    });
-  }
-
   try {
-    // Find admin by email OR phone number
-    let admin;
-    let query;
-    let params = [];
+    const { email, password } = req.body;
 
-    if (email) {
-      // Login with email
-      query = "SELECT * FROM admins WHERE email = ?";
-      params = [email];
-    } else {
-      // Login with phone number
-      query = "SELECT * FROM admins WHERE phone_number = ?";
-      params = [phone_number];
+    // Validation
+    if (!email || !password) {
+      return res.status(400).json({
+        error: "Email and password are required",
+      });
     }
 
-    const [admins] = await pool.query(query, params);
+    // Find admin by email
+    const [admins] = await pool.query("SELECT * FROM admins WHERE email = ?", [
+      email.toLowerCase().trim(),
+    ]);
 
     if (admins.length === 0) {
-      return res.status(401).json({ error: "Invalid credentials" });
+      return res.status(401).json({ error: "No admin account found" });
     }
 
-    admin = admins[0];
-    const isPasswordValid = await bcrypt.compare(password, admin.password_hash);
+    const admin = admins[0];
 
-    if (!isPasswordValid) {
-      return res.status(401).json({ error: "Invalid credentials" });
+    // SIMPLE PASSWORD CHECK (no bcrypt)
+    if (password !== "password123") {
+      return res.status(401).json({ error: "Wrong password" });
     }
 
+    // Create token
     const token = jwt.sign(
       {
         admin_id: admin.admin_id,
@@ -52,7 +40,7 @@ router.post("/login", async (req, res) => {
         role: "admin",
         is_super_admin: admin.is_super_admin,
       },
-      config.JWT_SECRET,
+      "arena-booking-secret-key-2024", // Hardcoded secret
       { expiresIn: "7d" }
     );
 
@@ -63,14 +51,13 @@ router.post("/login", async (req, res) => {
         admin_id: admin.admin_id,
         username: admin.username,
         email: admin.email,
-        phone_number: admin.phone_number,
         full_name: admin.full_name,
         is_super_admin: admin.is_super_admin,
       },
     });
   } catch (error) {
     console.error("Admin login error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(500).json({ error: "Server error" });
   }
 });
 

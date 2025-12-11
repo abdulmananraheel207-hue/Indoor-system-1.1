@@ -1,147 +1,100 @@
-import React, { useState } from "react";
-import UserLogin from "./UserLogin";
-import UserRegister from "./UserRegister";
-import OwnerLogin from "./OwnerLogin";
-import OwnerRegister from "./OwnerRegister";
-import AdminLogin from "./AdminLogin";
-import ManagerLogin from "./ManagerLogin";
+import React from "react";
+import { useNavigate } from "react-router-dom";
 
 const LoginSelector = () => {
-  const [selectedRole, setSelectedRole] = useState("user");
-  const [isLogin, setIsLogin] = useState(true);
+  const navigate = useNavigate();
 
   const roles = [
-    { id: "user", label: "Player/User", icon: "👤" },
-    { id: "owner", label: "Arena Owner", icon: "🏟️" },
-    { id: "admin", label: "Admin", icon: "⚙️" },
-    { id: "manager", label: "Manager", icon: "👔" },
-    { id: "guest", label: "Continue as Guest", icon: "🎮" },
+    {
+      id: "player",
+      label: "Player",
+      sub: "Book courts & play",
+      icon: "⚽",
+      route: "/login",
+      color: "bg-blue-50 text-blue-600",
+    },
+    {
+      id: "owner",
+      label: "Arena Owner",
+      sub: "Manage your venue",
+      icon: "🏟️",
+      route: "/owner/login",
+      color: "bg-green-50 text-green-600",
+    },
+    {
+      id: "manager",
+      label: "Manager",
+      sub: "Staff access",
+      icon: "👔",
+      route: "/manager/login",
+      color: "bg-purple-50 text-purple-600",
+    },
+    {
+      id: "admin",
+      label: "Admin",
+      sub: "System control",
+      icon: "⚙️",
+      route: "/admin/login",
+      color: "bg-gray-50 text-gray-600",
+    },
   ];
 
-  const handleGuestLogin = () => {
-    // Redirect to main app without authentication
-    window.location.href = "/home";
-  };
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-green-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl overflow-hidden">
-        <div className="flex flex-col md:flex-row">
-          {/* Left Side - Role Selection */}
-          <div className="md:w-1/3 bg-gradient-to-b from-blue-600 to-teal-600 p-8 text-white">
-            <h2 className="text-3xl font-bold mb-2">Welcome Back!</h2>
-            <p className="text-blue-100 mb-8">
-              Choose how you want to access the platform
-            </p>
+    <div className="min-h-screen bg-white flex flex-col page-enter">
+      {/* Hero Section */}
+      <div className="pt-12 pb-6 px-6 bg-gradient-to-b from-blue-600 to-blue-500 rounded-b-[2.5rem] shadow-xl text-center z-10">
+        <div className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-2xl mx-auto flex items-center justify-center text-3xl mb-4 shadow-inner">
+          🏆
+        </div>
+        <h1 className="text-2xl font-bold text-white mb-1">Sports Arena</h1>
+        <p className="text-blue-100 text-sm">Select your role to continue</p>
+      </div>
 
-            <div className="space-y-3">
-              {roles.map((role) => (
-                <button
-                  key={role.id}
-                  onClick={() => {
-                    if (role.id === "guest") {
-                      handleGuestLogin();
-                    } else {
-                      setSelectedRole(role.id);
-                      if (role.id === "admin" || role.id === "manager") {
-                        setIsLogin(true); // Only login for admin/manager
-                      }
-                    }
-                  }}
-                  className={`w-full flex items-center p-3 rounded-lg transition-all ${
-                    selectedRole === role.id
-                      ? "bg-white/20 border-2 border-white"
-                      : "hover:bg-white/10"
-                  }`}
-                >
-                  <span className="text-2xl mr-3">{role.icon}</span>
-                  <span className="font-medium">{role.label}</span>
-                </button>
-              ))}
+      {/* Role List */}
+      <div className="flex-1 -mt-4 px-5 pb-8 overflow-y-auto space-y-3">
+        {roles.map((role) => (
+          <button
+            key={role.id}
+            onClick={() => navigate(role.route)}
+            className="role-card w-full group"
+          >
+            <div
+              className={`w-12 h-12 rounded-xl ${role.color} flex items-center justify-center text-2xl shadow-sm group-active:scale-110 transition-transform`}
+            >
+              {role.icon}
             </div>
-
-            <div className="mt-10">
-              <h3 className="font-bold text-lg mb-3">About the Platform</h3>
-              <p className="text-sm text-blue-100">
-                Book indoor sports arenas for cricket, futsal, padel, and
-                badminton. Find the best courts, compare prices, and book
-                instantly!
-              </p>
+            <div className="flex-1 text-left">
+              <h3 className="font-bold text-gray-800 text-lg leading-tight">
+                {role.label}
+              </h3>
+              <p className="text-xs text-gray-500 font-medium">{role.sub}</p>
             </div>
-          </div>
-
-          {/* Right Side - Login/Register Form */}
-          <div className="md:w-2/3 p-8">
-            <div className="flex justify-between items-center mb-8">
-              <div>
-                <h1 className="text-2xl font-bold text-gray-800">
-                  {selectedRole === "user" &&
-                    (isLogin ? "Player Login" : "Player Registration")}
-                  {selectedRole === "owner" &&
-                    (isLogin
-                      ? "Arena Owner Login"
-                      : "Arena Owner Registration")}
-                  {selectedRole === "admin" && "Admin Login"}
-                  {selectedRole === "manager" && "Manager Login"}
-                </h1>
-                <p className="text-gray-600">
-                  {selectedRole === "user" &&
-                    "Book your favorite sports arenas"}
-                  {selectedRole === "owner" && "Manage your arena and bookings"}
-                  {selectedRole === "admin" && "Platform administration"}
-                  {selectedRole === "manager" &&
-                    "Staff access for arena management"}
-                </p>
-              </div>
-
-              {(selectedRole === "user" || selectedRole === "owner") && (
-                <div className="flex bg-gray-100 rounded-lg p-1">
-                  <button
-                    onClick={() => setIsLogin(true)}
-                    className={`px-4 py-2 rounded-md font-medium ${
-                      isLogin ? "bg-white shadow" : "text-gray-600"
-                    }`}
-                  >
-                    Login
-                  </button>
-                  <button
-                    onClick={() => setIsLogin(false)}
-                    className={`px-4 py-2 rounded-md font-medium ${
-                      !isLogin ? "bg-white shadow" : "text-gray-600"
-                    }`}
-                  >
-                    Register
-                  </button>
-                </div>
-              )}
+            <div className="text-gray-300">
+              <svg
+                className="w-6 h-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M9 5l7 7-7 7"
+                ></path>
+              </svg>
             </div>
+          </button>
+        ))}
 
-            {/* Render appropriate form */}
-            {selectedRole === "user" && isLogin && <UserLogin />}
-            {selectedRole === "user" && !isLogin && <UserRegister />}
-            {selectedRole === "owner" && isLogin && <OwnerLogin />}
-            {selectedRole === "owner" && !isLogin && <OwnerRegister />}
-            {selectedRole === "admin" && <AdminLogin />}
-            {selectedRole === "manager" && <ManagerLogin />}
-
-            {/* Guest message */}
-            {selectedRole === "guest" && (
-              <div className="text-center py-12">
-                <div className="text-6xl mb-6">🎮</div>
-                <h2 className="text-2xl font-bold mb-4">Continue as Guest</h2>
-                <p className="text-gray-600 mb-8">
-                  You can browse arenas, check availability, and view prices.
-                  Register to book courts and access all features.
-                </p>
-                <button
-                  onClick={handleGuestLogin}
-                  className="bg-gradient-to-r from-green-500 to-teal-500 text-white px-8 py-3 rounded-lg font-bold text-lg hover:opacity-90 transition"
-                >
-                  Explore Arenas Now
-                </button>
-              </div>
-            )}
-          </div>
+        {/* Guest Option */}
+        <div className="pt-4">
+          <button
+            onClick={() => navigate("/dashboard")}
+            className="w-full py-4 text-center text-gray-500 font-medium text-sm hover:text-blue-600 transition-colors"
+          >
+            Just browsing? <span className="underline">Continue as Guest</span>
+          </button>
         </div>
       </div>
     </div>

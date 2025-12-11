@@ -1,23 +1,25 @@
+// server.js - FIXED CORS (remove duplicate)
 const express = require("express");
 const cors = require("cors");
-const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
 require("dotenv").config();
+const adminRoutes = require("./routes/adminRoutes");
 
-// Import config and db
 const config = require("./config");
-const pool = require("./db"); // Use the pool instead of direct connection
+const pool = require("./db");
 
 const app = express();
 
-// Middleware
+// Middleware - FIXED (only one CORS)
 app.use(
   cors({
-    origin: config.CORS_ORIGIN,
+    origin: config.CORS_ORIGIN || "http://localhost:3000",
     credentials: true,
   })
 );
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// ... rest of server.js remains the same
 
 // Test database connection
 pool.getConnection((err, connection) => {
@@ -52,6 +54,7 @@ app.use("/api/auth/user", userAuthRoutes);
 app.use("/api/auth/owner", ownerAuthRoutes);
 app.use("/api/auth/admin", adminAuthRoutes);
 app.use("/api/auth/manager", managerAuthRoutes);
+app.use("/api/admin", adminRoutes);
 
 // Start server
 const PORT = config.PORT || 5000;
