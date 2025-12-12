@@ -1,48 +1,111 @@
+// routes/managerAuth.js - WITH TEST MANAGERS
 const express = require("express");
 const router = express.Router();
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const pool = require("../db");
-const config = require("../config");
 
-// Manager Login with Email OR Phone Number
+// Hardcoded test managers (for development)
+const TEST_MANAGERS = [
+  {
+    manager_id: 1,
+    name: "Test Manager",
+    email: "manager@test.com",
+    phone_number: "1234567890",
+    password_hash: "$2b$10$N9qo8uLOickgx2ZMRZoMy.Mrq/bH7P.3O9Q7Z0wKp7vYV0JjJw4bK", // 'manager123'
+    owner_id: 1,
+    permissions: JSON.stringify(["manage_bookings", "view_reports", "manage_staff"]),
+    is_active: true
+  },
+  {
+    manager_id: 2,
+    name: "Arena Manager",
+    email: "arena@manager.com",
+    phone_number: "9876543210",
+    password_hash: "$2b$10$N9qo8uLOickgx2ZMRZoMy.Mrq/bH7P.3O9Q7Z0wKp7vYV0JjJw4bK", // 'manager123'
+    owner_id: 2,
+    permissions: JSON.stringify(["manage_bookings"]),
+    is_active: true
+  }
+];
+
+// Test credentials endpoint
+router.get("/test-credentials", (req, res) => {
+  res.json({
+    message: "Development Test Managers",
+    managers: TEST_MANAGERS.map(mgr => ({
+      name: mgr.name,
+      email: mgr.email,
+      phone: mgr.phone_number,
+      password: "manager123", // All test managers use same password
+      permissions: JSON.parse(mgr.permissions)
+    }))
+  });
+});
+
+// Manager Login
 router.post("/login", async (req, res) => {
   const { email, phone_number, password } = req.body;
 
-  // Validation - accept either email or phone_number
   if ((!email && !phone_number) || !password) {
     return res.status(400).json({
-      error: "Either email or phone number along with password are required"
+      error: "Either email or phone number along with password are required",
+      test_accounts: TEST_MANAGERS.map(m => ({
+        email: m.email,
+        phone: m.phone_number,
+        password: "manager123"
+      }))
     });
   }
 
   try {
-    // Find manager by email OR phone number
-    let manager;
-    let query;
-    let params = [];
+    let manager = null;
+    let isTestAccount = false;
 
-    if (email) {
-      // Login with email
-      query = "SELECT * FROM arena_managers WHERE email = ? AND is_active = TRUE";
-      params = [email];
+    // 1. First check test managers
+    const testManager = TEST_MANAGERS.find(m =>
+      (email && m.email === email) ||
+      (phone_number && m.phone_number === phone_number)
+    );
+
+    if (testManager) {
+      // Test manager found
+      const isValid = await bcrypt.compare(password, testManager.password_hash);
+      if (!isValid) {
+        return res.status(401).json({
+          error: "Invalid password for test manager",
+          hint: "Try 'manager123' for test accounts"
+        });
+      }
+      manager = testManager;
+      isTestAccount = true;
     } else {
-      // Login with phone number
-      query = "SELECT * FROM arena_managers WHERE phone_number = ? AND is_active = TRUE";
-      params = [phone_number];
-    }
+      // 2. Check database for real managers
+      let query, params;
 
-    const [managers] = await pool.query(query, params);
+      if (email) {
+        query = "SELECT * FROM arena_managers WHERE email = ? AND is_active = TRUE";
+        params = [email];
+      } else {
+        query = "SELECT * FROM arena_managers WHERE phone_number = ? AND is_active = TRUE";
+        params = [phone_number];
+      }
 
-    if (managers.length === 0) {
-      return res.status(401).json({ error: "Invalid credentials" });
-    }
+      const [managers] = await pool.query(query, params);
 
-    manager = managers[0];
-    const isPasswordValid = await bcrypt.compare(password, manager.password_hash);
+      if (managers.length === 0) {
+        return res.status(401).json({
+          error: "Invalid credentials",
+          suggestion: "Try test manager: manager@test.com / manager123"
+        });
+      }
 
-    if (!isPasswordValid) {
-      return res.status(401).json({ error: "Invalid credentials" });
+      manager = managers[0];
+      const isPasswordValid = await bcrypt.compare(password, manager.password_hash);
+
+      if (!isPasswordValid) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
     }
 
     const token = jwt.sign(
@@ -52,8 +115,9 @@ router.post("/login", async (req, res) => {
         email: manager.email,
         role: "manager",
         permissions: manager.permissions,
+        is_test_account: isTestAccount
       },
-      config.JWT_SECRET,
+      process.env.JWT_SECRET || "arena-booking-secret-2024",
       { expiresIn: "7d" }
     );
 
@@ -66,7 +130,8 @@ router.post("/login", async (req, res) => {
         email: manager.email,
         phone_number: manager.phone_number,
         owner_id: manager.owner_id,
-        permissions: manager.permissions,
+        permissions: JSON.parse(manager.permissions),
+        is_test_account: isTestAccount
       },
     });
   } catch (error) {

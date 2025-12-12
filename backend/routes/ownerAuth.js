@@ -1,377 +1,489 @@
-const express = require("express");
+// routes/ownerRoutes.js
+const express = require('express');
 const router = express.Router();
-const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
-const pool = require("../db");
-const config = require("../config");
+const { verifyOwner } = require('../middleware/authMiddleware');
+const pool = require('../db');
 
-// Arena Owner Registration
-router.post("/register", async (req, res) => {
-  console.log("Request body received:", req.body);
-  const {
-    arena_name,
-    email,
-    password,
-    phone_number,
-    business_address,
-    google_maps_location,
-    number_of_courts,
-    agreed_to_terms,
-    time_slots,
-    sports_pricing,
-    court_details,
-  } = req.body;
+// Apply owner authentication to all routes
+router.use(verifyOwner);
 
-  // Validation
-  if (!arena_name || !email || !password || !phone_number || !agreed_to_terms) {
-    return res.status(400).json({
-      error:
-        "Arena name, email, password, phone number, and terms agreement are required",
-    });
-  }
-
-  if (agreed_to_terms !== true) {
-    return res.status(400).json({
-      error: "You must agree to the Terms and Conditions",
-    });
-  }
-
-  // ========== ADD PASSWORD VALIDATION HERE ==========
-  if (password.length < 8) {
-    return res.status(400).json({
-      error: "Password must be at least 8 characters long",
-    });
-  }
-
-  if (!/(?=.*[A-Z])/.test(password)) {
-    return res.status(400).json({
-      error: "Password must contain at least one uppercase letter",
-    });
-  }
-
-  if (!/(?=.*\d)/.test(password)) {
-    return res.status(400).json({
-      error: "Password must contain at least one number",
-    });
-  }
-
-  if (!/(?=.*[@$!%*?&])/.test(password)) {
-    return res.status(400).json({
-      error: "Password must contain at least one special character (@$!%*?&)",
-    });
-  }
-  // ========== END PASSWORD VALIDATION ==========
-
+// Get owner dashboard data
+router.get('/dashboard', async (req, res) => {
   try {
-    // Start a transaction
-    const connection = await pool.getConnection();
-    await connection.beginTransaction();
+    const ownerId = req.owner.owner_id;
 
-    try {
-      // Check if owner already exists with email
-      const [existingEmail] = await connection.query(
-        "SELECT * FROM arena_owners WHERE email = ?",
-        [email]
-      );
-
-      if (existingEmail.length > 0) {
-        await connection.rollback();
-        connection.release();
-        return res
-          .status(409)
-          .json({ error: "Arena owner already exists with this email" });
-      }
-
-      // Check if owner already exists with phone number
-      const [existingPhone] = await connection.query(
-        "SELECT * FROM arena_owners WHERE phone_number = ?",
-        [phone_number]
-      );
-
-      if (existingPhone.length > 0) {
-        await connection.rollback();
-        connection.release();
-        return res
-          .status(409)
-          .json({ error: "Arena owner already exists with this phone number" });
-      }
-
-      // Hash password
-      const saltRounds = 10;
-      const passwordHash = await bcrypt.hash(password, saltRounds);
-
-      // Insert new arena owner
-      const [ownerResult] = await connection.query(
-        `INSERT INTO arena_owners 
-         (arena_name, email, password_hash, phone_number, business_address, google_maps_location, number_of_courts, agreed_to_terms) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          arena_name,
-          email,
-          passwordHash,
-          phone_number,
-          business_address,
-          google_maps_location,
-          number_of_courts,
-          agreed_to_terms,
-        ]
-      );
-
-      const ownerId = ownerResult.insertId;
-
-      // Insert arena record
-      const [arenaResult] = await connection.query(
-        `INSERT INTO arenas 
-         (owner_id, name, address, is_active) 
-         VALUES (?, ?, ?, TRUE)`,
-        [ownerId, arena_name, business_address]
-      );
-
-      const arenaId = arenaResult.insertId;
-
-      // Store time slots in JSON format in arena_owners table
-      if (time_slots) {
-        await connection.query(
-          `UPDATE arena_owners SET time_slots = ? WHERE owner_id = ?`,
-          [JSON.stringify(time_slots), ownerId]
-        );
-      }
-
-      // Create court details
-      if (court_details && Array.isArray(court_details)) {
-        for (const courtData of court_details) {
-          // Insert court
-          const [courtResult] = await connection.query(
-            `INSERT INTO court_details 
-       (arena_id, court_number, court_name, size_sqft, price_per_hour, description) 
-       VALUES (?, ?, ?, ?, ?, ?)`,
-            [
-              arenaId,
-              courtData.courtNumber,
-              courtData.name || `Court ${courtData.courtNumber}`,
-              courtData.size,
-              courtData.pricePerHour,
-              courtData.description,
-            ]
-          );
-
-          const courtId = courtResult.insertId;
-
-          // Link sports to court
-          if (courtData.sportTypes && courtData.sportTypes.length > 0) {
-            for (const sportName of courtData.sportTypes) {
-              const [sportResult] = await connection.query(
-                "SELECT sport_id FROM sports_types WHERE name = ?",
-                [sportName]
-              );
-
-              if (sportResult.length > 0) {
-                await connection.query(
-                  "INSERT INTO court_sports (court_id, sport_id) VALUES (?, ?)",
-                  [courtId, sportResult[0].sport_id]
-                );
-              }
-            }
-          }
-
-          // Note: Image handling would be separate - upload to cloud storage first
-          // For now, we'll skip image storage during registration
-        }
-      }
-      // Insert sports types and pricing
-      if (sports_pricing && Array.isArray(sports_pricing)) {
-        for (const sportData of sports_pricing) {
-          // Check if sport type exists, if not create it
-          const [sportResult] = await connection.query(
-            "SELECT sport_id FROM sports_types WHERE name = ?",
-            [sportData.sport]
-          );
-
-          let sportId;
-          if (sportResult.length > 0) {
-            sportId = sportResult[0].sport_id;
-          } else {
-            const [newSportResult] = await connection.query(
-              "INSERT INTO sports_types (name) VALUES (?)",
-              [sportData.sport]
-            );
-            sportId = newSportResult.insertId;
-          }
-
-          // Link sport to arena with pricing
-          await connection.query(
-            `INSERT INTO arena_sports (arena_id, sport_id, price_per_hour) 
-             VALUES (?, ?, ?)
-             ON DUPLICATE KEY UPDATE price_per_hour = ?`,
-            [arenaId, sportId, sportData.pricePerHour, sportData.pricePerHour]
-          );
-        }
-      }
-
-      // Commit transaction
-      await connection.commit();
-      connection.release();
-
-      // Generate JWT token
-      const token = jwt.sign(
-        {
-          owner_id: ownerId,
-          email: email,
-          role: "owner",
-        },
-        config.JWT_SECRET || process.env.JWT_SECRET,
-        { expiresIn: "7d" }
-      );
-
-      res.status(201).json({
-        message: "Arena owner registered successfully",
-        owner_id: ownerId,
-        token: token,
-        owner: {
-          arena_name,
-          email,
-          phone_number,
-          number_of_courts,
-        },
-      });
-    } catch (error) {
-      await connection.rollback();
-      connection.release();
-      throw error;
-    }
-  } catch (error) {
-    console.error("Owner registration error:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-// Arena Owner Login with Email OR Phone Number
-router.post("/login", async (req, res) => {
-  const { email, phone_number, password } = req.body;
-
-  console.log("Login attempt received:", { email, phone_number });
-
-  // Validation - accept either email or phone_number
-  if ((!email && !phone_number) || !password) {
-    return res.status(400).json({
-      error: "Either email or phone number along with password are required",
-    });
-  }
-
-  try {
-    // Find owner by email OR phone number
-    let query;
-    let params = [];
-
-    if (email) {
-      // Login with email
-      query = "SELECT * FROM arena_owners WHERE email = ?";
-      params = [email.trim().toLowerCase()]; // Normalize email
-    } else {
-      // Login with phone number - clean it first
-      const cleanPhoneNumber = phone_number.replace(/\D/g, "");
-      query = "SELECT * FROM arena_owners WHERE phone_number = ?";
-      params = [cleanPhoneNumber];
-    }
-
-    console.log("Executing query:", query, params);
-
-    const [owners] = await pool.query(query, params);
-    console.log("Found records:", owners.length);
+    // Get owner details
+    const [owners] = await pool.query(
+      'SELECT * FROM arena_owners WHERE owner_id = ?',
+      [ownerId]
+    );
 
     if (owners.length === 0) {
-      return res.status(401).json({
-        error: "No account found with these credentials",
-      });
+      return res.status(404).json({ error: 'Owner not found' });
     }
 
     const owner = owners[0];
-    console.log("Owner found:", owner.email);
-
-    // Check if password_hash exists
-    if (!owner.password_hash) {
-      console.error("Owner has no password hash!");
-      return res.status(500).json({
-        error: "Account setup incomplete. Please contact support.",
-      });
-    }
-
-    // Compare passwords
-    const isPasswordValid = await bcrypt.compare(password, owner.password_hash);
-    console.log("Password match:", isPasswordValid);
-
-    if (!isPasswordValid) {
-      return res.status(401).json({
-        error: "Incorrect password",
-      });
-    }
-
-    // Check if account is active (if column exists)
-    if (owner.is_active !== undefined && owner.is_active === 0) {
-      return res.status(403).json({
-        error: "Account is deactivated. Please contact support.",
-      });
-    }
-
-    // Generate JWT token - use direct string for now
-    const jwtSecret = config.JWT_SECRET || "arena-booking-secret-key-2024";
-    const token = jwt.sign(
-      {
-        owner_id: owner.owner_id,
-        email: owner.email,
-        role: "owner",
-      },
-      jwtSecret,
-      { expiresIn: "7d" }
-    );
 
     // Get arena details
     const [arenas] = await pool.query(
-      "SELECT * FROM arenas WHERE owner_id = ?",
-      [owner.owner_id]
+      'SELECT * FROM arenas WHERE owner_id = ?',
+      [ownerId]
     );
 
-    // Return owner data (excluding password)
+    // Get court details
+    const [courts] = await pool.query(
+      `SELECT cd.*, GROUP_CONCAT(st.name) as sports 
+       FROM court_details cd
+       LEFT JOIN court_sports cs ON cd.court_id = cs.court_id
+       LEFT JOIN sports_types st ON cs.sport_id = st.sport_id
+       WHERE cd.arena_id IN (SELECT arena_id FROM arenas WHERE owner_id = ?)
+       GROUP BY cd.court_id`,
+      [ownerId]
+    );
+
+    // Get booking stats
+    const [stats] = await pool.query(
+      `SELECT 
+        COUNT(*) as total_bookings,
+        SUM(CASE WHEN status = 'completed' THEN total_amount ELSE 0 END) as total_revenue,
+        SUM(CASE WHEN status = 'cancelled' THEN cancellation_fee ELSE 0 END) as lost_revenue,
+        SUM(commission_amount) as total_commission
+       FROM bookings b
+       JOIN arenas a ON b.arena_id = a.arena_id
+       WHERE a.owner_id = ?`,
+      [ownerId]
+    );
+
+    // Parse time slots if stored as JSON
+    let timeSlots = {};
+    if (owner.time_slots) {
+      try {
+        timeSlots = typeof owner.time_slots === 'string'
+          ? JSON.parse(owner.time_slots)
+          : owner.time_slots;
+      } catch (e) {
+        console.error('Error parsing time slots:', e);
+      }
+    }
+
     res.json({
-      message: "Login successful",
-      token: token,
+      success: true,
       owner: {
-        owner_id: owner.owner_id,
-        arena_name: owner.arena_name,
-        email: owner.email,
-        phone_number: owner.phone_number,
-        number_of_courts: owner.number_of_courts || 0,
-        is_active: owner.is_active || true,
-        time_slots: owner.time_slots
-          ? typeof owner.time_slots === "string"
-            ? JSON.parse(owner.time_slots)
-            : owner.time_slots
-          : null,
-        arena: arenas[0] || null,
+        ...owner,
+        time_slots: timeSlots,
+        password_hash: undefined // Don't send password hash
       },
+      arena: arenas[0] || null,
+      courts: courts || [],
+      statistics: stats[0] || {
+        total_bookings: 0,
+        total_revenue: 0,
+        lost_revenue: 0,
+        total_commission: 0
+      }
+    });
+
+  } catch (error) {
+    console.error('Dashboard error:', error);
+    res.status(500).json({ error: 'Failed to load dashboard' });
+  }
+});
+
+// Get owner profile
+router.get('/profile', async (req, res) => {
+  try {
+    const ownerId = req.owner.owner_id;
+
+    const [owners] = await pool.query(
+      `SELECT 
+        owner_id, arena_name, email, phone_number, 
+        business_address, google_maps_location, 
+        number_of_courts, agreed_to_terms, is_active,
+        created_at, time_slots
+       FROM arena_owners 
+       WHERE owner_id = ?`,
+      [ownerId]
+    );
+
+    if (owners.length === 0) {
+      return res.status(404).json({ error: 'Owner not found' });
+    }
+
+    res.json({ success: true, owner: owners[0] });
+  } catch (error) {
+    console.error('Profile error:', error);
+    res.status(500).json({ error: 'Failed to load profile' });
+  }
+});
+
+// Update owner profile
+router.put('/profile', async (req, res) => {
+  try {
+    const ownerId = req.owner.owner_id;
+    const { arena_name, phone_number, business_address, google_maps_location } = req.body;
+
+    // Validation
+    if (!arena_name || !phone_number) {
+      return res.status(400).json({ error: 'Arena name and phone number are required' });
+    }
+
+    await pool.query(
+      `UPDATE arena_owners 
+       SET arena_name = ?, phone_number = ?, business_address = ?, 
+           google_maps_location = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE owner_id = ?`,
+      [arena_name, phone_number, business_address, google_maps_location, ownerId]
+    );
+
+    res.json({ success: true, message: 'Profile updated successfully' });
+  } catch (error) {
+    console.error('Update profile error:', error);
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+// Get arena details
+router.get('/arena', async (req, res) => {
+  try {
+    const ownerId = req.owner.owner_id;
+
+    const [arenas] = await pool.query(
+      `SELECT a.*, 
+        GROUP_CONCAT(DISTINCT st.name) as available_sports,
+        COUNT(DISTINCT cd.court_id) as total_courts
+       FROM arenas a
+       LEFT JOIN arena_sports asps ON a.arena_id = asps.arena_id
+       LEFT JOIN sports_types st ON asps.sport_id = st.sport_id
+       LEFT JOIN court_details cd ON a.arena_id = cd.arena_id
+       WHERE a.owner_id = ?
+       GROUP BY a.arena_id`,
+      [ownerId]
+    );
+
+    res.json({ success: true, arena: arenas[0] || null });
+  } catch (error) {
+    console.error('Get arena error:', error);
+    res.status(500).json({ error: 'Failed to load arena details' });
+  }
+});
+
+// Update arena details
+router.put('/arena', async (req, res) => {
+  try {
+    const ownerId = req.owner.owner_id;
+    const { name, description, address, base_price_per_hour } = req.body;
+
+    // Check if owner has an arena
+    const [existingArenas] = await pool.query(
+      'SELECT arena_id FROM arenas WHERE owner_id = ?',
+      [ownerId]
+    );
+
+    if (existingArenas.length === 0) {
+      // Create new arena if doesn't exist
+      const [result] = await pool.query(
+        `INSERT INTO arenas (owner_id, name, description, address, base_price_per_hour)
+         VALUES (?, ?, ?, ?, ?)`,
+        [ownerId, name, description, address, base_price_per_hour]
+      );
+
+      return res.json({
+        success: true,
+        message: 'Arena created successfully',
+        arena_id: result.insertId
+      });
+    }
+
+    // Update existing arena
+    const arenaId = existingArenas[0].arena_id;
+
+    await pool.query(
+      `UPDATE arenas 
+       SET name = ?, description = ?, address = ?, 
+           base_price_per_hour = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE arena_id = ? AND owner_id = ?`,
+      [name, description, address, base_price_per_hour, arenaId, ownerId]
+    );
+
+    res.json({ success: true, message: 'Arena updated successfully' });
+  } catch (error) {
+    console.error('Update arena error:', error);
+    res.status(500).json({ error: 'Failed to update arena' });
+  }
+});
+
+// Get all courts
+router.get('/courts', async (req, res) => {
+  try {
+    const ownerId = req.owner.owner_id;
+
+    const [courts] = await pool.query(
+      `SELECT cd.*, 
+        GROUP_CONCAT(st.name) as sports,
+        a.name as arena_name
+       FROM court_details cd
+       JOIN arenas a ON cd.arena_id = a.arena_id
+       LEFT JOIN court_sports cs ON cd.court_id = cs.court_id
+       LEFT JOIN sports_types st ON cs.sport_id = st.sport_id
+       WHERE a.owner_id = ?
+       GROUP BY cd.court_id
+       ORDER BY cd.court_number`,
+      [ownerId]
+    );
+
+    res.json({ success: true, courts });
+  } catch (error) {
+    console.error('Get courts error:', error);
+    res.status(500).json({ error: 'Failed to load courts' });
+  }
+});
+
+// Get single court
+router.get('/courts/:courtId', async (req, res) => {
+  try {
+    const ownerId = req.owner.owner_id;
+    const { courtId } = req.params;
+
+    const [courts] = await pool.query(
+      `SELECT cd.*, 
+        GROUP_CONCAT(st.sport_id) as sport_ids,
+        GROUP_CONCAT(st.name) as sport_names,
+        a.name as arena_name
+       FROM court_details cd
+       JOIN arenas a ON cd.arena_id = a.arena_id
+       LEFT JOIN court_sports cs ON cd.court_id = cs.court_id
+       LEFT JOIN sports_types st ON cs.sport_id = st.sport_id
+       WHERE cd.court_id = ? AND a.owner_id = ?
+       GROUP BY cd.court_id`,
+      [courtId, ownerId]
+    );
+
+    if (courts.length === 0) {
+      return res.status(404).json({ error: 'Court not found' });
+    }
+
+    const court = courts[0];
+    // Parse sport IDs and names
+    court.sport_ids = court.sport_ids ? court.sport_ids.split(',').map(Number) : [];
+    court.sport_names = court.sport_names ? court.sport_names.split(',') : [];
+
+    res.json({ success: true, court });
+  } catch (error) {
+    console.error('Get court error:', error);
+    res.status(500).json({ error: 'Failed to load court' });
+  }
+});
+
+// Create/Update court
+router.post('/courts', async (req, res) => {
+  try {
+    const ownerId = req.owner.owner_id;
+    const {
+      court_id,
+      court_number,
+      court_name,
+      size_sqft,
+      price_per_hour,
+      description,
+      sport_ids
+    } = req.body;
+
+    // Get owner's arena
+    const [arenas] = await pool.query(
+      'SELECT arena_id FROM arenas WHERE owner_id = ?',
+      [ownerId]
+    );
+
+    if (arenas.length === 0) {
+      return res.status(400).json({ error: 'Owner has no arena. Create arena first.' });
+    }
+
+    const arenaId = arenas[0].arena_id;
+
+    if (court_id) {
+      // Update existing court
+      await pool.query(
+        `UPDATE court_details 
+         SET court_number = ?, court_name = ?, size_sqft = ?, 
+             price_per_hour = ?, description = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE court_id = ? AND arena_id = ?`,
+        [court_number, court_name, size_sqft, price_per_hour, description, court_id, arenaId]
+      );
+
+      // Update sports
+      await pool.query('DELETE FROM court_sports WHERE court_id = ?', [court_id]);
+
+      if (sport_ids && Array.isArray(sport_ids)) {
+        for (const sportId of sport_ids) {
+          await pool.query(
+            'INSERT INTO court_sports (court_id, sport_id) VALUES (?, ?)',
+            [court_id, sportId]
+          );
+        }
+      }
+
+      res.json({ success: true, message: 'Court updated successfully', court_id });
+    } else {
+      // Create new court
+      const [result] = await pool.query(
+        `INSERT INTO court_details 
+         (arena_id, court_number, court_name, size_sqft, price_per_hour, description)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [arenaId, court_number, court_name, size_sqft, price_per_hour, description]
+      );
+
+      const newCourtId = result.insertId;
+
+      // Add sports
+      if (sport_ids && Array.isArray(sport_ids)) {
+        for (const sportId of sport_ids) {
+          await pool.query(
+            'INSERT INTO court_sports (court_id, sport_id) VALUES (?, ?)',
+            [newCourtId, sportId]
+          );
+        }
+      }
+
+      res.json({
+        success: true,
+        message: 'Court created successfully',
+        court_id: newCourtId
+      });
+    }
+  } catch (error) {
+    console.error('Save court error:', error);
+    res.status(500).json({ error: 'Failed to save court' });
+  }
+});
+
+// Delete court
+router.delete('/courts/:courtId', async (req, res) => {
+  try {
+    const ownerId = req.owner.owner_id;
+    const { courtId } = req.params;
+
+    // Verify court belongs to owner
+    const [courts] = await pool.query(
+      `SELECT cd.court_id 
+       FROM court_details cd
+       JOIN arenas a ON cd.arena_id = a.arena_id
+       WHERE cd.court_id = ? AND a.owner_id = ?`,
+      [courtId, ownerId]
+    );
+
+    if (courts.length === 0) {
+      return res.status(404).json({ error: 'Court not found or access denied' });
+    }
+
+    await pool.query('DELETE FROM court_details WHERE court_id = ?', [courtId]);
+
+    res.json({ success: true, message: 'Court deleted successfully' });
+  } catch (error) {
+    console.error('Delete court error:', error);
+    res.status(500).json({ error: 'Failed to delete court' });
+  }
+});
+
+// Update time slots
+router.put('/time-slots', async (req, res) => {
+  try {
+    const ownerId = req.owner.owner_id;
+    const { time_slots } = req.body;
+
+    if (!time_slots || typeof time_slots !== 'object') {
+      return res.status(400).json({ error: 'Time slots data is required' });
+    }
+
+    await pool.query(
+      'UPDATE arena_owners SET time_slots = ? WHERE owner_id = ?',
+      [JSON.stringify(time_slots), ownerId]
+    );
+
+    res.json({ success: true, message: 'Time slots updated successfully' });
+  } catch (error) {
+    console.error('Update time slots error:', error);
+    res.status(500).json({ error: 'Failed to update time slots' });
+  }
+});
+
+// Get sports types for selection
+router.get('/sports', async (req, res) => {
+  try {
+    const [sports] = await pool.query(
+      'SELECT sport_id, name FROM sports_types ORDER BY name'
+    );
+
+    res.json({ success: true, sports });
+  } catch (error) {
+    console.error('Get sports error:', error);
+    res.status(500).json({ error: 'Failed to load sports' });
+  }
+});
+
+// Get booking statistics (for charts)
+router.get('/statistics', async (req, res) => {
+  try {
+    const ownerId = req.owner.owner_id;
+    const { period = 'monthly' } = req.query;
+
+    let dateFilter = '';
+    switch (period) {
+      case 'daily':
+        dateFilter = 'AND DATE(b.booking_date) = CURDATE()';
+        break;
+      case 'weekly':
+        dateFilter = 'AND b.booking_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)';
+        break;
+      case 'monthly':
+        dateFilter = 'AND b.booking_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)';
+        break;
+      default:
+        dateFilter = 'AND b.booking_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)';
+    }
+
+    // Revenue by day
+    const [revenueData] = await pool.query(
+      `SELECT 
+        DATE(b.booking_date) as date,
+        COUNT(*) as bookings,
+        SUM(b.total_amount) as revenue,
+        SUM(b.commission_amount) as commission
+       FROM bookings b
+       JOIN arenas a ON b.arena_id = a.arena_id
+       WHERE a.owner_id = ? 
+         ${dateFilter}
+         AND b.status = 'completed'
+       GROUP BY DATE(b.booking_date)
+       ORDER BY date`,
+      [ownerId]
+    );
+
+    // Bookings by sport
+    const [sportData] = await pool.query(
+      `SELECT 
+        st.name as sport,
+        COUNT(*) as bookings,
+        SUM(b.total_amount) as revenue
+       FROM bookings b
+       JOIN sports_types st ON b.sport_id = st.sport_id
+       JOIN arenas a ON b.arena_id = a.arena_id
+       WHERE a.owner_id = ? 
+         ${dateFilter}
+         AND b.status = 'completed'
+       GROUP BY b.sport_id
+       ORDER BY bookings DESC`,
+      [ownerId]
+    );
+
+    res.json({
+      success: true,
+      revenue_data: revenueData,
+      sport_data: sportData,
+      period
     });
   } catch (error) {
-    console.error("Owner login error:", error.message);
-    console.error("Full error:", error);
-
-    // Provide more specific error messages
-    if (error.code === "ER_NO_SUCH_TABLE") {
-      return res.status(500).json({
-        error: "Database table not found. Please check your database setup.",
-      });
-    }
-
-    if (error.code === "ER_ACCESS_DENIED_ERROR") {
-      return res.status(500).json({
-        error: "Database access denied. Check your database credentials.",
-      });
-    }
-
-    res.status(500).json({
-      error: "Login failed. Please try again.",
-      details:
-        process.env.NODE_ENV === "development" ? error.message : undefined,
-    });
+    console.error('Statistics error:', error);
+    res.status(500).json({ error: 'Failed to load statistics' });
   }
 });
 
