@@ -1,122 +1,143 @@
-// server.js - UPDATE ONLY THE ROUTE REGISTRATION SECTION
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 require('dotenv').config();
 
+// Import your config and db
+const config = require('./config');
+const db = require('./db');
+
+// Import routes
+const authRoutes = require('./routes/auth');
+const userRoutes = require('./routes/users');
+const arenaRoutes = require('./routes/arenas');
+const ownerRoutes = require('./routes/owners');
+const adminRoutes = require('./routes/admin');
+const bookingRoutes = require('./routes/bookings');
+const chatRoutes = require('./routes/chats');
+
 const app = express();
 
-// ========== MIDDLEWARE ==========
+// Middleware
 app.use(helmet());
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:5173'],
+  origin: config.CORS_ORIGIN,
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(morgan('dev'));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// ========== DATABASE CONNECTION ==========
-const mysql = require('mysql2');
-const config = require('./config');
-
-const pool = mysql.createPool({
-  host: config.DB_HOST || 'localhost',
-  user: config.DB_USER || 'root',
-  password: config.DB_PASSWORD || 'password1144',
-  database: config.DB_DATABASE || 'indoor_system',
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
-});
-
-// Test database connection
-pool.getConnection((err, connection) => {
-  if (err) {
-    console.error('❌ Database connection failed:', err.message);
-  } else {
-    console.log('✅ Connected to MySQL database');
+// Test database connection on startup
+db.getConnection()
+  .then(connection => {
+    console.log('✅ Database connected to:', config.DB_DATABASE);
     connection.release();
-  }
-});
+  })
+  .catch(err => {
+    console.error('❌ Database connection failed:', err.message);
+  });
 
-// Make pool available to routes
-app.locals.db = pool;
-
-// ========== IMPORT ROUTES ==========
-const authRoutes = require('./routes/authRoutes'); // ADD THIS
-const adminAuth = require('./routes/adminAuth');
-const managerAuth = require('./routes/managerAuth');
-const ownerAuth = require('./routes/ownerAuth');
-const userAuth = require('./routes/userAuth');
-const bookingRoutes = require('./routes/bookingRoutes');
-const searchRoutes = require('./routes/searchRoutes');
-
-// ========== ROUTE REGISTRATION ==========
-
-// 1. Health Check
+// Health check route
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'OK',
-    service: 'Sports Arena Booking API',
+    timestamp: new Date(),
+    service: 'Indoor Booking System API',
     version: '1.0.0',
-    timestamp: new Date().toISOString(),
+    environment: config.NODE_ENV,
+    database: config.DB_DATABASE
   });
 });
 
-// 2. Public Authentication Routes
-app.use('/api/auth', authRoutes); // ADD THIS LINE
-app.use('/api/auth/admin', adminAuth);
-app.use('/api/auth/manager', managerAuth);
+// Database connection test
+app.get('/api/db-check', async (req, res) => {
+  try {
+    const connection = await db.getConnection();
+    const [rows] = await connection.execute('SELECT 1 as connection_test');
+    connection.release();
+    res.json({
+      success: true,
+      message: 'Database connected successfully',
+      database: config.DB_DATABASE,
+      test: rows[0]
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Database connection failed',
+      error: error.message
+    });
+  }
+});
 
-// 3. Owner Routes (uses verifyOwner middleware internally)
-app.use('/api/owner', ownerAuth);
+// API documentation
+app.get('/api', (req, res) => {
+  res.json({
+    name: 'Indoor Booking System API',
+    version: '1.0.0',
+    description: 'API for booking indoor sports arenas',
+    base_url: '/api',
+    endpoints: {
+      auth: '/auth',
+      users: '/users',
+      arenas: '/arenas',
+      owners: '/owners',
+      admin: '/admin',
+      bookings: '/bookings',
+      chats: '/chats'
+    }
+  });
+});
 
-// 4. User Routes (uses verifyUser middleware internally)
-app.use('/api/user', userAuth);
-
-// 5. Booking Routes (mixed public/protected)
+// API Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/arenas', arenaRoutes);
+app.use('/api/owners', ownerRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api/bookings', bookingRoutes);
-
-// 6. Search Routes (public)
-app.use('/api/search', searchRoutes);
-
-// ========== ERROR HANDLING ==========
-app.use((err, req, res, next) => {
-  console.error('Server Error:', err.message);
-  res.status(500).json({
-    success: false,
-    error: 'Internal server error'
-  });
-});
+app.use('/api/chats', chatRoutes);
 
 // 404 handler
-app.use('*', (req, res) => {
+app.use('/api/*', (req, res) => {
   res.status(404).json({
     success: false,
-    error: 'Endpoint not found',
-    path: req.originalUrl
+    message: `Route ${req.originalUrl} not found`,
+    method: req.method
   });
 });
 
-// ========== START SERVER ==========
-const PORT = config.PORT || 5000;
-const HOST = '0.0.0.0';
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Error:', err.stack);
 
-app.listen(PORT, HOST, () => {
-  console.log(`🚀 Server running on http://${HOST}:${PORT}`);
-  console.log(`🩺 Health: http://localhost:${PORT}/api/health`);
-  console.log(`\n📋 Available Endpoints:`);
-  console.log(`   Public:`);
-  console.log(`   - GET  /api/health`);
-  console.log(`   - POST /api/auth/register (user registration)`);
-  console.log(`   - POST /api/auth/login (user login)`);
-  console.log(`   - POST /api/auth/admin/login`);
-  console.log(`   - POST /api/auth/manager/login`);
-  console.log(`   - GET  /api/search/arenas`);
-  console.log(`\n   Protected (need token):`);
-  console.log(`   - /api/owner/* (owner dashboard)`);
-  console.log(`   - /api/user/* (user dashboard)`);
-  console.log(`   - /api/bookings/* (booking endpoints)`);
+  const statusCode = err.statusCode || 500;
+  const message = err.message || 'Internal Server Error';
+
+  res.status(statusCode).json({
+    success: false,
+    message: message,
+    ...(config.NODE_ENV === 'development' && { stack: err.stack })
+  });
 });
+
+// Start server
+const PORT = config.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`
+    🚀 Server is running!
+    🌐 Environment: ${config.NODE_ENV}
+    🔗 Base URL: http://localhost:${PORT}
+    📊 API Health: http://localhost:${PORT}/api/health
+    🗄️  Database: ${config.DB_DATABASE} @ ${config.DB_HOST}
+    🎯 CORS Origin: ${config.CORS_ORIGIN}
+    
+    ⏰ Started at: ${new Date().toLocaleString()}
+  `);
+});
+
+module.exports = app;
