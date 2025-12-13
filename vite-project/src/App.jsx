@@ -1,14 +1,21 @@
-import React, { useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import UserAuth from './components/auth/UserAuth';
-import OwnerAuth from './components/auth/OwnerAuth';
-import AdminAuth from './components/auth/AdminAuth';
-import ManagerAuth from './components/auth/ManagerAuth';
-import GuestAuth from './components/auth/GuestAuth';
-import UserHome from './components/user/UserHome';
-import UserTeams from './components/user/UserTeams';
-import UserBooking from './components/user/UserBooking';
-import UserProfile from './components/user/UserProfile';
+import React, { useState } from "react";
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  Navigate,
+  useNavigate,
+} from "react-router-dom";
+import UserAuth from "./components/auth/UserAuth";
+import OwnerAuth from "./components/auth/OwnerAuth";
+import AdminAuth from "./components/auth/AdminAuth";
+import ManagerAuth from "./components/auth/ManagerAuth";
+import GuestAuth from "./components/auth/GuestAuth";
+import UserHome from "./components/user/UserHome";
+import UserTeams from "./components/user/UserTeams";
+import UserBooking from "./components/user/UserBooking";
+import UserProfile from "./components/user/UserProfile";
+import OwnerDashboard from "./components/owner/OwnerDashboard";
 
 function App() {
   const [loggedIn, setLoggedIn] = useState(false);
@@ -19,7 +26,7 @@ function App() {
 
     const handleLogin = () => {
       setLoggedIn(true);
-      navigate('/user/dashboard');
+      navigate("/user/dashboard");
     };
 
     return <UserAuth onLogin={handleLogin} />;
@@ -29,9 +36,19 @@ function App() {
   const OwnerAuthWrapper = () => {
     const navigate = useNavigate();
 
-    const handleLogin = () => {
+    const handleLogin = (token, userData) => {
+      console.log("Owner login successful, updating state...");
+
+      // Store in localStorage (already done in OwnerAuth, but doing it here too)
+      localStorage.setItem("token", token);
+      localStorage.setItem("userRole", "owner");
+      localStorage.setItem("ownerData", JSON.stringify(userData));
+
+      // Update React state
       setLoggedIn(true);
-      navigate('/user/dashboard'); // Redirect to user dashboard for now
+
+      // Navigate to dashboard
+      navigate("/owner/dashboard");
     };
 
     return <OwnerAuth onLogin={handleLogin} />;
@@ -43,7 +60,7 @@ function App() {
 
     const handleLogin = () => {
       setLoggedIn(true);
-      navigate('/user/dashboard');
+      navigate("/user/dashboard");
     };
 
     return <Component onLogin={handleLogin} />;
@@ -55,13 +72,15 @@ function App() {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Indoor Booking System</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            Indoor Booking System
+          </h1>
           <p className="text-gray-600">Choose how you want to login</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl w-full">
           <button
-            onClick={() => navigate('/auth/user')}
+            onClick={() => navigate("/auth/user")}
             className="bg-white p-6 rounded-xl shadow-md hover:shadow-lg transition-shadow text-left"
           >
             <div className="flex items-center">
@@ -70,13 +89,15 @@ function App() {
               </div>
               <div>
                 <h3 className="font-semibold text-gray-900">User Login</h3>
-                <p className="text-sm text-gray-600 mt-1">Book arenas as a player</p>
+                <p className="text-sm text-gray-600 mt-1">
+                  Book arenas as a player
+                </p>
               </div>
             </div>
           </button>
 
           <button
-            onClick={() => navigate('/auth/owner')}
+            onClick={() => navigate("/auth/owner")}
             className="bg-white p-6 rounded-xl shadow-md hover:shadow-lg transition-shadow text-left"
           >
             <div className="flex items-center">
@@ -85,13 +106,15 @@ function App() {
               </div>
               <div>
                 <h3 className="font-semibold text-gray-900">Owner Login</h3>
-                <p className="text-sm text-gray-600 mt-1">Manage your arena business</p>
+                <p className="text-sm text-gray-600 mt-1">
+                  Manage your arena business
+                </p>
               </div>
             </div>
           </button>
 
           <button
-            onClick={() => navigate('/auth/admin')}
+            onClick={() => navigate("/auth/admin")}
             className="bg-white p-6 rounded-xl shadow-md hover:shadow-lg transition-shadow text-left"
           >
             <div className="flex items-center">
@@ -100,13 +123,15 @@ function App() {
               </div>
               <div>
                 <h3 className="font-semibold text-gray-900">Admin Login</h3>
-                <p className="text-sm text-gray-600 mt-1">System administration</p>
+                <p className="text-sm text-gray-600 mt-1">
+                  System administration
+                </p>
               </div>
             </div>
           </button>
 
           <button
-            onClick={() => navigate('/auth/guest')}
+            onClick={() => navigate("/auth/guest")}
             className="bg-white p-6 rounded-xl shadow-md hover:shadow-lg transition-shadow text-left"
           >
             <div className="flex items-center">
@@ -115,7 +140,9 @@ function App() {
               </div>
               <div>
                 <h3 className="font-semibold text-gray-900">Guest View</h3>
-                <p className="text-sm text-gray-600 mt-1">Preview without login</p>
+                <p className="text-sm text-gray-600 mt-1">
+                  Preview without login
+                </p>
               </div>
             </div>
           </button>
@@ -127,11 +154,11 @@ function App() {
   // User Dashboard Layout
   const UserDashboard = () => {
     const navigate = useNavigate();
-    const [currentTab, setCurrentTab] = useState('home');
+    const [currentTab, setCurrentTab] = useState("home");
 
     const handleLogout = () => {
       setLoggedIn(false);
-      navigate('/');
+      navigate("/");
     };
 
     return (
@@ -142,33 +169,49 @@ function App() {
             <div className="flex items-center justify-between">
               <div className="flex items-center">
                 <button
-                  onClick={() => navigate('/')}
+                  onClick={() => navigate("/")}
                   className="text-xl font-bold text-gray-900"
                 >
                   Indoor Booking
                 </button>
                 <div className="ml-8 flex space-x-4">
                   <button
-                    onClick={() => setCurrentTab('home')}
-                    className={`px-3 py-2 rounded-lg ${currentTab === 'home' ? 'bg-primary-100 text-primary-700' : 'text-gray-700 hover:bg-gray-100'}`}
+                    onClick={() => setCurrentTab("home")}
+                    className={`px-3 py-2 rounded-lg ${
+                      currentTab === "home"
+                        ? "bg-primary-100 text-primary-700"
+                        : "text-gray-700 hover:bg-gray-100"
+                    }`}
                   >
                     Home
                   </button>
                   <button
-                    onClick={() => setCurrentTab('teams')}
-                    className={`px-3 py-2 rounded-lg ${currentTab === 'teams' ? 'bg-primary-100 text-primary-700' : 'text-gray-700 hover:bg-gray-100'}`}
+                    onClick={() => setCurrentTab("teams")}
+                    className={`px-3 py-2 rounded-lg ${
+                      currentTab === "teams"
+                        ? "bg-primary-100 text-primary-700"
+                        : "text-gray-700 hover:bg-gray-100"
+                    }`}
                   >
                     Teams
                   </button>
                   <button
-                    onClick={() => setCurrentTab('booking')}
-                    className={`px-3 py-2 rounded-lg ${currentTab === 'booking' ? 'bg-primary-100 text-primary-700' : 'text-gray-700 hover:bg-gray-100'}`}
+                    onClick={() => setCurrentTab("booking")}
+                    className={`px-3 py-2 rounded-lg ${
+                      currentTab === "booking"
+                        ? "bg-primary-100 text-primary-700"
+                        : "text-gray-700 hover:bg-gray-100"
+                    }`}
                   >
                     Booking
                   </button>
                   <button
-                    onClick={() => setCurrentTab('profile')}
-                    className={`px-3 py-2 rounded-lg ${currentTab === 'profile' ? 'bg-primary-100 text-primary-700' : 'text-gray-700 hover:bg-gray-100'}`}
+                    onClick={() => setCurrentTab("profile")}
+                    className={`px-3 py-2 rounded-lg ${
+                      currentTab === "profile"
+                        ? "bg-primary-100 text-primary-700"
+                        : "text-gray-700 hover:bg-gray-100"
+                    }`}
                   >
                     Profile
                   </button>
@@ -186,10 +229,10 @@ function App() {
 
         {/* Main Content */}
         <main>
-          {currentTab === 'home' && <UserHome />}
-          {currentTab === 'teams' && <UserTeams />}
-          {currentTab === 'booking' && <UserBooking />}
-          {currentTab === 'profile' && <UserProfile />}
+          {currentTab === "home" && <UserHome />}
+          {currentTab === "teams" && <UserTeams />}
+          {currentTab === "booking" && <UserBooking />}
+          {currentTab === "profile" && <UserProfile />}
         </main>
       </div>
     );
@@ -202,16 +245,27 @@ function App() {
         <Route path="/" element={<LoginSelection />} />
         <Route path="/auth/user" element={<UserAuthWrapper />} />
         <Route path="/auth/owner" element={<OwnerAuthWrapper />} />
-        <Route path="/auth/admin" element={<AuthWrapper Component={AdminAuth} />} />
-        <Route path="/auth/manager" element={<AuthWrapper Component={ManagerAuth} />} />
-        <Route path="/auth/guest" element={<AuthWrapper Component={GuestAuth} />} />
-
+        <Route
+          path="/auth/admin"
+          element={<AuthWrapper Component={AdminAuth} />}
+        />
+        <Route
+          path="/auth/manager"
+          element={<AuthWrapper Component={ManagerAuth} />}
+        />
+        <Route
+          path="/auth/guest"
+          element={<AuthWrapper Component={GuestAuth} />}
+        />
         {/* Protected Routes */}
+        <Route
+          path="/owner/dashboard"
+          element={loggedIn ? <OwnerDashboard /> : <Navigate to="/" />}
+        />
         <Route
           path="/user/dashboard"
           element={loggedIn ? <UserDashboard /> : <Navigate to="/" />}
         />
-
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
