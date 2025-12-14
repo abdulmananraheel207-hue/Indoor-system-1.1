@@ -17,6 +17,24 @@ import UserBooking from "./components/user/UserBooking";
 import UserProfile from "./components/user/UserProfile";
 import OwnerDashboard from "./components/owner/OwnerDashboard";
 
+// Import Admin Components
+import AdminDashboard from "./components/admin/AdminDashboard";
+import ArenasManagement from "./components/admin/ArenasManagement";
+import UsersManagement from "./components/admin/UsersManagement";
+import OwnersManagement from "./components/admin/OwnersManagement";
+import FinancialReports from "./components/admin/FinancialReports";
+import CommissionPayments from "./components/admin/CommisionPayments";
+import AdminLayout from "./components/admin/AdminLayout";
+
+// Test admin credentials
+const TEST_ADMIN = {
+  username: 'admin',
+  email: 'admin@arenafinder.com',
+  password: 'admin123',
+  name: 'System Administrator',
+  role: 'admin'
+};
+
 // --- NEW/MODIFIED LOGIC ---
 const getInitialAuthStatus = (role) => {
   return (
@@ -28,7 +46,37 @@ function App() {
   // Initialize loggedIn state by checking if a token and a role exist
   // We'll treat any valid token as "logged in" for the user dashboard wrapper
   const [loggedIn, setLoggedIn] = useState(!!localStorage.getItem("token"));
+
+  // Admin authentication state
+  const [adminAuthenticated, setAdminAuthenticated] = useState(
+    !!localStorage.getItem("adminToken")
+  );
   // --- END NEW/MODIFIED LOGIC ---
+
+  // Admin login handler
+  const handleAdminLogin = (credentials) => {
+    // Simple test authentication
+    if (
+      credentials.username === TEST_ADMIN.username &&
+      credentials.password === TEST_ADMIN.password
+    ) {
+      localStorage.setItem("adminToken", "test-token-123");
+      localStorage.setItem("adminUser", JSON.stringify(TEST_ADMIN));
+      localStorage.setItem("userRole", "admin");
+      setAdminAuthenticated(true);
+      return true;
+    }
+    return false;
+  };
+
+  // Admin logout handler
+  const handleAdminLogout = () => {
+    localStorage.removeItem("adminToken");
+    localStorage.removeItem("adminUser");
+    localStorage.removeItem("userRole");
+    setAdminAuthenticated(false);
+  };
+
   //user auth wrapper
   const UserAuthWrapper = () => {
     const navigate = useNavigate();
@@ -40,6 +88,7 @@ function App() {
 
     return <UserAuth onLogin={handleLogin} />;
   };
+
   // Wrapper component for OwnerAuth
   const OwnerAuthWrapper = () => {
     const navigate = useNavigate();
@@ -56,6 +105,21 @@ function App() {
     return <OwnerAuth onLogin={handleLogin} />;
   };
 
+  // Wrapper for AdminAuth
+  const AdminAuthWrapper = () => {
+    const navigate = useNavigate();
+
+    const handleLogin = (credentials) => {
+      const success = handleAdminLogin(credentials);
+      if (success) {
+        navigate("/admin/dashboard");
+      }
+      return success;
+    };
+
+    return <AdminAuth onLogin={handleLogin} />;
+  };
+
   // Wrapper for other auth components
   const AuthWrapper = ({ Component }) => {
     const navigate = useNavigate();
@@ -66,6 +130,14 @@ function App() {
     };
 
     return <Component onLogin={handleLogin} />;
+  };
+
+  // Admin Protected Route Component
+  const AdminProtectedRoute = ({ children }) => {
+    if (!adminAuthenticated) {
+      return <Navigate to="/auth/admin" />;
+    }
+    return children;
   };
 
   const LoginSelection = () => {
@@ -133,11 +205,28 @@ function App() {
           </button>
 
           <button
-            onClick={() => navigate("/auth/guest")}
+            onClick={() => navigate("/auth/manager")}
             className="bg-white p-6 rounded-xl shadow-md hover:shadow-lg transition-shadow text-left"
           >
             <div className="flex items-center">
               <div className="h-12 w-12 bg-yellow-100 rounded-lg flex items-center justify-center mr-4">
+                <span className="text-2xl">👨‍💼</span>
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-900">Manager Login</h3>
+                <p className="text-sm text-gray-600 mt-1">
+                  Manage arena operations
+                </p>
+              </div>
+            </div>
+          </button>
+
+          <button
+            onClick={() => navigate("/auth/guest")}
+            className="bg-white p-6 rounded-xl shadow-md hover:shadow-lg transition-shadow text-left"
+          >
+            <div className="flex items-center">
+              <div className="h-12 w-12 bg-gray-100 rounded-lg flex items-center justify-center mr-4">
                 <span className="text-2xl">👁️</span>
               </div>
               <div>
@@ -159,6 +248,8 @@ function App() {
     const [currentTab, setCurrentTab] = useState("home");
 
     const handleLogout = () => {
+      localStorage.removeItem("token");
+      localStorage.removeItem("userRole");
       setLoggedIn(false);
       navigate("/");
     };
@@ -179,41 +270,37 @@ function App() {
                 <div className="ml-8 flex space-x-4">
                   <button
                     onClick={() => setCurrentTab("home")}
-                    className={`px-3 py-2 rounded-lg ${
-                      currentTab === "home"
-                        ? "bg-primary-100 text-primary-700"
-                        : "text-gray-700 hover:bg-gray-100"
-                    }`}
+                    className={`px-3 py-2 rounded-lg ${currentTab === "home"
+                      ? "bg-primary-100 text-primary-700"
+                      : "text-gray-700 hover:bg-gray-100"
+                      }`}
                   >
                     Home
                   </button>
                   <button
                     onClick={() => setCurrentTab("teams")}
-                    className={`px-3 py-2 rounded-lg ${
-                      currentTab === "teams"
-                        ? "bg-primary-100 text-primary-700"
-                        : "text-gray-700 hover:bg-gray-100"
-                    }`}
+                    className={`px-3 py-2 rounded-lg ${currentTab === "teams"
+                      ? "bg-primary-100 text-primary-700"
+                      : "text-gray-700 hover:bg-gray-100"
+                      }`}
                   >
                     Teams
                   </button>
                   <button
                     onClick={() => setCurrentTab("booking")}
-                    className={`px-3 py-2 rounded-lg ${
-                      currentTab === "booking"
-                        ? "bg-primary-100 text-primary-700"
-                        : "text-gray-700 hover:bg-gray-100"
-                    }`}
+                    className={`px-3 py-2 rounded-lg ${currentTab === "booking"
+                      ? "bg-primary-100 text-primary-700"
+                      : "text-gray-700 hover:bg-gray-100"
+                      }`}
                   >
                     Booking
                   </button>
                   <button
                     onClick={() => setCurrentTab("profile")}
-                    className={`px-3 py-2 rounded-lg ${
-                      currentTab === "profile"
-                        ? "bg-primary-100 text-primary-700"
-                        : "text-gray-700 hover:bg-gray-100"
-                    }`}
+                    className={`px-3 py-2 rounded-lg ${currentTab === "profile"
+                      ? "bg-primary-100 text-primary-700"
+                      : "text-gray-700 hover:bg-gray-100"
+                      }`}
                   >
                     Profile
                   </button>
@@ -240,6 +327,23 @@ function App() {
     );
   };
 
+  // Admin Layout Wrapper
+  const AdminWrapper = () => {
+    return (
+      <AdminLayout onLogout={handleAdminLogout}>
+        <Routes>
+          <Route index element={<Navigate to="dashboard" />} />
+          <Route path="dashboard" element={<AdminDashboard />} />
+          <Route path="arenas" element={<ArenasManagement />} />
+          <Route path="users" element={<UsersManagement />} />
+          <Route path="owners" element={<OwnersManagement />} />
+          <Route path="financial-reports" element={<FinancialReports />} />
+          <Route path="commission-payments" element={<CommissionPayments />} />
+        </Routes>
+      </AdminLayout>
+    );
+  };
+
   return (
     <Router>
       <Routes>
@@ -247,10 +351,7 @@ function App() {
         <Route path="/" element={<LoginSelection />} />
         <Route path="/auth/user" element={<UserAuthWrapper />} />
         <Route path="/auth/owner" element={<OwnerAuthWrapper />} />
-        <Route
-          path="/auth/admin"
-          element={<AuthWrapper Component={AdminAuth} />}
-        />
+        <Route path="/auth/admin" element={<AdminAuthWrapper />} />
         <Route
           path="/auth/manager"
           element={<AuthWrapper Component={ManagerAuth} />}
@@ -259,10 +360,16 @@ function App() {
           path="/auth/guest"
           element={<AuthWrapper Component={GuestAuth} />}
         />
-        {/* Protected Routes */}
+
+        {/* Protected User Routes */}
+        <Route
+          path="/user/dashboard"
+          element={loggedIn ? <UserDashboard /> : <Navigate to="/" />}
+        />
+
+        {/* Protected Owner Routes */}
         <Route
           path="/owner/dashboard"
-          // Check for owner role and token specifically
           element={
             getInitialAuthStatus("owner") ? (
               <OwnerDashboard />
@@ -271,10 +378,19 @@ function App() {
             )
           }
         />
+
+        {/* Protected Admin Routes */}
         <Route
-          path="/user/dashboard"
-          element={loggedIn ? <UserDashboard /> : <Navigate to="/" />}
+          path="/admin/*"
+          element={
+            adminAuthenticated ? (
+              <AdminWrapper />
+            ) : (
+              <Navigate to="/auth/admin" />
+            )
+          }
         />
+
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
