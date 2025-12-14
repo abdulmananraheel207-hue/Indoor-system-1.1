@@ -1,25 +1,29 @@
 import React, { useState, useEffect } from "react";
 
+// Receive the full ownerData object as a prop
 const OwnerHome = ({ ownerData }) => {
-  const [stats, setStats] = useState({
-    todayBookings: 0,
-    todayRevenue: 0,
-    monthlyRevenue: 0,
-    totalArenas: 0,
-    pendingRequests: 0,
-  });
-  const [timePeriod, setTimePeriod] = useState("today"); // today, weekly, monthly
-  const [recentActivity, setRecentActivity] = useState([]);
+  const [stats, setStats] = useState(ownerData.dashboard || {}); // Use dashboard data from props
+  const [timePeriod, setTimePeriod] = useState("today");
+  const [recentActivity, setRecentActivity] = useState(
+    ownerData.pending_requests || []
+  ); // Use initial pending requests from props
 
   useEffect(() => {
-    fetchDashboardStats();
-    fetchRecentActivity();
-  }, [timePeriod]);
+    // Only re-fetch if the time period changes (dashboard endpoint)
+    if (timePeriod !== "today") {
+      fetchDashboardStats();
+    } else {
+      // If "today" is selected, use the initial data passed from OwnerDashboard
+      setStats(ownerData.dashboard);
+      setRecentActivity(ownerData.pending_requests);
+    }
+  }, [timePeriod, ownerData]);
 
   const fetchDashboardStats = async () => {
     try {
       const token = localStorage.getItem("token");
       const response = await fetch(
+        // The backend endpoint for dashboard already handles the 'period' query
         `http://localhost:5000/api/owners/dashboard?period=${timePeriod}`,
         {
           headers: {
@@ -30,30 +34,20 @@ const OwnerHome = ({ ownerData }) => {
       const data = await response.json();
       if (response.ok) {
         setStats(data.dashboard);
+        // Note: The dashboard endpoint should also return recent activity for the selected period if available.
+        // For simplicity, we are only updating stats here.
       }
     } catch (error) {
       console.error("Error fetching stats:", error);
     }
   };
 
-  const fetchRecentActivity = async () => {
-    try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(
-        "http://localhost:5000/api/owners/bookings?status=pending&limit=5",
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-      const data = await response.json();
-      if (response.ok) {
-        setRecentActivity(data);
-      }
-    } catch (error) {
-      console.error("Error fetching recent activity:", error);
-    }
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      minimumFractionDigits: 0,
+    }).format(amount);
   };
 
   return (
@@ -105,7 +99,7 @@ const OwnerHome = ({ ownerData }) => {
             <div>
               <p className="text-gray-500 text-sm">Today's Bookings</p>
               <p className="text-2xl font-bold text-gray-900">
-                {stats.todayBookings}
+                {stats.today_bookings || 0}
               </p>
             </div>
           </div>
@@ -119,7 +113,7 @@ const OwnerHome = ({ ownerData }) => {
             <div>
               <p className="text-gray-500 text-sm">Today's Revenue</p>
               <p className="text-2xl font-bold text-gray-900">
-                ₹{stats.todayRevenue}
+                {formatCurrency(stats.today_revenue || 0)}
               </p>
             </div>
           </div>
@@ -133,7 +127,7 @@ const OwnerHome = ({ ownerData }) => {
             <div>
               <p className="text-gray-500 text-sm">Monthly Revenue</p>
               <p className="text-2xl font-bold text-gray-900">
-                ₹{stats.monthlyRevenue}
+                {formatCurrency(stats.monthly_revenue || 0)}
               </p>
             </div>
           </div>
@@ -147,7 +141,8 @@ const OwnerHome = ({ ownerData }) => {
             <div>
               <p className="text-gray-500 text-sm">Pending Requests</p>
               <p className="text-2xl font-bold text-gray-900">
-                {stats.pendingRequests}
+                {recentActivity.length}{" "}
+                {/* Fixed: Use the length of pending_requests */}
               </p>
             </div>
           </div>
@@ -208,7 +203,7 @@ const OwnerHome = ({ ownerData }) => {
                     {booking.start_time} - {booking.end_time}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
-                    ₹{booking.total_amount}
+                    {formatCurrency(booking.total_amount)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span

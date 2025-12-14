@@ -2,9 +2,10 @@ import React, { useState, useEffect } from "react";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 
-const OwnerCalendar = () => {
+// Receive arenas as a prop from OwnerDashboard
+const OwnerCalendar = ({ arenas = [] }) => {
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [arenas, setArenas] = useState([]);
+  // Removed internal 'arenas' state and fetchArenas useEffect/function
   const [selectedArena, setSelectedArena] = useState("");
   const [timeSlots, setTimeSlots] = useState([]);
   const [newSlots, setNewSlots] = useState([]);
@@ -26,9 +27,12 @@ const OwnerCalendar = () => {
     { start: "22:00", end: "00:00" },
   ];
 
+  // FIX: Initialize selectedArena from the prop list
   useEffect(() => {
-    fetchArenas();
-  }, []);
+    if (arenas.length > 0 && !selectedArena) {
+      setSelectedArena(arenas[0].arena_id);
+    }
+  }, [arenas]);
 
   useEffect(() => {
     if (selectedArena) {
@@ -36,23 +40,7 @@ const OwnerCalendar = () => {
     }
   }, [selectedDate, selectedArena]);
 
-  const fetchArenas = async () => {
-    try {
-      const token = localStorage.getItem("token");
-      const response = await fetch("http://localhost:5000/api/owners/arenas", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      const data = await response.json();
-      if (response.ok && data.length > 0) {
-        setArenas(data);
-        setSelectedArena(data[0].arena_id);
-      }
-    } catch (error) {
-      console.error("Error fetching arenas:", error);
-    }
-  };
+  // Removed fetchArenas
 
   const fetchTimeSlots = async () => {
     try {
@@ -70,16 +58,30 @@ const OwnerCalendar = () => {
       if (response.ok) {
         setTimeSlots(data);
 
-        // Initialize new slots from template
+        // FIX: Initialize new slots more robustly against existing slots
         const formattedDate = selectedDate.toISOString().split("T")[0];
-        const slots = timeSlotTemplates.map((template) => ({
-          date: formattedDate,
-          start_time: template.start,
-          end_time: template.end,
-          price: 500, // Default price
-          is_blocked: false,
-          is_holiday: false,
-        }));
+        const arenaBasePrice =
+          arenas.find((a) => a.arena_id == selectedArena)
+            ?.base_price_per_hour || 500;
+
+        const slots = timeSlotTemplates.map((template) => {
+          // Find existing slot data to pre-populate current status
+          const existingSlot = data.find(
+            (ts) =>
+              ts.start_time === template.start && ts.end_time === template.end
+          );
+
+          return {
+            date: formattedDate,
+            start_time: template.start,
+            end_time: template.end,
+            price: existingSlot?.price || arenaBasePrice,
+            is_blocked: existingSlot?.is_blocked_by_owner || false,
+            is_holiday: existingSlot?.is_holiday || false,
+            slot_id: existingSlot?.slot_id, // Include slot_id if exists for updating
+          };
+        });
+
         setNewSlots(slots);
       }
     } catch (error) {
@@ -119,9 +121,18 @@ const OwnerCalendar = () => {
       const dateStr = selectedDate.toISOString().split("T")[0];
 
       // Filter slots that have changes or are marked as blocked/holiday
-      const slotsToSave = newSlots.filter(
-        (slot) => slot.is_blocked || slot.is_holiday || slot.price !== 500
-      );
+      const arenaBasePrice =
+        arenas.find((a) => a.arena_id == selectedArena)?.base_price_per_hour ||
+        500;
+
+      const slotsToSave = newSlots.map((slot) => ({
+        date: slot.date,
+        start_time: slot.start_time,
+        end_time: slot.end_time,
+        price: slot.price || arenaBasePrice,
+        is_blocked: slot.is_blocked,
+        is_holiday: slot.is_holiday,
+      }));
 
       const payload = {
         date: dateStr,
@@ -262,7 +273,7 @@ const OwnerCalendar = () => {
         </div>
 
         {/* Selected Date Info */}
-        <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+        <div className="mt-4 p-4 bg-blue-50 rounded-lg md:col-span-3">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-lg font-medium text-blue-900">
@@ -270,7 +281,7 @@ const OwnerCalendar = () => {
               </h3>
               <p className="text-sm text-blue-700">
                 Managing time slots for{" "}
-                {arenas.find((a) => a.arena_id === selectedArena)?.name ||
+                {arenas.find((a) => a.arena_id == selectedArena)?.name ||
                   "selected arena"}
               </p>
             </div>
@@ -421,7 +432,9 @@ const OwnerCalendar = () => {
                     timeSlotTemplates.map((t) => ({
                       ...t,
                       date: selectedDate.toISOString().split("T")[0],
-                      price: 500,
+                      price:
+                        arenas.find((a) => a.arena_id == selectedArena)
+                          ?.base_price_per_hour || 500,
                       is_blocked: false,
                       is_holiday: false,
                     }))

@@ -71,7 +71,7 @@ const OwnerAuth = (props) => {
       console.log("Response:", response.status, data);
 
       if (response.ok) {
-        // Store token and role
+        // Store token and role (KEEP THIS)
         localStorage.setItem("token", data.token);
         localStorage.setItem("userRole", "owner");
         localStorage.setItem(
@@ -79,16 +79,12 @@ const OwnerAuth = (props) => {
           JSON.stringify(data.owner || data.user)
         );
 
-        // Show success message
+        // Show success message (KEEP THIS)
         alert(isLogin ? "Login successful!" : "Registration successful!");
 
-        // IMPORTANT: Call the onLogin prop if it exists
-        if (props.onLogin) {
-          props.onLogin(); // This updates loggedIn state in App.jsx
-        } else {
-          // Fallback: navigate directly
-          navigate("/owner/dashboard");
-        }
+        // FIX: REMOVE the redundant onLogin call and simplify navigation
+        // OLD: if (props.onLogin) { props.onLogin(); } else { navigate("/owner/dashboard"); }
+        navigate("/owner/dashboard"); // DIRECT NAVIGATION
       } else {
         if (data.errors && data.errors.length > 0) {
           const errorMessages = data.errors

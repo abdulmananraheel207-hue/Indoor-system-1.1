@@ -10,6 +10,7 @@ const OwnerDashboard = () => {
   const navigate = useNavigate();
   const [currentTab, setCurrentTab] = useState("home");
   const [ownerData, setOwnerData] = useState(null);
+  const [loading, setLoading] = useState(true); // Added loading state
 
   useEffect(() => {
     // Fetch owner data on component mount
@@ -17,8 +18,10 @@ const OwnerDashboard = () => {
   }, []);
 
   const fetchOwnerData = async () => {
+    setLoading(true);
     try {
       const token = localStorage.getItem("token");
+      // This fetch gets the full dashboard summary
       const response = await fetch(
         "http://localhost:5000/api/owners/dashboard",
         {
@@ -29,18 +32,38 @@ const OwnerDashboard = () => {
       );
       const data = await response.json();
       if (response.ok) {
+        // The dashboard endpoint returns combined data (stats, recent activity, etc.)
+        // We will store this whole object
         setOwnerData(data);
+      } else if (response.status === 401) {
+        // Handle unauthorized, likely due to expired token
+        handleLogout();
       }
     } catch (error) {
       console.error("Error fetching owner data:", error);
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleLogout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("userRole");
+    localStorage.removeItem("ownerData");
     navigate("/");
   };
+
+  // If loading or data is null, show a spinner
+  if (loading || !ownerData) {
+    return (
+      <div className="min-h-screen flex justify-center items-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  // Use ownerData.owner_name (or .arena_name if that's what the owner profile has)
+  const displayArenaName = ownerData.arenas?.[0]?.name || "Arena Owner";
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -110,7 +133,8 @@ const OwnerDashboard = () => {
             </div>
             <div className="flex items-center space-x-4">
               <span className="text-gray-600">
-                {ownerData?.owner_name || "Arena Owner"}
+                {/* Fixed display name using optional chaining */}
+                {ownerData?.arenas?.[0]?.name || "Arena Owner"}
               </span>
               <button
                 onClick={handleLogout}
@@ -127,9 +151,11 @@ const OwnerDashboard = () => {
       <main className="max-w-7xl mx-auto px-4 py-8">
         {currentTab === "home" && <OwnerHome ownerData={ownerData} />}
         {currentTab === "bookings" && <OwnerBookings />}
-        {currentTab === "calendar" && <OwnerCalendar />}
+        {currentTab === "calendar" && (
+          <OwnerCalendar arenas={ownerData.arenas} />
+        )}
         {currentTab === "managers" && <OwnerManagers />}
-        {currentTab === "profile" && <OwnerProfile />}
+        {currentTab === "profile" && <OwnerProfile dashboardData={ownerData} />}
       </main>
     </div>
   );

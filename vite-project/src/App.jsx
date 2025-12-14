@@ -17,8 +17,18 @@ import UserBooking from "./components/user/UserBooking";
 import UserProfile from "./components/user/UserProfile";
 import OwnerDashboard from "./components/owner/OwnerDashboard";
 
+// --- NEW/MODIFIED LOGIC ---
+const getInitialAuthStatus = (role) => {
+  return (
+    !!localStorage.getItem("token") && localStorage.getItem("userRole") === role
+  );
+};
+
 function App() {
-  const [loggedIn, setLoggedIn] = useState(false);
+  // Initialize loggedIn state by checking if a token and a role exist
+  // We'll treat any valid token as "logged in" for the user dashboard wrapper
+  const [loggedIn, setLoggedIn] = useState(!!localStorage.getItem("token"));
+  // --- END NEW/MODIFIED LOGIC ---
 
   // Wrapper component for UserAuth
   const UserAuthWrapper = () => {
@@ -157,7 +167,12 @@ function App() {
     const [currentTab, setCurrentTab] = useState("home");
 
     const handleLogout = () => {
+      // --- LOGOUT CHANGE ---
+      localStorage.removeItem("token");
+      localStorage.removeItem("userRole");
+      localStorage.removeItem("ownerData"); // Clean up all role-specific data
       setLoggedIn(false);
+      // --- END LOGOUT CHANGE ---
       navigate("/");
     };
 
@@ -260,11 +275,25 @@ function App() {
         {/* Protected Routes */}
         <Route
           path="/owner/dashboard"
-          element={loggedIn ? <OwnerDashboard /> : <Navigate to="/" />}
+          // Check for owner role and token specifically
+          element={
+            getInitialAuthStatus("owner") ? (
+              <OwnerDashboard />
+            ) : (
+              <Navigate to="/auth/owner" />
+            )
+          }
         />
         <Route
           path="/user/dashboard"
-          element={loggedIn ? <UserDashboard /> : <Navigate to="/" />}
+          // Check for user role and token specifically
+          element={
+            getInitialAuthStatus("user") ? (
+              <UserDashboard />
+            ) : (
+              <Navigate to="/auth/user" />
+            )
+          }
         />
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/" />} />

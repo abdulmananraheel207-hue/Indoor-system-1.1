@@ -79,7 +79,15 @@ const OwnerManagers = () => {
       );
       const data = await response.json();
       if (response.ok) {
-        setManagers(data);
+        // FIX: Ensure permissions are parsed on fetch if they come as strings
+        const processedManagers = data.map((manager) => ({
+          ...manager,
+          permissions:
+            typeof manager.permissions === "string"
+              ? JSON.parse(manager.permissions)
+              : manager.permissions,
+        }));
+        setManagers(processedManagers);
       }
     } catch (error) {
       console.error("Error fetching managers:", error);
@@ -190,11 +198,8 @@ const OwnerManagers = () => {
   };
 
   const handleEditManager = (manager) => {
-    // Parse permissions if they're stored as JSON string
-    const permissions =
-      typeof manager.permissions === "string"
-        ? JSON.parse(manager.permissions)
-        : manager.permissions || {};
+    // Permissions are now pre-parsed in fetchManagers, making this simpler
+    const permissions = manager.permissions || {};
 
     setFormData({
       name: manager.name,
@@ -216,10 +221,8 @@ const OwnerManagers = () => {
   };
 
   const getPermissionCount = (manager) => {
-    const perms =
-      typeof manager.permissions === "string"
-        ? JSON.parse(manager.permissions)
-        : manager.permissions || {};
+    // FIX: Permissions are guaranteed to be an object now
+    const perms = manager.permissions || {};
     return Object.values(perms).filter(Boolean).length;
   };
 
@@ -504,12 +507,10 @@ const OwnerManagers = () => {
                         {getPermissionCount(manager)} permissions
                       </div>
                       <div className="text-xs text-gray-500 mt-1">
-                        {manager.permissions &&
-                        typeof manager.permissions === "string"
-                          ? JSON.parse(manager.permissions).view_financial
-                            ? "Includes financial access"
-                            : "No financial access"
-                          : "No permissions set"}
+                        {/* FIX: Simplified check since permissions is an object */}
+                        {manager.permissions?.view_financial
+                          ? "Includes financial access"
+                          : "No financial access"}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -536,7 +537,9 @@ const OwnerManagers = () => {
                           onClick={async () => {
                             if (
                               window.confirm(
-                                "Are you sure you want to deactivate this manager?"
+                                `Are you sure you want to ${
+                                  manager.is_active ? "deactivate" : "activate"
+                                } this manager?`
                               )
                             ) {
                               try {

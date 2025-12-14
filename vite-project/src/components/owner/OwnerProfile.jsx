@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
 
-const OwnerProfile = () => {
-  const [ownerData, setOwnerData] = useState(null);
+// Receive dashboardData as a prop from OwnerDashboard
+const OwnerProfile = ({ dashboardData }) => {
+  const [ownerProfile, setOwnerProfile] = useState(null); // Separate state for profile details
   const [loading, setLoading] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [formData, setFormData] = useState({
@@ -17,20 +18,19 @@ const OwnerProfile = () => {
 
   const fetchOwnerProfile = async () => {
     try {
+      setLoading(true);
       const token = localStorage.getItem("token");
-      const response = await fetch(
-        "http://localhost:5000/api/owners/dashboard",
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
+      // --- FIX: Calling the correct dedicated profile endpoint ---
+      const response = await fetch("http://localhost:5000/api/owners/profile", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
       const data = await response.json();
       if (response.ok) {
-        setOwnerData(data);
+        setOwnerProfile(data); // Set profile details
         setFormData({
-          arena_name: data.owner_name || "",
+          arena_name: data.arena_name || "", // Corrected field access
           email: data.email || "",
           phone_number: data.phone_number || "",
           business_address: data.business_address || "",
@@ -38,6 +38,8 @@ const OwnerProfile = () => {
       }
     } catch (error) {
       console.error("Error fetching owner profile:", error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -59,13 +61,18 @@ const OwnerProfile = () => {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(formData),
+        // Only send fields that can be updated (email is not in validation)
+        body: JSON.stringify({
+          arena_name: formData.arena_name,
+          phone_number: formData.phone_number,
+          business_address: formData.business_address,
+        }),
       });
 
       if (response.ok) {
         alert("Profile updated successfully");
         setEditMode(false);
-        fetchOwnerProfile();
+        fetchOwnerProfile(); // Refresh profile data
       } else {
         const data = await response.json();
         alert(data.message || "Failed to update profile");
@@ -78,13 +85,25 @@ const OwnerProfile = () => {
     }
   };
 
-  if (!ownerData) {
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      minimumFractionDigits: 0,
+    }).format(amount);
+  };
+
+  // Use ownerProfile for profile details, dashboardData for stats
+  if (!ownerProfile) {
     return (
       <div className="flex justify-center items-center h-64">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
       </div>
     );
   }
+
+  const dashboardStats = dashboardData?.dashboard || {};
+  const managerCount = dashboardData?.managers?.length || 0;
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -146,7 +165,7 @@ const OwnerProfile = () => {
                     />
                   ) : (
                     <p className="text-sm text-gray-900">
-                      {ownerData.owner_name}
+                      {ownerProfile.arena_name}
                     </p>
                   )}
                 </div>
@@ -165,7 +184,7 @@ const OwnerProfile = () => {
                     />
                   ) : (
                     <p className="text-sm text-gray-900">
-                      {ownerData.business_address || "Not provided"}
+                      {ownerProfile.business_address || "Not provided"}
                     </p>
                   )}
                 </div>
@@ -175,7 +194,7 @@ const OwnerProfile = () => {
                     Registration Date
                   </label>
                   <p className="text-sm text-gray-900">
-                    {new Date(ownerData.created_at).toLocaleDateString()}
+                    {new Date(ownerProfile.created_at).toLocaleDateString()}
                   </p>
                 </div>
               </div>
@@ -193,15 +212,19 @@ const OwnerProfile = () => {
                     Email Address
                   </label>
                   {editMode ? (
+                    // Email is likely read-only after registration
                     <input
                       type="email"
                       name="email"
                       value={formData.email}
                       onChange={handleInputChange}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                      disabled
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-100"
                     />
                   ) : (
-                    <p className="text-sm text-gray-900">{ownerData.email}</p>
+                    <p className="text-sm text-gray-900">
+                      {ownerProfile.email}
+                    </p>
                   )}
                 </div>
 
@@ -219,7 +242,7 @@ const OwnerProfile = () => {
                     />
                   ) : (
                     <p className="text-sm text-gray-900">
-                      {ownerData.phone_number || "Not provided"}
+                      {ownerProfile.phone_number || "Not provided"}
                     </p>
                   )}
                 </div>
@@ -236,7 +259,7 @@ const OwnerProfile = () => {
             </div>
           </div>
 
-          {/* Stats Summary */}
+          {/* Stats Summary - Now using dashboardData prop */}
           <div className="mt-8 pt-6 border-t">
             <h3 className="text-sm font-medium text-gray-900 mb-4">
               Business Summary
@@ -245,25 +268,27 @@ const OwnerProfile = () => {
               <div className="p-4 bg-blue-50 rounded-lg">
                 <p className="text-sm text-blue-700">Total Arenas</p>
                 <p className="text-2xl font-bold text-blue-900">
-                  {ownerData.dashboard?.total_arenas || 0}
+                  {dashboardStats.total_arenas || 0}
                 </p>
               </div>
               <div className="p-4 bg-green-50 rounded-lg">
-                <p className="text-sm text-green-700">Active Bookings</p>
+                <p className="text-sm text-green-700">
+                  Active Bookings (Today)
+                </p>
                 <p className="text-2xl font-bold text-green-900">
-                  {ownerData.dashboard?.today_bookings || 0}
+                  {dashboardStats.today_bookings || 0}
                 </p>
               </div>
               <div className="p-4 bg-purple-50 rounded-lg">
                 <p className="text-sm text-purple-700">Monthly Revenue</p>
                 <p className="text-2xl font-bold text-purple-900">
-                  ₹{ownerData.dashboard?.monthly_revenue || 0}
+                  {formatCurrency(dashboardStats.monthly_revenue || 0)}
                 </p>
               </div>
               <div className="p-4 bg-yellow-50 rounded-lg">
                 <p className="text-sm text-yellow-700">Managers</p>
                 <p className="text-2xl font-bold text-yellow-900">
-                  {ownerData.managers?.length || 0}
+                  {managerCount}
                 </p>
               </div>
             </div>
@@ -273,13 +298,14 @@ const OwnerProfile = () => {
           {editMode && (
             <div className="mt-6 pt-6 border-t">
               <button
+                type="button" // Important to specify type="button" to prevent form submission
                 onClick={() => {
                   setEditMode(false);
                   setFormData({
-                    arena_name: ownerData.owner_name || "",
-                    email: ownerData.email || "",
-                    phone_number: ownerData.phone_number || "",
-                    business_address: ownerData.business_address || "",
+                    arena_name: ownerProfile.arena_name || "",
+                    email: ownerProfile.email || "",
+                    phone_number: ownerProfile.phone_number || "",
+                    business_address: ownerProfile.business_address || "",
                   });
                 }}
                 className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
@@ -291,7 +317,7 @@ const OwnerProfile = () => {
         </div>
       </div>
 
-      {/* Security Section */}
+      {/* Security Section (Unchanged for now) */}
       <div className="mt-6 bg-white rounded-xl shadow p-6">
         <h3 className="text-lg font-medium text-gray-900 mb-4">Security</h3>
         <div className="space-y-4">
