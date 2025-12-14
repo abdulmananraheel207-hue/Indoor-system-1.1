@@ -29,8 +29,7 @@ function App() {
   // We'll treat any valid token as "logged in" for the user dashboard wrapper
   const [loggedIn, setLoggedIn] = useState(!!localStorage.getItem("token"));
   // --- END NEW/MODIFIED LOGIC ---
-
-  // Wrapper component for UserAuth
+  //user auth wrapper
   const UserAuthWrapper = () => {
     const navigate = useNavigate();
 
@@ -41,19 +40,12 @@ function App() {
 
     return <UserAuth onLogin={handleLogin} />;
   };
-
   // Wrapper component for OwnerAuth
   const OwnerAuthWrapper = () => {
     const navigate = useNavigate();
 
     const handleLogin = (token, userData) => {
       console.log("Owner login successful, updating state...");
-
-      // Store in localStorage (already done in OwnerAuth, but doing it here too)
-      localStorage.setItem("token", token);
-      localStorage.setItem("userRole", "owner");
-      localStorage.setItem("ownerData", JSON.stringify(userData));
-
       // Update React state
       setLoggedIn(true);
 
@@ -167,12 +159,7 @@ function App() {
     const [currentTab, setCurrentTab] = useState("home");
 
     const handleLogout = () => {
-      // --- LOGOUT CHANGE ---
-      localStorage.removeItem("token");
-      localStorage.removeItem("userRole");
-      localStorage.removeItem("ownerData"); // Clean up all role-specific data
       setLoggedIn(false);
-      // --- END LOGOUT CHANGE ---
       navigate("/");
     };
 
@@ -286,14 +273,7 @@ function App() {
         />
         <Route
           path="/user/dashboard"
-          // Check for user role and token specifically
-          element={
-            getInitialAuthStatus("user") ? (
-              <UserDashboard />
-            ) : (
-              <Navigate to="/auth/user" />
-            )
-          }
+          element={loggedIn ? <UserDashboard /> : <Navigate to="/" />}
         />
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/" />} />
