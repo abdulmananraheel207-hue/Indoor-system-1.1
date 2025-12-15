@@ -107,15 +107,15 @@ const OwnerProfile = ({ dashboardData }) => {
 
   return (
     <div className="max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">
+      <h1 className="text-xl font-bold text-gray-900 mb-4 md:text-2xl md:mb-6">
         Profile Settings
       </h1>
 
       <div className="bg-white rounded-xl shadow overflow-hidden">
         {/* Header */}
-        <div className="px-6 py-4 border-b bg-gray-50">
-          <div className="flex justify-between items-center">
-            <h2 className="text-lg font-medium text-gray-900">
+        <div className="px-4 py-3 border-b bg-gray-50 md:px-6 md:py-4">
+          <div className="flex flex-col space-y-3 md:flex-row md:justify-between md:items-center md:space-y-0">
+            <h2 className="text-base font-medium text-gray-900 md:text-lg">
               Owner Information
             </h2>
             <button
@@ -123,13 +123,13 @@ const OwnerProfile = ({ dashboardData }) => {
                 editMode ? handleSaveProfile() : setEditMode(true)
               }
               disabled={loading}
-              className={`px-4 py-2 rounded-md text-white ${
+              className={`px-3 py-1.5 text-sm rounded-md text-white md:px-4 md:py-2 md:text-base ${
                 loading ? "bg-blue-400" : "bg-blue-600 hover:bg-blue-700"
               }`}
             >
               {loading ? (
                 <>
-                  <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></span>
+                  <span className="inline-block animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1 md:h-4 md:w-4 md:mr-2"></span>
                   Saving...
                 </>
               ) : editMode ? (
@@ -142,15 +142,15 @@ const OwnerProfile = ({ dashboardData }) => {
         </div>
 
         {/* Profile Content */}
-        <div className="p-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="p-4 md:p-6">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-6">
             {/* Arena Information */}
             <div>
-              <h3 className="text-sm font-medium text-gray-900 mb-4">
+              <h3 className="text-sm font-medium text-gray-900 mb-3 md:mb-4">
                 Arena Details
               </h3>
 
-              <div className="space-y-4">
+              <div className="space-y-3 md:space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Arena Name
@@ -161,7 +161,7 @@ const OwnerProfile = ({ dashboardData }) => {
                       name="arena_name"
                       value={formData.arena_name}
                       onChange={handleInputChange}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                      className="w-full px-3 py-2 text-sm md:text-base border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                     />
                   ) : (
                     <p className="text-sm text-gray-900">
@@ -180,7 +180,7 @@ const OwnerProfile = ({ dashboardData }) => {
                       value={formData.business_address}
                       onChange={handleInputChange}
                       rows="3"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                      className="w-full px-3 py-2 text-sm md:text-base border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                     />
                   ) : (
                     <p className="text-sm text-gray-900">
@@ -202,24 +202,23 @@ const OwnerProfile = ({ dashboardData }) => {
 
             {/* Contact Information */}
             <div>
-              <h3 className="text-sm font-medium text-gray-900 mb-4">
+              <h3 className="text-sm font-medium text-gray-900 mb-3 md:mb-4">
                 Contact Information
               </h3>
 
-              <div className="space-y-4">
+              <div className="space-y-3 md:space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Email Address
                   </label>
                   {editMode ? (
-                    // Email is likely read-only after registration
                     <input
                       type="email"
                       name="email"
                       value={formData.email}
                       onChange={handleInputChange}
                       disabled
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-100"
+                      className="w-full px-3 py-2 text-sm md:text-base border border-gray-300 rounded-md shadow-sm bg-gray-100"
                     />
                   ) : (
                     <p className="text-sm text-gray-900">
@@ -238,7 +237,7 @@ const OwnerProfile = ({ dashboardData }) => {
                       name="phone_number"
                       value={formData.phone_number}
                       onChange={handleInputChange}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                      className="w-full px-3 py-2 text-sm md:text-base border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                     />
                   ) : (
                     <p className="text-sm text-gray-900">
@@ -259,35 +258,37 @@ const OwnerProfile = ({ dashboardData }) => {
             </div>
           </div>
 
-          {/* Stats Summary - Now using dashboardData prop */}
-          <div className="mt-8 pt-6 border-t">
-            <h3 className="text-sm font-medium text-gray-900 mb-4">
+          {/* Stats Summary */}
+          <div className="mt-6 pt-4 border-t md:mt-8 md:pt-6">
+            <h3 className="text-sm font-medium text-gray-900 mb-3 md:mb-4">
               Business Summary
             </h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="p-4 bg-blue-50 rounded-lg">
-                <p className="text-sm text-blue-700">Total Arenas</p>
-                <p className="text-2xl font-bold text-blue-900">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
+              <div className="p-3 bg-blue-50 rounded-lg md:p-4">
+                <p className="text-xs text-blue-700 md:text-sm">Total Arenas</p>
+                <p className="text-lg font-bold text-blue-900 md:text-2xl">
                   {dashboardStats.total_arenas || 0}
                 </p>
               </div>
-              <div className="p-4 bg-green-50 rounded-lg">
-                <p className="text-sm text-green-700">
+              <div className="p-3 bg-green-50 rounded-lg md:p-4">
+                <p className="text-xs text-green-700 md:text-sm">
                   Active Bookings (Today)
                 </p>
-                <p className="text-2xl font-bold text-green-900">
+                <p className="text-lg font-bold text-green-900 md:text-2xl">
                   {dashboardStats.today_bookings || 0}
                 </p>
               </div>
-              <div className="p-4 bg-purple-50 rounded-lg">
-                <p className="text-sm text-purple-700">Monthly Revenue</p>
-                <p className="text-2xl font-bold text-purple-900">
+              <div className="p-3 bg-purple-50 rounded-lg md:p-4">
+                <p className="text-xs text-purple-700 md:text-sm">
+                  Monthly Revenue
+                </p>
+                <p className="text-lg font-bold text-purple-900 md:text-2xl">
                   {formatCurrency(dashboardStats.monthly_revenue || 0)}
                 </p>
               </div>
-              <div className="p-4 bg-yellow-50 rounded-lg">
-                <p className="text-sm text-yellow-700">Managers</p>
-                <p className="text-2xl font-bold text-yellow-900">
+              <div className="p-3 bg-yellow-50 rounded-lg md:p-4">
+                <p className="text-xs text-yellow-700 md:text-sm">Managers</p>
+                <p className="text-lg font-bold text-yellow-900 md:text-2xl">
                   {managerCount}
                 </p>
               </div>
@@ -296,9 +297,9 @@ const OwnerProfile = ({ dashboardData }) => {
 
           {/* Cancel Edit Button */}
           {editMode && (
-            <div className="mt-6 pt-6 border-t">
+            <div className="mt-4 pt-4 border-t md:mt-6 md:pt-6">
               <button
-                type="button" // Important to specify type="button" to prevent form submission
+                type="button"
                 onClick={() => {
                   setEditMode(false);
                   setFormData({
@@ -308,7 +309,7 @@ const OwnerProfile = ({ dashboardData }) => {
                     business_address: ownerProfile.business_address || "",
                   });
                 }}
-                className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                className="px-4 py-2 text-sm border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
               >
                 Cancel
               </button>
@@ -317,26 +318,28 @@ const OwnerProfile = ({ dashboardData }) => {
         </div>
       </div>
 
-      {/* Security Section (Unchanged for now) */}
-      <div className="mt-6 bg-white rounded-xl shadow p-6">
-        <h3 className="text-lg font-medium text-gray-900 mb-4">Security</h3>
-        <div className="space-y-4">
+      {/* Security Section */}
+      <div className="mt-4 bg-white rounded-xl shadow p-4 md:mt-6 md:p-6">
+        <h3 className="text-base font-medium text-gray-900 mb-3 md:text-lg md:mb-4">
+          Security
+        </h3>
+        <div className="space-y-3 md:space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Change Password
             </label>
-            <div className="flex space-x-3">
+            <div className="space-y-2 md:flex md:space-x-3 md:space-y-0">
               <input
                 type="password"
                 placeholder="Current password"
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 text-sm md:text-base border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
               />
               <input
                 type="password"
                 placeholder="New password"
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 text-sm md:text-base border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
               />
-              <button className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+              <button className="w-full px-4 py-2 text-sm md:text-base bg-blue-600 text-white rounded-md hover:bg-blue-700 md:w-auto">
                 Update
               </button>
             </div>

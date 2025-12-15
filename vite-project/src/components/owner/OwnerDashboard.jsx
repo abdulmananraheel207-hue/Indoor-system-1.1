@@ -10,10 +10,10 @@ const OwnerDashboard = () => {
   const navigate = useNavigate();
   const [currentTab, setCurrentTab] = useState("home");
   const [ownerData, setOwnerData] = useState(null);
-  const [loading, setLoading] = useState(true); // Added loading state
+  const [loading, setLoading] = useState(true);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false); // New state for mobile menu
 
   useEffect(() => {
-    // Fetch owner data on component mount
     fetchOwnerData();
   }, []);
 
@@ -21,7 +21,6 @@ const OwnerDashboard = () => {
     setLoading(true);
     try {
       const token = localStorage.getItem("token");
-      // This fetch gets the full dashboard summary
       const response = await fetch(
         "http://localhost:5000/api/owners/dashboard",
         {
@@ -32,11 +31,8 @@ const OwnerDashboard = () => {
       );
       const data = await response.json();
       if (response.ok) {
-        // The dashboard endpoint returns combined data (stats, recent activity, etc.)
-        // We will store this whole object
         setOwnerData(data);
       } else if (response.status === 401) {
-        // Handle unauthorized, likely due to expired token
         handleLogout();
       }
     } catch (error) {
@@ -53,7 +49,6 @@ const OwnerDashboard = () => {
     navigate("/");
   };
 
-  // If loading or data is null, show a spinner
   if (loading || !ownerData) {
     return (
       <div className="min-h-screen flex justify-center items-center">
@@ -62,26 +57,90 @@ const OwnerDashboard = () => {
     );
   }
 
-  // Use ownerData.owner_name (or .arena_name if that's what the owner profile has)
   const displayArenaName = ownerData.arenas?.[0]?.name || "Arena Owner";
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
+      {/* Header - Updated for mobile */}
       <header className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 py-4">
+        <div className="px-4 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center">
+            {/* Mobile menu button */}
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="md:hidden p-2 rounded-md text-gray-700 hover:bg-gray-100"
+            >
+              {mobileMenuOpen ? (
+                <svg
+                  className="h-6 w-6"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              ) : (
+                <svg
+                  className="h-6 w-6"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 6h16M4 12h16M4 18h16"
+                  />
+                </svg>
+              )}
+            </button>
+
+            <button
+              onClick={() => {
+                setCurrentTab("home");
+                setMobileMenuOpen(false);
+              }}
+              className="text-lg font-bold text-gray-900 md:text-xl"
+            >
+              Arena Owner Portal
+            </button>
+
+            {/* Desktop navigation */}
+            <div className="hidden md:flex items-center space-x-4">
+              <span className="text-gray-600">{displayArenaName}</span>
               <button
-                onClick={() => setCurrentTab("home")}
-                className="text-xl font-bold text-gray-900"
+                onClick={handleLogout}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm md:text-base"
               >
-                Arena Owner Portal
+                Logout
               </button>
-              <div className="ml-8 flex space-x-4">
+            </div>
+
+            {/* Mobile logout button */}
+            <button
+              onClick={handleLogout}
+              className="md:hidden px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+            >
+              Logout
+            </button>
+          </div>
+
+          {/* Mobile Navigation Menu */}
+          {mobileMenuOpen && (
+            <div className="md:hidden mt-4 pb-4 border-t">
+              <div className="flex flex-col space-y-2 pt-4">
                 <button
-                  onClick={() => setCurrentTab("home")}
-                  className={`px-3 py-2 rounded-lg ${
+                  onClick={() => {
+                    setCurrentTab("home");
+                    setMobileMenuOpen(false);
+                  }}
+                  className={`px-3 py-2.5 rounded-lg text-left ${
                     currentTab === "home"
                       ? "bg-blue-100 text-blue-700"
                       : "text-gray-700 hover:bg-gray-100"
@@ -90,8 +149,11 @@ const OwnerDashboard = () => {
                   Dashboard
                 </button>
                 <button
-                  onClick={() => setCurrentTab("bookings")}
-                  className={`px-3 py-2 rounded-lg ${
+                  onClick={() => {
+                    setCurrentTab("bookings");
+                    setMobileMenuOpen(false);
+                  }}
+                  className={`px-3 py-2.5 rounded-lg text-left ${
                     currentTab === "bookings"
                       ? "bg-blue-100 text-blue-700"
                       : "text-gray-700 hover:bg-gray-100"
@@ -100,8 +162,11 @@ const OwnerDashboard = () => {
                   Bookings
                 </button>
                 <button
-                  onClick={() => setCurrentTab("calendar")}
-                  className={`px-3 py-2 rounded-lg ${
+                  onClick={() => {
+                    setCurrentTab("calendar");
+                    setMobileMenuOpen(false);
+                  }}
+                  className={`px-3 py-2.5 rounded-lg text-left ${
                     currentTab === "calendar"
                       ? "bg-blue-100 text-blue-700"
                       : "text-gray-700 hover:bg-gray-100"
@@ -110,8 +175,11 @@ const OwnerDashboard = () => {
                   Calendar
                 </button>
                 <button
-                  onClick={() => setCurrentTab("managers")}
-                  className={`px-3 py-2 rounded-lg ${
+                  onClick={() => {
+                    setCurrentTab("managers");
+                    setMobileMenuOpen(false);
+                  }}
+                  className={`px-3 py-2.5 rounded-lg text-left ${
                     currentTab === "managers"
                       ? "bg-blue-100 text-blue-700"
                       : "text-gray-700 hover:bg-gray-100"
@@ -120,8 +188,11 @@ const OwnerDashboard = () => {
                   Managers
                 </button>
                 <button
-                  onClick={() => setCurrentTab("profile")}
-                  className={`px-3 py-2 rounded-lg ${
+                  onClick={() => {
+                    setCurrentTab("profile");
+                    setMobileMenuOpen(false);
+                  }}
+                  className={`px-3 py-2.5 rounded-lg text-left ${
                     currentTab === "profile"
                       ? "bg-blue-100 text-blue-700"
                       : "text-gray-700 hover:bg-gray-100"
@@ -129,26 +200,73 @@ const OwnerDashboard = () => {
                 >
                   Profile
                 </button>
+                <div className="pt-2 mt-2 border-t">
+                  <div className="px-3 py-2 text-sm text-gray-600">
+                    Signed in as: {displayArenaName}
+                  </div>
+                </div>
               </div>
             </div>
-            <div className="flex items-center space-x-4">
-              <span className="text-gray-600">
-                {/* Fixed display name using optional chaining */}
-                {ownerData?.arenas?.[0]?.name || "Arena Owner"}
-              </span>
-              <button
-                onClick={handleLogout}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
-              >
-                Logout
-              </button>
-            </div>
+          )}
+
+          {/* Desktop Navigation */}
+          <div className="hidden md:flex mt-4 space-x-2">
+            <button
+              onClick={() => setCurrentTab("home")}
+              className={`px-3 py-2 rounded-lg text-sm ${
+                currentTab === "home"
+                  ? "bg-blue-100 text-blue-700"
+                  : "text-gray-700 hover:bg-gray-100"
+              }`}
+            >
+              Dashboard
+            </button>
+            <button
+              onClick={() => setCurrentTab("bookings")}
+              className={`px-3 py-2 rounded-lg text-sm ${
+                currentTab === "bookings"
+                  ? "bg-blue-100 text-blue-700"
+                  : "text-gray-700 hover:bg-gray-100"
+              }`}
+            >
+              Bookings
+            </button>
+            <button
+              onClick={() => setCurrentTab("calendar")}
+              className={`px-3 py-2 rounded-lg text-sm ${
+                currentTab === "calendar"
+                  ? "bg-blue-100 text-blue-700"
+                  : "text-gray-700 hover:bg-gray-100"
+              }`}
+            >
+              Calendar
+            </button>
+            <button
+              onClick={() => setCurrentTab("managers")}
+              className={`px-3 py-2 rounded-lg text-sm ${
+                currentTab === "managers"
+                  ? "bg-blue-100 text-blue-700"
+                  : "text-gray-700 hover:bg-gray-100"
+              }`}
+            >
+              Managers
+            </button>
+            <button
+              onClick={() => setCurrentTab("profile")}
+              className={`px-3 py-2 rounded-lg text-sm ${
+                currentTab === "profile"
+                  ? "bg-blue-100 text-blue-700"
+                  : "text-gray-700 hover:bg-gray-100"
+              }`}
+            >
+              Profile
+            </button>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 py-8">
+      <main className="px-3 py-6 md:px-4 md:py-8 max-w-7xl mx-auto">
         {currentTab === "home" && <OwnerHome ownerData={ownerData} />}
         {currentTab === "bookings" && <OwnerBookings />}
         {currentTab === "calendar" && (

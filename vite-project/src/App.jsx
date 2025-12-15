@@ -28,11 +28,11 @@ import AdminLayout from "./components/admin/AdminLayout";
 
 // Test admin credentials
 const TEST_ADMIN = {
-  username: 'admin',
-  email: 'admin@arenafinder.com',
-  password: 'admin123',
-  name: 'System Administrator',
-  role: 'admin'
+  username: "admin",
+  email: "admin@arenafinder.com",
+  password: "admin123",
+  name: "System Administrator",
+  role: "admin",
 };
 
 // --- NEW/MODIFIED LOGIC ---
@@ -93,18 +93,19 @@ function App() {
   const OwnerAuthWrapper = () => {
     const navigate = useNavigate();
 
-    const handleLogin = (token, userData) => {
+    const handleLogin = () => {
       console.log("Owner login successful, updating state...");
       // Update React state
       setLoggedIn(true);
 
-      // Navigate to dashboard
-      navigate("/owner/dashboard");
+      // Add a small delay to ensure state is updated before navigation
+      setTimeout(() => {
+        navigate("/owner/dashboard");
+      }, 100);
     };
 
     return <OwnerAuth onLogin={handleLogin} />;
   };
-
   // Wrapper for AdminAuth
   const AdminAuthWrapper = () => {
     const navigate = useNavigate();
@@ -270,37 +271,41 @@ function App() {
                 <div className="ml-8 flex space-x-4">
                   <button
                     onClick={() => setCurrentTab("home")}
-                    className={`px-3 py-2 rounded-lg ${currentTab === "home"
-                      ? "bg-primary-100 text-primary-700"
-                      : "text-gray-700 hover:bg-gray-100"
-                      }`}
+                    className={`px-3 py-2 rounded-lg ${
+                      currentTab === "home"
+                        ? "bg-primary-100 text-primary-700"
+                        : "text-gray-700 hover:bg-gray-100"
+                    }`}
                   >
                     Home
                   </button>
                   <button
                     onClick={() => setCurrentTab("teams")}
-                    className={`px-3 py-2 rounded-lg ${currentTab === "teams"
-                      ? "bg-primary-100 text-primary-700"
-                      : "text-gray-700 hover:bg-gray-100"
-                      }`}
+                    className={`px-3 py-2 rounded-lg ${
+                      currentTab === "teams"
+                        ? "bg-primary-100 text-primary-700"
+                        : "text-gray-700 hover:bg-gray-100"
+                    }`}
                   >
                     Teams
                   </button>
                   <button
                     onClick={() => setCurrentTab("booking")}
-                    className={`px-3 py-2 rounded-lg ${currentTab === "booking"
-                      ? "bg-primary-100 text-primary-700"
-                      : "text-gray-700 hover:bg-gray-100"
-                      }`}
+                    className={`px-3 py-2 rounded-lg ${
+                      currentTab === "booking"
+                        ? "bg-primary-100 text-primary-700"
+                        : "text-gray-700 hover:bg-gray-100"
+                    }`}
                   >
                     Booking
                   </button>
                   <button
                     onClick={() => setCurrentTab("profile")}
-                    className={`px-3 py-2 rounded-lg ${currentTab === "profile"
-                      ? "bg-primary-100 text-primary-700"
-                      : "text-gray-700 hover:bg-gray-100"
-                      }`}
+                    className={`px-3 py-2 rounded-lg ${
+                      currentTab === "profile"
+                        ? "bg-primary-100 text-primary-700"
+                        : "text-gray-700 hover:bg-gray-100"
+                    }`}
                   >
                     Profile
                   </button>
