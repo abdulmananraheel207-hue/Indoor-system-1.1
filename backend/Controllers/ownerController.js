@@ -131,16 +131,31 @@ const ownerController = {
 
         const arena_id = arenaResult.insertId;
 
-        // 3. Add sports to arena
         if (sports.length > 0) {
+          // Validate sport IDs exist
+          const placeholders = sports.map(() => '?').join(',');
+          const [validSports] = await connection.execute(
+            `SELECT COUNT(*) as count FROM sports_types WHERE sport_id IN (${placeholders})`,
+            sports
+          );
+
+          if (validSports[0].count !== sports.length) {
+            await connection.rollback();
+            return res.status(400).json({
+              message: "Invalid sport IDs. Please select valid sports."
+            });
+          }
+
+          // Then proceed with your existing arena_sports insertion
           for (const sport_id of sports) {
             await connection.execute(
               `INSERT INTO arena_sports (arena_id, sport_id, price_per_hour)
-               VALUES (?, ?, ?)`,
+       VALUES (?, ?, ?)`,
               [arena_id, sport_id, parseFloat(base_price_per_hour) || 500]
             );
           }
         }
+
 
         // 4. Create court details (if courts array provided)
         let courtData = courts;

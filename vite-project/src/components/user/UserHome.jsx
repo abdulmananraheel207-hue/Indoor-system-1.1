@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { arenaAPI } from '../../services/api';
 
 const UserHome = () => {
+    const navigate = useNavigate();
     const [location, setLocation] = useState(null);
     const [sports, setSports] = useState([]);
     const [selectedSport, setSelectedSport] = useState(null);
@@ -8,51 +11,11 @@ const UserHome = () => {
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
 
-    // Sample data - replace with API calls
-    const sampleSports = [
-        { id: 1, name: 'Cricket', icon: '🏏' },
-        { id: 2, name: 'Futsal', icon: '⚽' },
-        { id: 3, name: 'Padel', icon: '🎾' },
-        { id: 4, name: 'Badminton', icon: '🏸' },
-        { id: 5, name: 'Basketball', icon: '🏀' },
-        { id: 6, name: 'Tennis', icon: '🎾' },
-    ];
-
-    const sampleArenas = [
-        {
-            id: 1,
-            name: 'Elite Sports Arena',
-            address: '123 Sports Street, City',
-            rating: 4.5,
-            price: 2000,
-            distance: '2.5 km',
-            sports: ['Cricket', 'Futsal'],
-            image: 'https://via.placeholder.com/300x200'
-        },
-        {
-            id: 2,
-            name: 'Pro Badminton Court',
-            address: '456 Game Road, City',
-            rating: 4.2,
-            price: 1500,
-            distance: '3.1 km',
-            sports: ['Badminton'],
-            image: 'https://via.placeholder.com/300x200'
-        },
-        {
-            id: 3,
-            name: 'City Padel Club',
-            address: '789 Sports Avenue, City',
-            rating: 4.8,
-            price: 2500,
-            distance: '1.8 km',
-            sports: ['Padel', 'Tennis'],
-            image: 'https://via.placeholder.com/300x200'
-        },
-    ];
-
     useEffect(() => {
-        // Request location permission on component mount
+        fetchSports();
+        fetchArenas();
+
+        // Get user location
         if (navigator.geolocation) {
             navigator.geolocation.getCurrentPosition(
                 (position) => {
@@ -60,31 +23,63 @@ const UserHome = () => {
                         lat: position.coords.latitude,
                         lng: position.coords.longitude
                     });
-                    console.log('User location:', position.coords);
                 },
-                (error) => {
-                    console.error('Error getting location:', error);
-                    setLocation({ lat: 0, lng: 0 }); // Default location
-                }
+                (error) => console.error('Error getting location:', error)
             );
         }
-
-        // Load sports and arenas
-        setSports(sampleSports);
-        setArenas(sampleArenas);
-        setLoading(false);
     }, []);
 
-    const handleSearch = (e) => {
-        e.preventDefault();
-        console.log('Search query:', searchQuery);
-        // Implement search logic
+    const fetchSports = async () => {
+        try {
+            const response = await arenaAPI.getSportsCategories();
+            setSports(response.data);
+        } catch (error) {
+            console.error('Error fetching sports:', error);
+        }
     };
 
-    const handleSportSelect = (sport) => {
+    const fetchArenas = async () => {
+        try {
+            const params = {};
+            if (location) {
+                params.lat = location.lat;
+                params.lng = location.lng;
+                params.radius = 10;
+            }
+            const response = await arenaAPI.searchArenas(params);
+            setArenas(response.data);
+        } catch (error) {
+            console.error('Error fetching arenas:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleSearch = async (e) => {
+        e.preventDefault();
+        try {
+            const params = { query: searchQuery };
+            if (selectedSport) params.sport_id = selectedSport.sport_id;
+
+            const response = await arenaAPI.searchArenas(params);
+            setArenas(response.data);
+        } catch (error) {
+            console.error('Error searching arenas:', error);
+        }
+    };
+
+    const handleSportSelect = async (sport) => {
         setSelectedSport(sport);
-        console.log('Selected sport:', sport);
-        // Filter arenas by sport
+        try {
+            const response = await arenaAPI.searchArenas({ sport_id: sport.sport_id });
+            setArenas(response.data);
+        } catch (error) {
+            console.error('Error filtering arenas:', error);
+        }
+    };
+
+    const handleViewDetails = (arenaId) => {
+        navigate(`/user/arenas/${arenaId}`);
     };
 
     return (
@@ -120,13 +115,6 @@ const UserHome = () => {
                                     Enable location to find nearby arenas
                                 </button>
                             )}
-                        </div>
-                        <div className="flex items-center space-x-4">
-                            <button className="p-2 text-gray-600 hover:text-gray-900">
-                                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-                                </svg>
-                            </button>
                         </div>
                     </div>
 
@@ -168,14 +156,14 @@ const UserHome = () => {
                     <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
                         {sports.map((sport) => (
                             <button
-                                key={sport.id}
+                                key={sport.sport_id}
                                 onClick={() => handleSportSelect(sport)}
-                                className={`flex flex-col items-center p-4 rounded-xl transition-all duration-200 ${selectedSport?.id === sport.id
-                                        ? 'bg-primary-50 border-2 border-primary-500'
-                                        : 'bg-white border border-gray-200 hover:border-primary-300'
+                                className={`flex flex-col items-center p-4 rounded-xl transition-all duration-200 ${selectedSport?.sport_id === sport.sport_id
+                                    ? 'bg-primary-50 border-2 border-primary-500'
+                                    : 'bg-white border border-gray-200 hover:border-primary-300'
                                     }`}
                             >
-                                <span className="text-2xl mb-2">{sport.icon}</span>
+                                <span className="text-2xl mb-2">{sport.icon_url ? '🏸' : '🎾'}</span>
                                 <span className="text-sm font-medium text-gray-700">{sport.name}</span>
                             </button>
                         ))}
@@ -186,11 +174,8 @@ const UserHome = () => {
                 <div>
                     <div className="flex items-center justify-between mb-6">
                         <h2 className="text-lg font-semibold text-gray-900">
-                            {selectedSport ? `${selectedSport.name} Arenas` : 'Nearby Arenas'}
+                            {selectedSport ? `${selectedSport.name} Arenas` : 'Available Arenas'}
                         </h2>
-                        <button className="text-sm text-primary-600 hover:text-primary-500">
-                            View All
-                        </button>
                     </div>
 
                     {loading ? (
@@ -200,18 +185,19 @@ const UserHome = () => {
                     ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                             {arenas.map((arena) => (
-                                <div key={arena.id} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow duration-200">
+                                <div key={arena.arena_id} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow duration-200">
                                     <div className="h-48 bg-gray-300 overflow-hidden relative">
-                                        <img
-                                            src={arena.image}
-                                            alt={arena.name}
-                                            className="w-full h-full object-cover"
-                                        />
-                                        <button className="absolute top-4 right-4 p-2 bg-white rounded-full shadow-md hover:shadow-lg">
-                                            <svg className="h-5 w-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-                                            </svg>
-                                        </button>
+                                        {arena.images && arena.images[0] ? (
+                                            <img
+                                                src={arena.images[0].image_url}
+                                                alt={arena.name}
+                                                className="w-full h-full object-cover"
+                                            />
+                                        ) : (
+                                            <div className="w-full h-full bg-gray-200 flex items-center justify-center">
+                                                <span className="text-gray-400">No Image</span>
+                                            </div>
+                                        )}
                                     </div>
                                     <div className="p-5">
                                         <div className="flex items-start justify-between mb-3">
@@ -220,7 +206,7 @@ const UserHome = () => {
                                                 <svg className="h-4 w-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
                                                     <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                                                 </svg>
-                                                <span className="font-semibold">{arena.rating}</span>
+                                                <span className="font-semibold">{arena.rating || 'New'}</span>
                                             </div>
                                         </div>
 
@@ -229,27 +215,30 @@ const UserHome = () => {
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                                             </svg>
-                                            <span>{arena.address}</span>
+                                            <span>{arena.address || 'Address not available'}</span>
                                         </div>
 
                                         <div className="flex flex-wrap gap-2 mb-4">
-                                            {arena.sports.map((sport, index) => (
+                                            {arena.sports && arena.sports.split(',').map((sport, index) => (
                                                 <span
                                                     key={index}
                                                     className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded"
                                                 >
-                                                    {sport}
+                                                    {sport.trim()}
                                                 </span>
                                             ))}
                                         </div>
 
                                         <div className="flex items-center justify-between">
                                             <div>
-                                                <span className="text-2xl font-bold text-gray-900">Rs {arena.price}</span>
+                                                <span className="text-2xl font-bold text-gray-900">Rs {arena.base_price_per_hour || 0}</span>
                                                 <span className="text-gray-600">/hour</span>
                                             </div>
-                                            <button className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors">
-                                                Book Now
+                                            <button
+                                                onClick={() => handleViewDetails(arena.arena_id)}
+                                                className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+                                            >
+                                                View Details
                                             </button>
                                         </div>
                                     </div>
