@@ -16,6 +16,7 @@ const ownerRoutes = require('./routes/owners');
 const adminRoutes = require('./routes/admin');
 const bookingRoutes = require('./routes/bookings');
 const chatRoutes = require('./routes/chats');
+const managerRoutes = require("./routes/managers");
 
 const app = express();
 
@@ -101,6 +102,7 @@ app.use('/api/owners', ownerRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/chats', chatRoutes);
+app.use("/api/managers", managerRoutes);
 
 // 404 handler
 app.use('/api/*', (req, res) => {

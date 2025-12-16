@@ -1,10 +1,18 @@
+
 const express = require("express");
 const router = express.Router();
 const ownerController = require("../Controllers/ownerController");
 const auth = require("../middleware/auth");
-const { arenaValidation } = require("../middleware/validation");
+const upload = require("../middleware/uploadMiddleware");
 
-// All routes require owner or manager authentication
+// Public registration route (no authentication required)
+router.post("/register/complete", ownerController.registerOwnerComplete);
+
+// Photo upload routes (public during registration)
+router.post("/arenas/:arena_id/photos", upload.array('photos', 10), ownerController.uploadArenaPhotos);
+router.post("/courts/:court_id/photos", upload.array('photos', 10), ownerController.uploadCourtPhotos);
+
+// All other routes require owner or manager authentication
 router.use(auth.verifyToken, auth.isOwnerOrManager);
 
 // Dashboard
@@ -12,11 +20,7 @@ router.get("/dashboard", ownerController.getDashboard);
 
 // Arena management
 router.get("/arenas", ownerController.getArenas);
-router.post(
-  "/arenas",
-  arenaValidation.createArena,
-  ownerController.createArena
-);
+router.post("/arenas", ownerController.createArena);
 router.put("/arenas/:arena_id", ownerController.updateArena);
 router.put("/arenas/:arena_id/slots", ownerController.manageTimeSlots);
 
@@ -34,7 +38,7 @@ router.put("/managers/:manager_id", ownerController.updateManager);
 // Reports
 router.get("/reports/export", ownerController.exportBookingData);
 
-// profile
+// Profile
 router.get("/profile", ownerController.getOwnerProfile);
 router.put("/profile", ownerController.updateOwnerProfile);
 

@@ -1,6 +1,385 @@
 const pool = require("../db");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 
 const ownerController = {
+  // Complete owner registration with arena, courts, sports, and time slots
+  registerOwnerComplete: async (req, res) => {
+    try {
+      const {
+        // Owner details
+        arena_name,
+        email,
+        password,
+        phone_number,
+        business_address,
+        google_maps_location,
+        number_of_courts,
+        agreed_to_terms,
+
+        // Arena details
+        description,
+        base_price_per_hour,
+
+        // Sports
+        sports = [],
+
+        // Court details (array of courts)
+        courts = [],
+
+        // Time slots configuration
+        opening_time = "06:00",
+        closing_time = "22:00",
+        slot_duration = 60,
+        days_available = {
+          monday: true,
+          tuesday: true,
+          wednesday: true,
+          thursday: true,
+          friday: true,
+          saturday: true,
+          sunday: false,
+        },
+      } = req.body;
+
+      // Validate required fields
+      if (!arena_name || !email || !password || !phone_number || !business_address) {
+        return res.status(400).json({
+          message:
+            "Missing required fields: arena_name, email, password, phone_number, business_address",
+        });
+      }
+
+      if (!agreed_to_terms) {
+        return res.status(400).json({
+          message: "You must agree to terms and conditions",
+        });
+      }
+
+      // Normalize phone number for Pakistani format
+      let normalizedPhone = phone_number.trim().replace(/[\s\-()]/g, "");
+
+      if (normalizedPhone.startsWith("0")) {
+        normalizedPhone = "+92" + normalizedPhone.substring(1);
+      } else if (normalizedPhone.startsWith("92") && !normalizedPhone.startsWith("+92")) {
+        normalizedPhone = "+" + normalizedPhone;
+      } else if (!normalizedPhone.startsWith("+")) {
+        normalizedPhone = "+92" + normalizedPhone;
+      }
+
+      const phoneRegex = /^\+923[0-9]{9}$/;
+      if (!phoneRegex.test(normalizedPhone)) {
+        return res.status(400).json({
+          message:
+            "Please enter a valid Pakistani mobile number (e.g., 03001234567, +923001234567)",
+        });
+      }
+
+      // Check if email already exists
+      const [existingOwner] = await pool.execute(
+        "SELECT owner_id FROM arena_owners WHERE email = ?",
+        [email]
+      );
+
+      if (existingOwner.length > 0) {
+        return res.status(400).json({ message: "Email already registered" });
+      }
+
+      // Start transaction
+      const connection = await pool.getConnection();
+      await connection.beginTransaction();
+
+      try {
+        // 1. Create owner record
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        const [ownerResult] = await connection.execute(
+          `INSERT INTO arena_owners 
+           (arena_name, email, password_hash, phone_number, 
+            business_address, google_maps_location, 
+            number_of_courts, agreed_to_terms, is_active)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE)`,
+          [
+            arena_name,
+            email,
+            hashedPassword,
+            normalizedPhone,
+            business_address,
+            google_maps_location || null,
+            parseInt(number_of_courts) || 1,
+            agreed_to_terms,
+          ]
+        );
+
+        const owner_id = ownerResult.insertId;
+
+        // 2. Create arena record
+        // Match exactly the columns that exist in your arenas table
+        const [arenaResult] = await connection.execute(
+          `INSERT INTO arenas 
+           (owner_id, name, description, location_lat, location_lng,
+            address, base_price_per_hour, rating, total_reviews, is_active, is_blocked, total_commission_due)
+           VALUES (?, ?, ?, 0, 0, ?, ?, 0, 0, TRUE, FALSE, 0.00)`,
+          [
+            owner_id,
+            arena_name,
+            description || "",
+            business_address,
+            parseFloat(base_price_per_hour) || 500,
+          ]
+        );
+
+        const arena_id = arenaResult.insertId;
+
+        // 3. Add sports to arena
+        if (sports.length > 0) {
+          for (const sport_id of sports) {
+            await connection.execute(
+              `INSERT INTO arena_sports (arena_id, sport_id, price_per_hour)
+               VALUES (?, ?, ?)`,
+              [arena_id, sport_id, parseFloat(base_price_per_hour) || 500]
+            );
+          }
+        }
+
+        // 4. Create court details (if courts array provided)
+        let courtData = courts;
+        if (courts.length === 0) {
+          // Auto-generate courts based on number_of_courts
+          courtData = Array.from(
+            { length: parseInt(number_of_courts) || 1 },
+            (_, i) => ({
+              court_number: i + 1,
+              court_name: `Court ${i + 1}`,
+              size_sqft: 2000,
+              price_per_hour: parseFloat(base_price_per_hour) || 500,
+              description: "",
+              sports: sports, // Assign all selected sports to each court
+            })
+          );
+        }
+
+        for (const court of courtData) {
+          const [courtResult] = await connection.execute(
+            `INSERT INTO court_details 
+             (arena_id, court_number, court_name, size_sqft, 
+              price_per_hour, description, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+            [
+              arena_id,
+              court.court_number || 1,
+              court.court_name || `Court ${court.court_number || 1}`,
+              parseFloat(court.size_sqft) || 2000,
+              parseFloat(court.price_per_hour) ||
+              parseFloat(base_price_per_hour) ||
+              500,
+              court.description || "",
+            ]
+          );
+
+          const court_id = courtResult.insertId;
+
+          // Add sports to court
+          const courtSports = court.sports || sports;
+          if (courtSports && courtSports.length > 0) {
+            for (const sport_id of courtSports) {
+              await connection.execute(
+                `INSERT INTO court_sports (court_id, sport_id)
+                 VALUES (?, ?)`,
+                [court_id, sport_id]
+              );
+            }
+          }
+        }
+
+        // 5. Generate and create time slots for next 30 days
+        const timeSlots = generateTimeSlots(
+          opening_time,
+          closing_time,
+          slot_duration
+        );
+
+        const today = new Date();
+        for (let i = 0; i < 30; i++) {
+          const date = new Date(today);
+          date.setDate(today.getDate() + i);
+          const dateStr = date.toISOString().split("T")[0];
+          const dayName = date
+            .toLocaleDateString("en-US", { weekday: "long" })
+            .toLowerCase();
+
+          if (days_available[dayName] !== false) {
+            for (const slot of timeSlots) {
+              await connection.execute(
+                `INSERT INTO time_slots 
+                 (arena_id, sport_id, date, start_time, end_time, price, is_available)
+                 VALUES (?, NULL, ?, ?, ?, ?, TRUE)`,
+                [
+                  arena_id,
+                  dateStr,
+                  slot.start_time,
+                  slot.end_time,
+                  parseFloat(base_price_per_hour) || 500,
+                ]
+              );
+            }
+          }
+        }
+
+        // 6. Store time slots configuration in owner record (time_slots JSON exists in arena_owners)
+        const timeSlotsConfig = JSON.stringify({
+          opening_time,
+          closing_time,
+          slot_duration,
+          days_available,
+        });
+
+        await connection.execute(
+          `UPDATE arena_owners SET time_slots = ? WHERE owner_id = ?`,
+          [timeSlotsConfig, owner_id]
+        );
+
+        // Commit transaction
+        await connection.commit();
+
+        // Generate JWT token for immediate login
+        const token = jwt.sign(
+          { id: owner_id, email, role: "owner" },
+          process.env.JWT_SECRET || "your_jwt_secret",
+          { expiresIn: "7d" }
+        );
+
+        // Get owner data
+        const [ownerData] = await connection.execute(
+          "SELECT owner_id, arena_name, email, phone_number, business_address, created_at FROM arena_owners WHERE owner_id = ?",
+          [owner_id]
+        );
+
+        // Get arena data
+        const [arenaData] = await connection.execute(
+          "SELECT * FROM arenas WHERE arena_id = ?",
+          [arena_id]
+        );
+
+        res.status(201).json({
+          message: "Owner registration completed successfully",
+          token,
+          owner: ownerData[0],
+          arena: arenaData[0],
+          arena_id,
+        });
+      } catch (error) {
+        await connection.rollback();
+        console.error("Transaction error:", error);
+        throw error;
+      } finally {
+        connection.release();
+      }
+    } catch (error) {
+      console.error("Registration error:", error);
+      res.status(500).json({
+        message: "Server error during registration",
+        error: error.message,
+      });
+    }
+  },
+
+  // Upload arena photos
+  uploadArenaPhotos: async (req, res) => {
+    try {
+      const { arena_id } = req.params;
+      const files = req.files; // Assuming multer middleware
+
+      if (!files || files.length === 0) {
+        return res.status(400).json({ message: "No files uploaded" });
+      }
+
+      // Verify owner owns this arena
+      const [arenaCheck] = await pool.execute(
+        "SELECT arena_id FROM arenas WHERE arena_id = ? AND owner_id = ?",
+        [arena_id, req.user.id]
+      );
+
+      if (arenaCheck.length === 0) {
+        return res
+          .status(404)
+          .json({ message: "Arena not found or access denied" });
+      }
+
+      // Save photos to database
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        await pool.execute(
+          `INSERT INTO arena_images (arena_id, image_url, is_primary, uploaded_at)
+           VALUES (?, ?, ?, NOW())`,
+          [
+            arena_id,
+            `/uploads/arenas/${file.filename}`,
+            i === 0, // First photo is primary
+          ]
+        );
+      }
+
+      res.json({
+        message: "Arena photos uploaded successfully",
+        count: files.length,
+        files: files.map((f) => f.filename),
+      });
+    } catch (error) {
+      console.error("Photo upload error:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+
+  // Upload court photos
+  uploadCourtPhotos: async (req, res) => {
+    try {
+      const { court_id } = req.params;
+      const files = req.files;
+
+      if (!files || files.length === 0) {
+        return res.status(400).json({ message: "No files uploaded" });
+      }
+
+      // Verify court belongs to owner's arena
+      const [courtCheck] = await pool.execute(
+        `SELECT cd.court_id FROM court_details cd
+         JOIN arenas a ON cd.arena_id = a.arena_id
+         WHERE cd.court_id = ? AND a.owner_id = ?`,
+        [court_id, req.user.id]
+      );
+
+      if (courtCheck.length === 0) {
+        return res
+          .status(404)
+          .json({ message: "Court not found or access denied" });
+      }
+
+      // Save photos to database
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        await pool.execute(
+          `INSERT INTO court_images (court_id, image_url, is_primary, uploaded_at)
+           VALUES (?, ?, ?, NOW())`,
+          [
+            court_id,
+            `/uploads/courts/${file.filename}`,
+            i === 0, // First photo is primary
+          ]
+        );
+      }
+
+      res.json({
+        message: "Court photos uploaded successfully",
+        count: files.length,
+        files: files.map((f) => f.filename),
+      });
+    } catch (error) {
+      console.error("Court photo upload error:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+
   // Get owner dashboard data
   getDashboard: async (req, res) => {
     try {
@@ -52,22 +431,6 @@ const ownerController = {
         [owner_id]
       );
 
-      // Recent activity (last 10 bookings)
-      const [recentActivity] = await pool.execute(
-        `SELECT b.*, u.name as user_name, st.name as sport_name, 
-                ts.date, ts.start_time, ts.end_time,
-                a.name as arena_name
-         FROM bookings b
-         JOIN arenas a ON b.arena_id = a.arena_id
-         JOIN users u ON b.user_id = u.user_id
-         JOIN sports_types st ON b.sport_id = st.sport_id
-         JOIN time_slots ts ON b.slot_id = ts.slot_id
-         WHERE a.owner_id = ?
-         ORDER BY b.booking_date DESC
-         LIMIT 10`,
-        [owner_id]
-      );
-
       // Get arenas owned by this owner
       const [arenas] = await pool.execute(
         "SELECT * FROM arenas WHERE owner_id = ?",
@@ -82,7 +445,6 @@ const ownerController = {
           total_arenas: arenas.length,
         },
         pending_requests: pendingRequests,
-        recent_activity: recentActivity,
         arenas: arenas,
       });
     } catch (error) {
@@ -249,7 +611,7 @@ const ownerController = {
          LEFT JOIN bookings b ON a.arena_id = b.arena_id
          WHERE a.owner_id = ?
          GROUP BY a.arena_id
-         ORDER BY a.created_at DESC`,
+         ORDER BY a.arena_id DESC`,
         [req.user.id]
       );
 
@@ -279,18 +641,18 @@ const ownerController = {
       await connection.beginTransaction();
 
       try {
-        // Create arena
+        // Create arena (match arenas table)
         const [arenaResult] = await connection.execute(
           `INSERT INTO arenas 
            (owner_id, name, description, location_lat, location_lng, 
-            address, base_price_per_hour, rating, total_reviews)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0)`,
+            address, base_price_per_hour, rating, total_reviews, is_active, is_blocked, total_commission_due)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, TRUE, FALSE, 0.00)`,
           [
             req.user.id,
             name,
-            description,
-            location_lat,
-            location_lng,
+            description || "",
+            location_lat || 0,
+            location_lng || 0,
             address,
             base_price_per_hour,
           ]
@@ -459,8 +821,8 @@ const ownerController = {
               // Create new slot
               await connection.execute(
                 `INSERT INTO time_slots 
-                 (arena_id, date, start_time, end_time, price, is_blocked_by_owner, is_holiday)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                 (arena_id, date, start_time, end_time, price, is_blocked_by_owner, is_holiday, is_available)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, TRUE)`,
                 [
                   arena_id,
                   date,
@@ -514,11 +876,14 @@ const ownerController = {
           break;
         case "month":
           dateFilter =
-            "MONTH(booking_date) = MONTH(CURDATE()) AND YEAR(booking_date) = YEAR(CURDATE())";
+            "MONTH(booking_date) = MONTH(CURDATE()) AND YEAR(booking_date) = YEAR(CURRENT_DATE())";
           break;
         case "year":
           dateFilter = "YEAR(booking_date) = YEAR(CURDATE())";
           break;
+        default:
+          dateFilter =
+            "MONTH(booking_date) = MONTH(CURDATE()) AND YEAR(booking_date) = YEAR(CURRENT_DATE())";
       }
 
       const [stats] = await pool.execute(
@@ -576,7 +941,6 @@ const ownerController = {
       }
 
       // Hash password
-      const bcrypt = require("bcryptjs");
       const hashedPassword = await bcrypt.hash(password, 10);
 
       // Insert manager
@@ -670,7 +1034,7 @@ const ownerController = {
     }
   },
 
-  // In ownerController.js, add this method:
+  // Get owner profile
   getOwnerProfile: async (req, res) => {
     try {
       const [owners] = await pool.execute(
@@ -689,6 +1053,7 @@ const ownerController = {
     }
   },
 
+  // Update owner profile
   updateOwnerProfile: async (req, res) => {
     try {
       const { arena_name, phone_number, business_address } = req.body;
@@ -716,7 +1081,9 @@ const ownerController = {
       values.push(req.user.id);
 
       await pool.execute(
-        `UPDATE arena_owners SET ${updateFields.join(", ")} WHERE owner_id = ?`,
+        `UPDATE arena_owners SET ${updateFields.join(
+          ", "
+        )} WHERE owner_id = ?`,
         values
       );
 
@@ -727,7 +1094,7 @@ const ownerController = {
     }
   },
 
-  // Export booking data as CSV (simplified - returns JSON that can be converted to CSV)
+  // Export booking data as JSON (can be turned into CSV on frontend)
   exportBookingData: async (req, res) => {
     try {
       const owner_id = req.user.id;
@@ -775,9 +1142,9 @@ const ownerController = {
       const [bookings] = await pool.execute(query, params);
 
       res.json({
-        filename: `bookings_export_${
-          new Date().toISOString().split("T")[0]
-        }.json`,
+        filename: `bookings_export_${new Date()
+          .toISOString()
+          .split("T")[0]}.json`,
         data: bookings,
         total_records: bookings.length,
         total_revenue: bookings.reduce(
@@ -795,5 +1162,26 @@ const ownerController = {
     }
   },
 };
+
+// Helper function to generate time slots
+function generateTimeSlots(opening_time, closing_time, slot_duration) {
+  const slots = [];
+
+  const startHour = parseInt(opening_time.split(":")[0]);
+  const endHour = parseInt(closing_time.split(":")[0]);
+  const durationHours = slot_duration / 60;
+
+  for (let hour = startHour; hour < endHour; hour += durationHours) {
+    const startHourStr = hour.toString().padStart(2, "0");
+    const endHourStr = (hour + durationHours).toString().padStart(2, "0");
+
+    slots.push({
+      start_time: `${startHourStr}:00`,
+      end_time: `${endHourStr}:00`,
+    });
+  }
+
+  return slots;
+}
 
 module.exports = ownerController;
