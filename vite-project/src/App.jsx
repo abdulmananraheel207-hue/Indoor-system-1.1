@@ -32,6 +32,11 @@ import AdminLayout from "./components/admin/AdminLayout";
 // Import Manager Components
 import ManagerDashboard from "./components/manager/ManagerDashboard";
 
+// Import new User Components
+import UserArenaDetails from "./components/user/UserArenaDetails";
+import UserBookingChat from "./components/user/UserBookingChat";
+import UserTournament from "./components/user/UserTournament";
+
 // Test admin credentials
 const TEST_ADMIN = {
   username: "admin",
@@ -94,13 +99,16 @@ function App() {
     setLoggedIn(false);
   };
 
-  // User auth wrapper
+  //user auth wrapper
   const UserAuthWrapper = () => {
     const navigate = useNavigate();
 
     const handleLogin = () => {
-      setLoggedIn(true);
-      navigate("/user/dashboard");
+      // Use callback to ensure state is updated before navigation
+      setLoggedIn((prev) => {
+        navigate("/user/dashboard");
+        return true;
+      });
     };
 
     return <UserAuth onLogin={handleLogin} />;
@@ -120,13 +128,16 @@ function App() {
     return <OwnerAuth onLogin={handleLogin} />;
   };
 
-  // Manager auth wrapper
+  // App.jsx - Update ManagerAuthWrapper:
+
   const ManagerAuthWrapper = () => {
     const navigate = useNavigate();
 
     const handleLogin = () => {
-      setLoggedIn(true);
-      navigate("/manager/dashboard");
+      setLoggedIn((prev) => {
+        navigate("/manager/dashboard");
+        return true;
+      });
     };
 
     return <ManagerAuth onLogin={handleLogin} />;
@@ -177,7 +188,9 @@ function App() {
           <h1 className="text-3xl font-bold text-gray-900 mb-2">
             ArenaFinder Pro
           </h1>
-          <p className="text-gray-600">Your Complete Sports Arena Management Solution</p>
+          <p className="text-gray-600">
+            Your Complete Sports Arena Management Solution
+          </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-w-4xl w-full">
@@ -301,7 +314,9 @@ function App() {
                 <span className="text-xl">🏆</span>
               </div>
               <h4 className="font-medium text-gray-900">Multiple Sports</h4>
-              <p className="text-sm text-gray-600 mt-1">Badminton, Tennis, Squash & more</p>
+              <p className="text-sm text-gray-600 mt-1">
+                Badminton, Tennis, Squash & more
+              </p>
             </div>
 
             <div className="p-4">
@@ -309,7 +324,9 @@ function App() {
                 <span className="text-xl">💰</span>
               </div>
               <h4 className="font-medium text-gray-900">Revenue Management</h4>
-              <p className="text-sm text-gray-600 mt-1">Track earnings & commissions</p>
+              <p className="text-sm text-gray-600 mt-1">
+                Track earnings & commissions
+              </p>
             </div>
 
             <div className="p-4">
@@ -317,7 +334,9 @@ function App() {
                 <span className="text-xl">📱</span>
               </div>
               <h4 className="font-medium text-gray-900">Mobile Friendly</h4>
-              <p className="text-sm text-gray-600 mt-1">Access from any device</p>
+              <p className="text-sm text-gray-600 mt-1">
+                Access from any device
+              </p>
             </div>
           </div>
         </div>
@@ -328,9 +347,15 @@ function App() {
             © {new Date().getFullYear()} ArenaFinder Pro. All rights reserved.
           </p>
           <div className="mt-2 space-x-4">
-            <a href="#" className="text-sm text-blue-600 hover:text-blue-800">Terms of Service</a>
-            <a href="#" className="text-sm text-blue-600 hover:text-blue-800">Privacy Policy</a>
-            <a href="#" className="text-sm text-blue-600 hover:text-blue-800">Contact Support</a>
+            <a href="#" className="text-sm text-blue-600 hover:text-blue-800">
+              Terms of Service
+            </a>
+            <a href="#" className="text-sm text-blue-600 hover:text-blue-800">
+              Privacy Policy
+            </a>
+            <a href="#" className="text-sm text-blue-600 hover:text-blue-800">
+              Contact Support
+            </a>
           </div>
         </div>
       </div>
@@ -363,37 +388,41 @@ function App() {
                 <div className="ml-8 flex space-x-4">
                   <button
                     onClick={() => setCurrentTab("home")}
-                    className={`px-3 py-2 rounded-lg ${currentTab === "home"
-                      ? "bg-blue-100 text-blue-700"
-                      : "text-gray-700 hover:bg-gray-100"
-                      }`}
+                    className={`px-3 py-2 rounded-lg ${
+                      currentTab === "home"
+                        ? "bg-blue-100 text-blue-700"
+                        : "text-gray-700 hover:bg-gray-100"
+                    }`}
                   >
                     Home
                   </button>
                   <button
                     onClick={() => setCurrentTab("teams")}
-                    className={`px-3 py-2 rounded-lg ${currentTab === "teams"
-                      ? "bg-blue-100 text-blue-700"
-                      : "text-gray-700 hover:bg-gray-100"
-                      }`}
+                    className={`px-3 py-2 rounded-lg ${
+                      currentTab === "teams"
+                        ? "bg-blue-100 text-blue-700"
+                        : "text-gray-700 hover:bg-gray-100"
+                    }`}
                   >
                     Teams
                   </button>
                   <button
                     onClick={() => setCurrentTab("booking")}
-                    className={`px-3 py-2 rounded-lg ${currentTab === "booking"
-                      ? "bg-blue-100 text-blue-700"
-                      : "text-gray-700 hover:bg-gray-100"
-                      }`}
+                    className={`px-3 py-2 rounded-lg ${
+                      currentTab === "booking"
+                        ? "bg-blue-100 text-blue-700"
+                        : "text-gray-700 hover:bg-gray-100"
+                    }`}
                   >
                     Booking
                   </button>
                   <button
                     onClick={() => setCurrentTab("profile")}
-                    className={`px-3 py-2 rounded-lg ${currentTab === "profile"
-                      ? "bg-blue-100 text-blue-700"
-                      : "text-gray-700 hover:bg-gray-100"
-                      }`}
+                    className={`px-3 py-2 rounded-lg ${
+                      currentTab === "profile"
+                        ? "bg-blue-100 text-blue-700"
+                        : "text-gray-700 hover:bg-gray-100"
+                    }`}
                   >
                     Profile
                   </button>
@@ -454,14 +483,56 @@ function App() {
         {/* Protected User Routes */}
         <Route
           path="/user/dashboard"
-          element={getInitialAuthStatus("user") ? <UserDashboard /> : <Navigate to="/" />}
+          element={
+            getInitialAuthStatus("user") ? (
+              <UserDashboard />
+            ) : (
+              <Navigate to="/" />
+            )
+          }
+        />
+
+        {/* New User Routes */}
+        <Route
+          path="/user/arenas/:arenaId"
+          element={
+            getInitialAuthStatus("user") ? (
+              <UserArenaDetails />
+            ) : (
+              <Navigate to="/" />
+            )
+          }
+        />
+        <Route
+          path="/user/bookings/:bookingId/chat"
+          element={
+            getInitialAuthStatus("user") ? (
+              <UserBookingChat />
+            ) : (
+              <Navigate to="/" />
+            )
+          }
+        />
+        <Route
+          path="/user/tournaments/create"
+          element={
+            getInitialAuthStatus("user") ? (
+              <UserTournament />
+            ) : (
+              <Navigate to="/" />
+            )
+          }
         />
 
         {/* Protected Owner Routes */}
         <Route
           path="/owner/dashboard"
           element={
-            getInitialAuthStatus("owner") ? <OwnerDashboard /> : <Navigate to="/auth/owner" />
+            getInitialAuthStatus("owner") ? (
+              <OwnerDashboard />
+            ) : (
+              <Navigate to="/auth/owner" />
+            )
           }
         />
 
@@ -469,7 +540,11 @@ function App() {
         <Route
           path="/manager/dashboard"
           element={
-            getInitialAuthStatus("manager") ? <ManagerDashboard /> : <Navigate to="/auth/manager" />
+            getInitialAuthStatus("manager") ? (
+              <ManagerDashboard />
+            ) : (
+              <Navigate to="/auth/manager" />
+            )
           }
         />
 
@@ -477,7 +552,11 @@ function App() {
         <Route
           path="/admin/*"
           element={
-            adminAuthenticated ? <AdminWrapper /> : <Navigate to="/auth/admin" />
+            adminAuthenticated ? (
+              <AdminWrapper />
+            ) : (
+              <Navigate to="/auth/admin" />
+            )
           }
         />
 
