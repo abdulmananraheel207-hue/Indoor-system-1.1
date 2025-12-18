@@ -1,4 +1,3 @@
-
 const express = require("express");
 const router = express.Router();
 const ownerController = require("../Controllers/ownerController");
@@ -9,8 +8,16 @@ const upload = require("../middleware/uploadMiddleware");
 router.post("/register/complete", ownerController.registerOwnerComplete);
 
 // Photo upload routes (public during registration)
-router.post("/arenas/:arena_id/photos", upload.array('photos', 10), ownerController.uploadArenaPhotos);
-router.post("/courts/:court_id/photos", upload.array('photos', 10), ownerController.uploadCourtPhotos);
+router.post(
+  "/arenas/:arena_id/photos",
+  upload.array("photos", 10),
+  ownerController.uploadArenaPhotos
+);
+router.post(
+  "/courts/:court_id/photos",
+  upload.array("photos", 10),
+  ownerController.uploadCourtPhotos
+);
 
 // All other routes require owner or manager authentication
 router.use(auth.verifyToken, auth.isOwnerOrManager);

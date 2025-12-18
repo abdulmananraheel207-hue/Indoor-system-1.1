@@ -35,7 +35,6 @@ import ManagerDashboard from "./components/manager/ManagerDashboard";
 // Import new User Components
 import UserArenaDetails from "./components/user/UserArenaDetails";
 import UserBookingChat from "./components/user/UserBookingChat";
-import UserTournament from "./components/user/UserTournament";
 
 // Test admin credentials
 const TEST_ADMIN = {
@@ -508,16 +507,6 @@ function App() {
           element={
             getInitialAuthStatus("user") ? (
               <UserBookingChat />
-            ) : (
-              <Navigate to="/" />
-            )
-          }
-        />
-        <Route
-          path="/user/tournaments/create"
-          element={
-            getInitialAuthStatus("user") ? (
-              <UserTournament />
             ) : (
               <Navigate to="/" />
             )

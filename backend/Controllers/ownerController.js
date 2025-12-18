@@ -43,7 +43,13 @@ const ownerController = {
       } = req.body;
 
       // Validate required fields
-      if (!arena_name || !email || !password || !phone_number || !business_address) {
+      if (
+        !arena_name ||
+        !email ||
+        !password ||
+        !phone_number ||
+        !business_address
+      ) {
         return res.status(400).json({
           message:
             "Missing required fields: arena_name, email, password, phone_number, business_address",
@@ -61,7 +67,10 @@ const ownerController = {
 
       if (normalizedPhone.startsWith("0")) {
         normalizedPhone = "+92" + normalizedPhone.substring(1);
-      } else if (normalizedPhone.startsWith("92") && !normalizedPhone.startsWith("+92")) {
+      } else if (
+        normalizedPhone.startsWith("92") &&
+        !normalizedPhone.startsWith("+92")
+      ) {
         normalizedPhone = "+" + normalizedPhone;
       } else if (!normalizedPhone.startsWith("+")) {
         normalizedPhone = "+92" + normalizedPhone;
@@ -133,7 +142,7 @@ const ownerController = {
 
         if (sports.length > 0) {
           // Validate sport IDs exist
-          const placeholders = sports.map(() => '?').join(',');
+          const placeholders = sports.map(() => "?").join(",");
           const [validSports] = await connection.execute(
             `SELECT COUNT(*) as count FROM sports_types WHERE sport_id IN (${placeholders})`,
             sports
@@ -142,7 +151,7 @@ const ownerController = {
           if (validSports[0].count !== sports.length) {
             await connection.rollback();
             return res.status(400).json({
-              message: "Invalid sport IDs. Please select valid sports."
+              message: "Invalid sport IDs. Please select valid sports.",
             });
           }
 
@@ -155,7 +164,6 @@ const ownerController = {
             );
           }
         }
-
 
         // 4. Create court details (if courts array provided)
         let courtData = courts;
@@ -186,8 +194,8 @@ const ownerController = {
               court.court_name || `Court ${court.court_number || 1}`,
               parseFloat(court.size_sqft) || 2000,
               parseFloat(court.price_per_hour) ||
-              parseFloat(base_price_per_hour) ||
-              500,
+                parseFloat(base_price_per_hour) ||
+                500,
               court.description || "",
             ]
           );
@@ -1096,9 +1104,7 @@ const ownerController = {
       values.push(req.user.id);
 
       await pool.execute(
-        `UPDATE arena_owners SET ${updateFields.join(
-          ", "
-        )} WHERE owner_id = ?`,
+        `UPDATE arena_owners SET ${updateFields.join(", ")} WHERE owner_id = ?`,
         values
       );
 
@@ -1157,9 +1163,9 @@ const ownerController = {
       const [bookings] = await pool.execute(query, params);
 
       res.json({
-        filename: `bookings_export_${new Date()
-          .toISOString()
-          .split("T")[0]}.json`,
+        filename: `bookings_export_${
+          new Date().toISOString().split("T")[0]
+        }.json`,
         data: bookings,
         total_records: bookings.length,
         total_revenue: bookings.reduce(

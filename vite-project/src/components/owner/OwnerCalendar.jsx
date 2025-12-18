@@ -1,33 +1,31 @@
 import React, { useState, useEffect } from "react";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
+import { ownerAPI } from "../../services/api";
 
-// Receive arenas as a prop from OwnerDashboard
 const OwnerCalendar = ({ arenas = [] }) => {
   const [selectedDate, setSelectedDate] = useState(new Date());
-  // Removed internal 'arenas' state and fetchArenas useEffect/function
   const [selectedArena, setSelectedArena] = useState("");
   const [timeSlots, setTimeSlots] = useState([]);
-  const [newSlots, setNewSlots] = useState([]);
-  const [isBlocked, setIsBlocked] = useState(false);
-  const [isHoliday, setIsHoliday] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
 
-  // Time slot templates
-  const timeSlotTemplates = [
-    { start: "06:00", end: "08:00" },
-    { start: "08:00", end: "10:00" },
-    { start: "10:00", end: "12:00" },
-    { start: "12:00", end: "14:00" },
-    { start: "14:00", end: "16:00" },
-    { start: "16:00", end: "18:00" },
-    { start: "18:00", end: "20:00" },
-    { start: "20:00", end: "22:00" },
-    { start: "22:00", end: "00:00" },
-  ];
+  // Add new slot form state
+  const [showAddSlotForm, setShowAddSlotForm] = useState(false);
+  const [newSlot, setNewSlot] = useState({
+    start_time: "05:00",
+    end_time: "06:00",
+    price: 500,
+  });
 
-  // FIX: Initialize selectedArena from the prop list
+  // Edit slot modal state
+  const [editingSlot, setEditingSlot] = useState(null);
+  const [editForm, setEditForm] = useState({
+    price: "",
+    is_blocked: false,
+  });
+
   useEffect(() => {
     if (arenas.length > 0 && !selectedArena) {
       setSelectedArena(arenas[0].arena_id);
@@ -40,147 +38,205 @@ const OwnerCalendar = ({ arenas = [] }) => {
     }
   }, [selectedDate, selectedArena]);
 
-  // Removed fetchArenas
-
   const fetchTimeSlots = async () => {
     try {
-      const token = localStorage.getItem("token");
       const dateStr = selectedDate.toISOString().split("T")[0];
-      const response = await fetch(
-        `http://localhost:5000/api/owners/arenas/${selectedArena}/slots?date=${dateStr}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-      const data = await response.json();
-      if (response.ok) {
-        setTimeSlots(data);
+      const response = await ownerAPI.getTimeSlots(selectedArena, dateStr);
 
-        // FIX: Initialize new slots more robustly against existing slots
-        const formattedDate = selectedDate.toISOString().split("T")[0];
-        const arenaBasePrice =
-          arenas.find((a) => a.arena_id == selectedArena)
-            ?.base_price_per_hour || 500;
-
-        const slots = timeSlotTemplates.map((template) => {
-          // Find existing slot data to pre-populate current status
-          const existingSlot = data.find(
-            (ts) =>
-              ts.start_time === template.start && ts.end_time === template.end
-          );
-
-          return {
-            date: formattedDate,
-            start_time: template.start,
-            end_time: template.end,
-            price: existingSlot?.price || arenaBasePrice,
-            is_blocked: existingSlot?.is_blocked_by_owner || false,
-            is_holiday: existingSlot?.is_holiday || false,
-            slot_id: existingSlot?.slot_id, // Include slot_id if exists for updating
-          };
-        });
-
-        setNewSlots(slots);
+      if (response.data && response.data.length > 0) {
+        // Use existing slots from database
+        setTimeSlots(response.data);
+      } else {
+        // Generate auto slots based on arena registration settings
+        generateAutoSlots();
       }
     } catch (error) {
       console.error("Error fetching time slots:", error);
+      generateAutoSlots();
     }
   };
 
-  const handleSlotChange = (index, field, value) => {
-    const updatedSlots = [...newSlots];
-    if (field === "price") {
-      updatedSlots[index].price = parseInt(value) || 0;
-    } else if (field === "is_blocked") {
-      updatedSlots[index].is_blocked = value;
-    } else if (field === "is_holiday") {
-      updatedSlots[index].is_holiday = value;
+  const generateAutoSlots = () => {
+    const arena = arenas.find((a) => a.arena_id == selectedArena);
+    if (!arena) return;
+
+    const openingTime = arena.opening_time || "06:00";
+    const closingTime = arena.closing_time || "22:00";
+    const slotDuration = arena.slot_duration || 60;
+    const basePrice = arena.base_price_per_hour || 500;
+
+    const slots = [];
+    let currentHour = parseInt(openingTime.split(":")[0]);
+    let currentMinute = parseInt(openingTime.split(":")[1]);
+    const endHour = parseInt(closingTime.split(":")[0]);
+    const endMinute = parseInt(closingTime.split(":")[1]);
+
+    // Generate auto slots
+    while (
+      currentHour < endHour ||
+      (currentHour === endHour && currentMinute < endMinute)
+    ) {
+      let endHourCalc = currentHour;
+      let endMinuteCalc = currentMinute + slotDuration;
+
+      while (endMinuteCalc >= 60) {
+        endHourCalc += 1;
+        endMinuteCalc -= 60;
+      }
+
+      // Stop if exceeds closing time
+      if (
+        endHourCalc > endHour ||
+        (endHourCalc === endHour && endMinuteCalc > endMinute)
+      ) {
+        break;
+      }
+
+      const startTimeStr = `${currentHour
+        .toString()
+        .padStart(2, "0")}:${currentMinute.toString().padStart(2, "0")}`;
+      const endTimeStr = `${endHourCalc
+        .toString()
+        .padStart(2, "0")}:${endMinuteCalc.toString().padStart(2, "0")}`;
+
+      slots.push({
+        start_time: startTimeStr,
+        end_time: endTimeStr,
+        price: basePrice,
+        is_blocked: false,
+        is_auto: true, // Mark as auto-generated
+        slot_id: `auto_${startTimeStr}_${endTimeStr}`,
+      });
+
+      currentHour = endHourCalc;
+      currentMinute = endMinuteCalc;
     }
-    setNewSlots(updatedSlots);
+
+    setTimeSlots(slots);
   };
 
-  const handleApplyToAll = (field, value) => {
-    const updatedSlots = newSlots.map((slot) => ({
+  const handleAddSlot = () => {
+    if (!newSlot.start_time || !newSlot.end_time) {
+      alert("Please enter start and end time");
+      return;
+    }
+
+    // Check if slot overlaps with existing slots
+    const isOverlap = timeSlots.some(
+      (slot) =>
+        (newSlot.start_time >= slot.start_time &&
+          newSlot.start_time < slot.end_time) ||
+        (newSlot.end_time > slot.start_time &&
+          newSlot.end_time <= slot.end_time) ||
+        (newSlot.start_time <= slot.start_time &&
+          newSlot.end_time >= slot.end_time)
+    );
+
+    if (isOverlap) {
+      alert("This time slot overlaps with an existing slot!");
+      return;
+    }
+
+    const newSlotObj = {
+      start_time: newSlot.start_time,
+      end_time: newSlot.end_time,
+      price: newSlot.price || 500,
+      is_blocked: false,
+      is_auto: false, // Mark as manually added
+      slot_id: `manual_${Date.now()}`,
+    };
+
+    // Add to beginning or sort by time
+    const updatedSlots = [...timeSlots, newSlotObj].sort((a, b) =>
+      a.start_time.localeCompare(b.start_time)
+    );
+
+    setTimeSlots(updatedSlots);
+    setShowAddSlotForm(false);
+    setNewSlot({ start_time: "05:00", end_time: "06:00", price: 500 });
+  };
+
+  const handleEditSlot = (slot) => {
+    setEditingSlot(slot);
+    setEditForm({
+      price: slot.price,
+      is_blocked: slot.is_blocked || false,
+    });
+  };
+
+  const handleUpdateSlot = () => {
+    if (!editingSlot) return;
+
+    const updatedSlots = timeSlots.map((slot) =>
+      slot.slot_id === editingSlot.slot_id ? { ...slot, ...editForm } : slot
+    );
+
+    setTimeSlots(updatedSlots);
+    setEditingSlot(null);
+  };
+
+  const handleDeleteSlot = (slotId) => {
+    if (!window.confirm("Are you sure you want to delete this time slot?"))
+      return;
+
+    // Don't allow deletion of auto-generated slots
+    const slotToDelete = timeSlots.find((s) => s.slot_id === slotId);
+    if (slotToDelete?.is_auto) {
+      alert(
+        "Auto-generated slots cannot be deleted. You can block them instead."
+      );
+      return;
+    }
+
+    const updatedSlots = timeSlots.filter((slot) => slot.slot_id !== slotId);
+    setTimeSlots(updatedSlots);
+  };
+
+  const handleBlockAll = () => {
+    const updatedSlots = timeSlots.map((slot) => ({
       ...slot,
-      [field]: value,
+      is_blocked: true,
     }));
-    setNewSlots(updatedSlots);
+    setTimeSlots(updatedSlots);
   };
 
-  const handleSaveSlots = async () => {
+  const handleUnblockAll = () => {
+    const updatedSlots = timeSlots.map((slot) => ({
+      ...slot,
+      is_blocked: false,
+    }));
+    setTimeSlots(updatedSlots);
+  };
+
+  const handleSaveChanges = async () => {
     if (!selectedArena) {
       alert("Please select an arena first");
       return;
     }
 
-    setLoading(true);
+    setSaving(true);
     try {
-      const token = localStorage.getItem("token");
       const dateStr = selectedDate.toISOString().split("T")[0];
-
-      // Filter slots that have changes or are marked as blocked/holiday
-      const arenaBasePrice =
-        arenas.find((a) => a.arena_id == selectedArena)?.base_price_per_hour ||
-        500;
-
-      const slotsToSave = newSlots.map((slot) => ({
-        date: slot.date,
-        start_time: slot.start_time,
-        end_time: slot.end_time,
-        price: slot.price || arenaBasePrice,
-        is_blocked: slot.is_blocked,
-        is_holiday: slot.is_holiday,
-      }));
 
       const payload = {
         date: dateStr,
-        slots: slotsToSave,
-        is_blocked: isBlocked,
-        is_holiday: isHoliday,
+        slots: timeSlots.map((slot) => ({
+          start_time: slot.start_time + ":00",
+          end_time: slot.end_time + ":00",
+          price: slot.price,
+          is_blocked: slot.is_blocked,
+          is_auto: slot.is_auto,
+        })),
       };
 
-      const response = await fetch(
-        `http://localhost:5000/api/owners/arenas/${selectedArena}/slots`,
-        {
-          method: "PUT",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(payload),
-        }
-      );
-
-      if (response.ok) {
-        setSuccessMessage("Time slots updated successfully!");
-        setTimeout(() => setSuccessMessage(""), 3000);
-        fetchTimeSlots(); // Refresh
-      } else {
-        const data = await response.json();
-        alert(data.message || "Failed to update time slots");
-      }
+      await ownerAPI.updateTimeSlots(selectedArena, payload);
+      setSuccessMessage("Time slots saved successfully!");
+      setTimeout(() => setSuccessMessage(""), 3000);
     } catch (error) {
       console.error("Error saving time slots:", error);
-      alert("An error occurred");
+      alert(error.response?.data?.message || "Failed to save time slots");
     } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSetHoliday = () => {
-    const confirm = window.confirm(
-      "Set this entire date as holiday? All time slots will be blocked."
-    );
-    if (confirm) {
-      setIsHoliday(true);
-      const updatedSlots = newSlots.map((slot) => ({
-        ...slot,
-        is_blocked: true,
-        is_holiday: true,
-      }));
-      setNewSlots(updatedSlots);
+      setSaving(false);
     }
   };
 
@@ -193,40 +249,40 @@ const OwnerCalendar = ({ arenas = [] }) => {
     });
   };
 
+  const getArenaInfo = () => {
+    return arenas.find((a) => a.arena_id == selectedArena);
+  };
+
   return (
-    <div>
+    <div className="max-w-6xl mx-auto">
       <h1 className="text-xl font-bold text-gray-900 mb-4 md:text-2xl md:mb-6">
         Calendar & Time Slot Management
       </h1>
 
       {successMessage && (
-        <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg md:p-4">
+        <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
           <div className="flex items-center">
-            <div className="flex-shrink-0">
-              <svg
-                className="h-5 w-5 text-green-400"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                  clipRule="evenodd"
-                />
-              </svg>
-            </div>
-            <div className="ml-3">
-              <p className="text-sm font-medium text-green-800">
-                {successMessage}
-              </p>
-            </div>
+            <svg
+              className="h-5 w-5 text-green-400 mr-2"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+            >
+              <path
+                fillRule="evenodd"
+                d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                clipRule="evenodd"
+              />
+            </svg>
+            <p className="text-sm font-medium text-green-800">
+              {successMessage}
+            </p>
           </div>
         </div>
       )}
 
-      {/* Arena Selection and Date Picker - Mobile optimized */}
-      <div className="bg-white p-4 rounded-xl shadow mb-4 md:p-6 md:mb-6">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3 md:gap-4">
+      {/* Arena Selection and Date Picker */}
+      <div className="bg-white p-4 rounded-xl shadow mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Select Arena
@@ -234,7 +290,7 @@ const OwnerCalendar = ({ arenas = [] }) => {
             <select
               value={selectedArena}
               onChange={(e) => setSelectedArena(e.target.value)}
-              className="w-full px-3 py-2 text-sm md:text-base border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
             >
               <option value="">Select an arena</option>
               {arenas.map((arena) => (
@@ -252,7 +308,7 @@ const OwnerCalendar = ({ arenas = [] }) => {
             <DatePicker
               selected={selectedDate}
               onChange={(date) => setSelectedDate(date)}
-              className="w-full px-3 py-2 text-sm md:text-base border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
               dateFormat="yyyy-MM-dd"
               minDate={new Date()}
             />
@@ -260,338 +316,302 @@ const OwnerCalendar = ({ arenas = [] }) => {
 
           <div className="flex items-end">
             <button
-              onClick={handleSetHoliday}
-              className="w-full px-3 py-2 text-sm md:text-base md:px-4 md:py-2 bg-red-600 text-white rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+              onClick={fetchTimeSlots}
+              className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200"
             >
-              Set as Holiday
+              Refresh Slots
             </button>
           </div>
         </div>
 
-        {/* Selected Date Info - Mobile optimized */}
-        <div className="mt-4 p-3 bg-blue-50 rounded-lg md:p-4">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between">
-            <div className="mb-2 md:mb-0">
-              <h3 className="text-sm font-medium text-blue-900 md:text-lg">
-                {formatDate(selectedDate)}
-              </h3>
-              <p className="text-xs text-blue-700 md:text-sm">
-                Managing time slots for{" "}
-                {arenas.find((a) => a.arena_id == selectedArena)?.name ||
-                  "selected arena"}
-              </p>
-            </div>
-            <div className="flex space-x-2 self-start">
-              <button
-                onClick={() => handleApplyToAll("is_blocked", true)}
-                className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 md:px-3 md:text-sm"
-              >
-                Block All
-              </button>
-              <button
-                onClick={() => handleApplyToAll("is_blocked", false)}
-                className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 md:px-3 md:text-sm"
-              >
-                Unblock All
-              </button>
+        {/* Arena Info */}
+        {selectedArena && (
+          <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="font-medium text-blue-900">
+                  {getArenaInfo()?.name}
+                </h3>
+                <p className="text-sm text-blue-700">
+                  Auto-generated slots:{" "}
+                  {getArenaInfo()?.opening_time || "06:00"} to{" "}
+                  {getArenaInfo()?.closing_time || "22:00"}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-sm text-gray-600">
+                  {formatDate(selectedDate)}
+                </p>
+                <p className="text-xs text-gray-500">
+                  {timeSlots.length} time slots
+                </p>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
 
-      {/* Time Slots Grid - Mobile optimized */}
-      <div className="bg-white rounded-xl shadow overflow-hidden">
-        <div className="p-3 border-b bg-gray-50 md:p-4">
-          <h2 className="text-sm font-medium text-gray-900 md:text-lg">
-            Time Slots for {formatDate(selectedDate)}
-          </h2>
-          <p className="text-xs text-gray-600 md:text-sm">
-            Adjust prices and availability for each time slot
-          </p>
-        </div>
-
-        {/* Desktop Table View */}
-        <div className="hidden md:block overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Time Slot
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Price (₹)
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Block Slot
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Holiday
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {newSlots.map((slot, index) => (
-                <tr
-                  key={index}
-                  className={
-                    slot.is_blocked
-                      ? "bg-red-50"
-                      : slot.is_holiday
-                      ? "bg-yellow-50"
-                      : ""
-                  }
-                >
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900">
-                      {slot.start_time} - {slot.end_time}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <input
-                      type="number"
-                      value={slot.price}
-                      onChange={(e) =>
-                        handleSlotChange(index, "price", e.target.value)
-                      }
-                      className="w-24 px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
-                      min="0"
-                    />
-                    <span className="ml-2 text-sm text-gray-500">₹/hour</span>
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <span
-                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                        ${
-                          slot.is_blocked
-                            ? "bg-red-100 text-red-800"
-                            : slot.is_holiday
-                            ? "bg-yellow-100 text-yellow-800"
-                            : "bg-green-100 text-green-800"
-                        }`}
-                    >
-                      {slot.is_blocked
-                        ? "Blocked"
-                        : slot.is_holiday
-                        ? "Holiday"
-                        : "Available"}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <input
-                      type="checkbox"
-                      checked={slot.is_blocked}
-                      onChange={(e) =>
-                        handleSlotChange(index, "is_blocked", e.target.checked)
-                      }
-                      className="h-4 w-4 text-red-600 focus:ring-red-500 border-gray-300 rounded"
-                    />
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <input
-                      type="checkbox"
-                      checked={slot.is_holiday}
-                      onChange={(e) =>
-                        handleSlotChange(index, "is_holiday", e.target.checked)
-                      }
-                      className="h-4 w-4 text-yellow-600 focus:ring-yellow-500 border-gray-300 rounded"
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Mobile Card View for Time Slots */}
-        <div className="md:hidden space-y-2 p-3">
-          {newSlots.map((slot, index) => (
-            <div
-              key={index}
-              className={`border rounded-lg p-3 ${
-                slot.is_blocked
-                  ? "bg-red-50 border-red-200"
-                  : slot.is_holiday
-                  ? "bg-yellow-50 border-yellow-200"
-                  : "bg-white border-gray-200"
-              }`}
+      {/* Time Slots Management */}
+      <div className="bg-white rounded-xl shadow overflow-hidden mb-6">
+        <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
+          <div>
+            <h2 className="text-lg font-medium text-gray-900">Time Slots</h2>
+            <p className="text-sm text-gray-600">
+              Auto-generated slots are based on your arena's operating hours
+            </p>
+          </div>
+          <div className="flex space-x-2">
+            <button
+              onClick={handleBlockAll}
+              className="px-3 py-1.5 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200"
             >
-              <div className="flex justify-between items-center mb-2">
-                <div className="font-medium text-gray-900">
-                  {slot.start_time} - {slot.end_time}
-                </div>
-                <span
-                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
-                    ${
-                      slot.is_blocked
-                        ? "bg-red-100 text-red-800"
-                        : slot.is_holiday
-                        ? "bg-yellow-100 text-yellow-800"
-                        : "bg-green-100 text-green-800"
-                    }`}
-                >
-                  {slot.is_blocked
-                    ? "Blocked"
-                    : slot.is_holiday
-                    ? "Holiday"
-                    : "Available"}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs text-gray-600 mb-1">
-                    Price (₹/hour)
-                  </label>
-                  <input
-                    type="number"
-                    value={slot.price}
-                    onChange={(e) =>
-                      handleSlotChange(index, "price", e.target.value)
-                    }
-                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    min="0"
-                  />
-                </div>
-
-                <div className="flex items-center space-x-4">
-                  <div className="flex items-center">
-                    <input
-                      type="checkbox"
-                      checked={slot.is_blocked}
-                      onChange={(e) =>
-                        handleSlotChange(index, "is_blocked", e.target.checked)
-                      }
-                      className="h-4 w-4 text-red-600 focus:ring-red-500 border-gray-300 rounded"
-                    />
-                    <label className="ml-2 text-xs text-gray-700">Block</label>
-                  </div>
-                  <div className="flex items-center">
-                    <input
-                      type="checkbox"
-                      checked={slot.is_holiday}
-                      onChange={(e) =>
-                        handleSlotChange(index, "is_holiday", e.target.checked)
-                      }
-                      className="h-4 w-4 text-yellow-600 focus:ring-yellow-500 border-gray-300 rounded"
-                    />
-                    <label className="ml-2 text-xs text-gray-700">
-                      Holiday
-                    </label>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
+              Block All
+            </button>
+            <button
+              onClick={handleUnblockAll}
+              className="px-3 py-1.5 text-sm bg-green-100 text-green-700 rounded hover:bg-green-200"
+            >
+              Unblock All
+            </button>
+          </div>
         </div>
 
-        {/* Action Buttons - Mobile optimized */}
-        <div className="p-3 border-t bg-gray-50 md:p-4">
-          <div className="flex flex-col space-y-3 md:flex-row md:justify-between md:items-center md:space-y-0">
-            <div className="flex flex-col space-y-2 md:flex-row md:items-center md:space-x-4 md:space-y-0">
-              <div className="flex items-center">
-                <div className="h-3 w-3 bg-red-100 border border-red-300 rounded mr-2"></div>
-                <span className="text-xs text-gray-600 md:text-sm">
-                  Blocked
-                </span>
+        {/* Add New Slot Form */}
+        {showAddSlotForm && (
+          <div className="p-4 border-b bg-blue-50">
+            <h3 className="font-medium text-blue-900 mb-3">
+              Add New Time Slot
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">
+                  Start Time
+                </label>
+                <input
+                  type="time"
+                  value={newSlot.start_time}
+                  onChange={(e) =>
+                    setNewSlot({ ...newSlot, start_time: e.target.value })
+                  }
+                  className="w-full px-2 py-1.5 border border-gray-300 rounded"
+                />
               </div>
-              <div className="flex items-center">
-                <div className="h-3 w-3 bg-yellow-100 border border-yellow-300 rounded mr-2"></div>
-                <span className="text-xs text-gray-600 md:text-sm">
-                  Holiday
-                </span>
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">
+                  End Time
+                </label>
+                <input
+                  type="time"
+                  value={newSlot.end_time}
+                  onChange={(e) =>
+                    setNewSlot({ ...newSlot, end_time: e.target.value })
+                  }
+                  className="w-full px-2 py-1.5 border border-gray-300 rounded"
+                />
               </div>
-              <div className="flex items-center">
-                <div className="h-3 w-3 bg-green-100 border border-green-300 rounded mr-2"></div>
-                <span className="text-xs text-gray-600 md:text-sm">
-                  Available
-                </span>
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">
+                  Price (₹)
+                </label>
+                <input
+                  type="number"
+                  value={newSlot.price}
+                  onChange={(e) =>
+                    setNewSlot({ ...newSlot, price: e.target.value })
+                  }
+                  className="w-full px-2 py-1.5 border border-gray-300 rounded"
+                  min="0"
+                />
+              </div>
+              <div className="flex items-end space-x-2">
+                <button
+                  onClick={handleAddSlot}
+                  className="px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700"
+                >
+                  Add Slot
+                </button>
+                <button
+                  onClick={() => setShowAddSlotForm(false)}
+                  className="px-4 py-1.5 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+                >
+                  Cancel
+                </button>
               </div>
             </div>
-            <div className="flex flex-col space-y-2 md:flex-row md:space-x-3 md:space-y-0">
-              <button
-                onClick={() =>
-                  setNewSlots(
-                    timeSlotTemplates.map((t) => ({
-                      ...t,
-                      date: selectedDate.toISOString().split("T")[0],
-                      price:
-                        arenas.find((a) => a.arena_id == selectedArena)
-                          ?.base_price_per_hour || 500,
-                      is_blocked: false,
-                      is_holiday: false,
-                    }))
-                  )
-                }
-                className="px-3 py-2 text-sm border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 md:px-4"
-                disabled={loading}
-              >
-                Reset
-              </button>
-              <button
-                onClick={handleSaveSlots}
-                disabled={loading || !selectedArena}
-                className={`px-3 py-2 text-sm rounded-md text-white md:px-4 ${
-                  loading || !selectedArena
-                    ? "bg-blue-400 cursor-not-allowed"
-                    : "bg-blue-600 hover:bg-blue-700"
+          </div>
+        )}
+
+        {/* Time Slots List */}
+        <div className="divide-y">
+          {timeSlots.length === 0 ? (
+            <div className="p-8 text-center text-gray-500">
+              No time slots found. Click "Refresh Slots" to generate auto slots.
+            </div>
+          ) : (
+            timeSlots.map((slot) => (
+              <div
+                key={slot.slot_id}
+                className={`p-4 flex justify-between items-center ${
+                  slot.is_blocked ? "bg-red-50" : ""
                 }`}
               >
-                {loading ? (
-                  <>
-                    <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></span>
-                    Saving...
-                  </>
-                ) : (
-                  "Save Changes"
-                )}
-              </button>
+                <div className="flex-1">
+                  <div className="flex items-center space-x-3">
+                    <span className="font-medium">
+                      {slot.start_time} - {slot.end_time}
+                    </span>
+                    {slot.is_auto && (
+                      <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-800 rounded">
+                        Auto
+                      </span>
+                    )}
+                    {!slot.is_auto && (
+                      <span className="px-2 py-0.5 text-xs bg-green-100 text-green-800 rounded">
+                        Manual
+                      </span>
+                    )}
+                    {slot.is_blocked && (
+                      <span className="px-2 py-0.5 text-xs bg-red-100 text-red-800 rounded">
+                        Blocked
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1 text-sm text-gray-600">
+                    ₹{slot.price} per hour
+                  </div>
+                </div>
+
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => handleEditSlot(slot)}
+                    className="px-3 py-1 text-sm bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+                  >
+                    Edit
+                  </button>
+                  {!slot.is_auto && (
+                    <button
+                      onClick={() => handleDeleteSlot(slot.slot_id)}
+                      className="px-3 py-1 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200"
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Add Slot Button */}
+        <div className="p-4 border-t">
+          <button
+            onClick={() => setShowAddSlotForm(true)}
+            className="w-full py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50"
+          >
+            + Add Custom Time Slot
+          </button>
+        </div>
+      </div>
+
+      {/* Action Buttons */}
+      <div className="bg-white p-4 rounded-xl shadow">
+        <div className="flex flex-col md:flex-row justify-between space-y-3 md:space-y-0">
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center">
+              <div className="h-3 w-3 bg-red-100 border border-red-300 rounded mr-2"></div>
+              <span className="text-sm text-gray-600">Blocked Slot</span>
             </div>
+            <div className="flex items-center">
+              <div className="h-3 w-3 bg-blue-100 border border-blue-300 rounded mr-2"></div>
+              <span className="text-sm text-gray-600">Auto-generated</span>
+            </div>
+            <div className="flex items-center">
+              <div className="h-3 w-3 bg-green-100 border border-green-300 rounded mr-2"></div>
+              <span className="text-sm text-gray-600">Manual Slot</span>
+            </div>
+          </div>
+
+          <div className="flex space-x-3">
+            <button
+              onClick={handleSaveChanges}
+              disabled={saving || !selectedArena}
+              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-300"
+            >
+              {saving ? "Saving..." : "Save Changes"}
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Legend - Mobile optimized */}
-      <div className="mt-4 p-3 bg-gray-50 rounded-lg md:mt-6 md:p-4">
-        <h3 className="text-sm font-medium text-gray-900 mb-2">
-          Quick Actions
-        </h3>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3 md:gap-4">
-          <button
-            onClick={() => handleApplyToAll("is_blocked", true)}
-            className="p-3 text-sm bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 text-left"
-          >
-            <div className="font-medium text-red-700">Block All Slots</div>
-            <div className="text-xs text-red-600 md:text-sm">
-              Mark all time slots as unavailable
+      {/* Edit Slot Modal */}
+      {editingSlot && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white w-full max-w-md rounded-xl shadow-lg">
+            <div className="p-4 border-b flex justify-between items-center">
+              <h3 className="font-medium text-gray-900">
+                Edit Time Slot: {editingSlot.start_time} -{" "}
+                {editingSlot.end_time}
+              </h3>
+              <button
+                onClick={() => setEditingSlot(null)}
+                className="text-gray-400 hover:text-gray-600 text-xl"
+              >
+                ×
+              </button>
             </div>
-          </button>
-          <button
-            onClick={() => handleApplyToAll("is_blocked", false)}
-            className="p-3 text-sm bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 text-left"
-          >
-            <div className="font-medium text-green-700">Open All Slots</div>
-            <div className="text-xs text-green-600 md:text-sm">
-              Mark all time slots as available
+
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Price (₹ per hour)
+                </label>
+                <input
+                  type="number"
+                  value={editForm.price}
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, price: e.target.value })
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  min="0"
+                />
+              </div>
+
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  checked={editForm.is_blocked}
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, is_blocked: e.target.checked })
+                  }
+                  className="h-4 w-4 text-red-600 rounded"
+                  id="blockSlot"
+                />
+                <label
+                  htmlFor="blockSlot"
+                  className="ml-2 text-sm text-gray-700"
+                >
+                  Block this time slot (make it unavailable)
+                </label>
+              </div>
+
+              <div className="flex justify-end space-x-3 pt-4">
+                <button
+                  onClick={() => setEditingSlot(null)}
+                  className="px-4 py-2 text-gray-700 hover:text-gray-900"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleUpdateSlot}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                >
+                  Update Slot
+                </button>
+              </div>
             </div>
-          </button>
-          <button
-            onClick={() => {
-              setIsHoliday(true);
-              handleApplyToAll("is_holiday", true);
-              handleApplyToAll("is_blocked", true);
-            }}
-            className="p-3 text-sm bg-yellow-50 border border-yellow-200 rounded-lg hover:bg-yellow-100 text-left"
-          >
-            <div className="font-medium text-yellow-700">Set as Holiday</div>
-            <div className="text-xs text-yellow-600 md:text-sm">
-              Block all slots and mark as holiday
-            </div>
-          </button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

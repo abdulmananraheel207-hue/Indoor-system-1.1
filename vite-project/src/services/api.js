@@ -60,13 +60,6 @@ export const authAPI = {
 };
 
 // Add these to your existing api.js
-export const tournamentAPI = {
-  createTournament: (data) => API.post("/user/tournaments", data),
-  getTournaments: () => API.get("/user/tournaments"),
-  getTournamentDetails: (tournamentId) =>
-    API.get(`/user/tournaments/${tournamentId}`),
-};
-
 export const reviewAPI = {
   submitReview: (arenaId, data) => API.post(`/arenas/${arenaId}/reviews`, data),
   getReviews: (arenaId) => API.get(`/arenas/${arenaId}/reviews`),
@@ -76,6 +69,41 @@ export const chatAPI = {
   getMessages: (bookingId) => API.get(`/bookings/${bookingId}/messages`),
   sendMessage: (bookingId, data) =>
     API.post(`/bookings/${bookingId}/messages`, data),
+};
+
+export const ownerAPI = {
+  // Dashboard & Profile
+  getDashboard: (params) => API.get("/owners/dashboard", { params }),
+  getProfile: () => API.get("/owners/profile"),
+  updateProfile: (data) => API.put("/owners/profile", data),
+
+  // Managers
+  getManagers: () => API.get("/owners/managers"),
+  addManager: (data) => API.post("/owners/managers", data),
+  updateManager: (managerId, data) =>
+    API.put(`/owners/managers/${managerId}`, data),
+
+  // Bookings
+  getOwnerBookings: (params) => API.get("/owners/bookings", { params }),
+  acceptBooking: (bookingId) =>
+    API.post(`/owners/bookings/${bookingId}/accept`),
+  rejectBooking: (bookingId, data) =>
+    API.post(`/owners/bookings/${bookingId}/reject`, data),
+
+  // Arena & Court Management
+  getCourts: (arenaId) => API.get(`/arenas/${arenaId}/courts`),
+  updateArena: (arenaId, data) => API.put(`/owners/arenas/${arenaId}`, data),
+  uploadCourtPhotos: (courtId, data) =>
+    API.post(`/owners/courts/${courtId}/photos`, data),
+  updateCourt: (courtId, data) => API.put(`/owners/courts/${courtId}`, data),
+
+  // Time Slots
+  getTimeSlots: (arenaId, date) =>
+    API.get(`/arenas/${arenaId}/slots`, { params: { date } }),
+
+  // MODIFIED: Now includes apply_to_future parameter
+  updateTimeSlots: (arenaId, data) =>
+    API.put(`/owners/arenas/${arenaId}/slots`, data),
 };
 
 export default API;

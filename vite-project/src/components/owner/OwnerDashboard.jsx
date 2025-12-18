@@ -5,13 +5,14 @@ import OwnerBookings from "./OwnerBookings";
 import OwnerCalendar from "./OwnerCalendar";
 import OwnerManagers from "./OwnerManagers";
 import OwnerProfile from "./OwnerProfile";
+import OwnerArenaSettings from "./OwnerArenaSettings"; // Add this import
 
 const OwnerDashboard = () => {
   const navigate = useNavigate();
   const [currentTab, setCurrentTab] = useState("home");
   const [ownerData, setOwnerData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false); // New state for mobile menu
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     fetchOwnerData();
@@ -176,6 +177,19 @@ const OwnerDashboard = () => {
                 </button>
                 <button
                   onClick={() => {
+                    setCurrentTab("arenasettings");
+                    setMobileMenuOpen(false);
+                  }}
+                  className={`px-3 py-2.5 rounded-lg text-left ${
+                    currentTab === "arenasettings"
+                      ? "bg-blue-100 text-blue-700"
+                      : "text-gray-700 hover:bg-gray-100"
+                  }`}
+                >
+                  Arena Settings
+                </button>
+                <button
+                  onClick={() => {
                     setCurrentTab("managers");
                     setMobileMenuOpen(false);
                   }}
@@ -242,6 +256,16 @@ const OwnerDashboard = () => {
               Calendar
             </button>
             <button
+              onClick={() => setCurrentTab("arenasettings")}
+              className={`px-3 py-2 rounded-lg text-sm ${
+                currentTab === "arenasettings"
+                  ? "bg-blue-100 text-blue-700"
+                  : "text-gray-700 hover:bg-gray-100"
+              }`}
+            >
+              Arena Settings
+            </button>
+            <button
               onClick={() => setCurrentTab("managers")}
               className={`px-3 py-2 rounded-lg text-sm ${
                 currentTab === "managers"
@@ -271,6 +295,9 @@ const OwnerDashboard = () => {
         {currentTab === "bookings" && <OwnerBookings />}
         {currentTab === "calendar" && (
           <OwnerCalendar arenas={ownerData.arenas} />
+        )}
+        {currentTab === "arenasettings" && (
+          <OwnerArenaSettings dashboardData={ownerData} />
         )}
         {currentTab === "managers" && <OwnerManagers />}
         {currentTab === "profile" && <OwnerProfile dashboardData={ownerData} />}
