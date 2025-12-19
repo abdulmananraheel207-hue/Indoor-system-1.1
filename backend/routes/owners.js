@@ -31,6 +31,12 @@ router.post("/arenas", ownerController.createArena);
 router.put("/arenas/:arena_id", ownerController.updateArena);
 router.put("/arenas/:arena_id/slots", ownerController.manageTimeSlots);
 
+// Court management routes
+router.get("/arenas/:arena_id/courts", ownerController.getCourts);
+router.post("/arenas/:arena_id/courts", ownerController.addCourt);
+router.put("/courts/:court_id", ownerController.updateCourt);
+router.delete("/courts/:court_id/photos", ownerController.deleteCourtPhoto);
+
 // Booking management
 router.get("/bookings", ownerController.getBookingRequests);
 router.get("/bookings/stats", ownerController.getBookingStats);

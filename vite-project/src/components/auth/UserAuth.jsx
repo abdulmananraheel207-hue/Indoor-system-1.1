@@ -18,7 +18,6 @@ const UserAuth = ({ onLogin }) => {
     });
   };
 
-  // In UserAuth.jsx, replace the handleSubmit function:
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -32,16 +31,16 @@ const UserAuth = ({ onLogin }) => {
 
       const payload = isLogin
         ? {
-            email: formData.email,
-            password: formData.password,
-            userType: "user", // IMPORTANT: Your backend expects this!
-          }
+          email: formData.email,
+          password: formData.password,
+          userType: "user", // IMPORTANT: Your backend expects this!
+        }
         : {
-            name: formData.name,
-            email: formData.email,
-            password: formData.password,
-            phone_number: formData.phone, // Note: backend expects phone_number, not phone
-          };
+          name: formData.name,
+          email: formData.email,
+          password: formData.password,
+          phone_number: formData.phone, // Note: backend expects phone_number, not phone
+        };
 
       const response = await fetch(endpoint, {
         method: "POST",
@@ -61,12 +60,26 @@ const UserAuth = ({ onLogin }) => {
           localStorage.setItem("userData", JSON.stringify(data.user));
         }
 
-        // Call the onLogin prop when login is successful
-        if (onLogin) {
-          onLogin();
-        }
-
         // Show success message
+        alert(isLogin ? "Login successful!" : "Registration successful!");
+
+        // Determine where to redirect based on user role
+        const userRole = data.user?.role || "user";
+
+        // Add a small delay for better UX
+        setTimeout(() => {
+          if (onLogin) {
+            onLogin(); // This should trigger parent component to update
+          }
+
+          // Force redirect based on role
+          if (userRole === "owner") {
+            window.location.href = "/owner-dashboard"; // Redirect to owner dashboard
+          } else {
+            window.location.href = "/user-dashboard"; // Redirect to user dashboard
+          }
+        }, 1000);
+
       } else {
         // Show error message from backend
         alert(data.message || `Failed to ${isLogin ? "login" : "register"}.`);
@@ -269,11 +282,10 @@ const UserAuth = ({ onLogin }) => {
             <button
               type="submit"
               disabled={loading}
-              className={`group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white ${
-                loading
-                  ? "bg-blue-400 cursor-not-allowed"
-                  : "bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-              } transition-colors duration-200`}
+              className={`group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white ${loading
+                ? "bg-blue-400 cursor-not-allowed"
+                : "bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                } transition-colors duration-200`}
             >
               {loading ? (
                 <>

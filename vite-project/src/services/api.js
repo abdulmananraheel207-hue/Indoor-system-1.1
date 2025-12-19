@@ -91,17 +91,18 @@ export const ownerAPI = {
     API.post(`/owners/bookings/${bookingId}/reject`, data),
 
   // Arena & Court Management
-  getCourts: (arenaId) => API.get(`/arenas/${arenaId}/courts`),
+  // FIX THIS LINE: Change from /arenas/ to /owners/arenas/
+  getCourts: (arenaId) => API.get(`/owners/arenas/${arenaId}/courts`), // FIXED!
   updateArena: (arenaId, data) => API.put(`/owners/arenas/${arenaId}`, data),
   uploadCourtPhotos: (courtId, data) =>
     API.post(`/owners/courts/${courtId}/photos`, data),
-  updateCourt: (courtId, data) => API.put(`/owners/courts/${courtId}`, data),
+  updateCourt: (courtId, data) => API.put(`/owners/courts/${courtId}`, data), // This is correct
+  addCourt: (arenaId, data) => API.post(`/owners/arenas/${arenaId}/courts`, data), // This is correct
+  deleteCourtPhoto: (courtId, data) => API.delete(`/owners/courts/${courtId}/photos`, { data }), // This is correct
 
   // Time Slots
   getTimeSlots: (arenaId, date) =>
     API.get(`/arenas/${arenaId}/slots`, { params: { date } }),
-
-  // MODIFIED: Now includes apply_to_future parameter
   updateTimeSlots: (arenaId, data) =>
     API.put(`/owners/arenas/${arenaId}/slots`, data),
 };

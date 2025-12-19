@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -16,11 +16,7 @@ import UserTeams from "./components/user/UserTeams";
 import UserBooking from "./components/user/UserBooking";
 import UserProfile from "./components/user/UserProfile";
 import OwnerDashboard from "./components/owner/OwnerDashboard";
-
-// Import the new OwnerRegistration component
 import OwnerRegistration from "./components/owner/OwnerRegistration";
-
-// Import Admin Components
 import AdminDashboard from "./components/admin/AdminDashboard";
 import ArenasManagement from "./components/admin/ArenasManagement";
 import UsersManagement from "./components/admin/UsersManagement";
@@ -28,11 +24,7 @@ import OwnersManagement from "./components/admin/OwnersManagement";
 import FinancialReports from "./components/admin/FinancialReports";
 import CommissionPayments from "./components/admin/CommisionPayments";
 import AdminLayout from "./components/admin/AdminLayout";
-
-// Import Manager Components
 import ManagerDashboard from "./components/manager/ManagerDashboard";
-
-// Import new User Components
 import UserArenaDetails from "./components/user/UserArenaDetails";
 import UserBookingChat from "./components/user/UserBookingChat";
 
@@ -45,98 +37,159 @@ const TEST_ADMIN = {
   role: "admin",
 };
 
-// Helper function to check authentication status
-const getInitialAuthStatus = (role) => {
-  const token = localStorage.getItem("token");
-  const userRole = localStorage.getItem("userRole");
+// Custom hook to check authentication status
+const useAuth = () => {
+  const [authState, setAuthState] = useState({
+    isAuthenticated: false,
+    userRole: null,
+    isLoading: true,
+  });
 
-  // Check for admin separately
-  if (role === "admin") {
-    return !!localStorage.getItem("adminToken");
-  }
+  useEffect(() => {
+    checkAuthStatus();
 
-  // Check for regular roles
-  return !!token && userRole === role;
+    // Listen for storage changes (like when login happens in another tab)
+    const handleStorageChange = () => {
+      checkAuthStatus();
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+
+    // Also check on focus
+    window.addEventListener('focus', checkAuthStatus);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('focus', checkAuthStatus);
+    };
+  }, []);
+
+  const checkAuthStatus = () => {
+    const token = localStorage.getItem("token");
+    const userRole = localStorage.getItem("userRole");
+    const adminToken = localStorage.getItem("adminToken");
+
+    if (adminToken) {
+      setAuthState({
+        isAuthenticated: true,
+        userRole: "admin",
+        isLoading: false,
+      });
+    } else if (token && userRole) {
+      setAuthState({
+        isAuthenticated: true,
+        userRole,
+        isLoading: false,
+      });
+    } else {
+      setAuthState({
+        isAuthenticated: false,
+        userRole: null,
+        isLoading: false,
+      });
+    }
+  };
+
+  const login = (token, role, userData = null) => {
+    localStorage.setItem("token", token);
+    localStorage.setItem("userRole", role);
+    if (userData) {
+      localStorage.setItem("userData", JSON.stringify(userData));
+    }
+    checkAuthStatus();
+  };
+
+  const logout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("userRole");
+    localStorage.removeItem("userData");
+    localStorage.removeItem("ownerData");
+    localStorage.removeItem("managerData");
+    setAuthState({
+      isAuthenticated: false,
+      userRole: null,
+      isLoading: false,
+    });
+  };
+
+  const adminLogin = (token) => {
+    localStorage.setItem("adminToken", token);
+    localStorage.setItem("userRole", "admin");
+    checkAuthStatus();
+  };
+
+  const adminLogout = () => {
+    localStorage.removeItem("adminToken");
+    localStorage.removeItem("userRole");
+    setAuthState({
+      isAuthenticated: false,
+      userRole: null,
+      isLoading: false,
+    });
+  };
+
+  return {
+    ...authState,
+    login,
+    logout,
+    adminLogin,
+    adminLogout,
+    checkAuthStatus,
+  };
 };
 
 function App() {
-  const [loggedIn, setLoggedIn] = useState(!!localStorage.getItem("token"));
-  const [adminAuthenticated, setAdminAuthenticated] = useState(
-    !!localStorage.getItem("adminToken")
-  );
+  const auth = useAuth();
 
-  // Admin login handler
-  const handleAdminLogin = (credentials) => {
-    // Simple test authentication
-    if (
-      credentials.username === TEST_ADMIN.username &&
-      credentials.password === TEST_ADMIN.password
-    ) {
-      localStorage.setItem("adminToken", "test-token-123");
-      localStorage.setItem("adminUser", JSON.stringify(TEST_ADMIN));
-      localStorage.setItem("userRole", "admin");
-      setAdminAuthenticated(true);
-      return true;
-    }
-    return false;
-  };
-
-  // Admin logout handler
-  const handleAdminLogout = () => {
-    localStorage.removeItem("adminToken");
-    localStorage.removeItem("adminUser");
-    localStorage.removeItem("userRole");
-    setAdminAuthenticated(false);
-  };
-
-  // General logout handler for all roles except admin
-  const handleGeneralLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("userRole");
-    localStorage.removeItem("ownerData");
-    localStorage.removeItem("managerData");
-    setLoggedIn(false);
-  };
-
-  //user auth wrapper
+  // User auth wrapper
   const UserAuthWrapper = () => {
     const navigate = useNavigate();
 
-    const handleLogin = () => {
-      // Use callback to ensure state is updated before navigation
-      setLoggedIn((prev) => {
-        navigate("/user/dashboard");
-        return true;
-      });
+    const handleLogin = (token, userData) => {
+      // Determine role from response or default to 'user'
+      const role = userData?.role || "user";
+      auth.login(token, role, userData);
+
+      // Small delay to ensure state updates
+      setTimeout(() => {
+        if (role === "owner") {
+          navigate("/owner/dashboard");
+        } else if (role === "manager") {
+          navigate("/manager/dashboard");
+        } else {
+          navigate("/user/dashboard");
+        }
+      }, 50);
     };
 
     return <UserAuth onLogin={handleLogin} />;
   };
 
-  // Owner auth wrapper - updated to handle registration
+  // Owner auth wrapper
   const OwnerAuthWrapper = () => {
     const navigate = useNavigate();
 
     const handleLogin = (token, ownerData) => {
-      setLoggedIn(true);
+      auth.login(token, "owner", ownerData);
+
       setTimeout(() => {
         navigate("/owner/dashboard");
-      }, 100);
+      }, 50);
     };
 
     return <OwnerAuth onLogin={handleLogin} />;
   };
 
-  // App.jsx - Update ManagerAuthWrapper:
-
+  // Manager auth wrapper
   const ManagerAuthWrapper = () => {
     const navigate = useNavigate();
 
-    const handleLogin = () => {
-      setLoggedIn((prev) => {
+    const handleLogin = (token, managerData) => {
+      auth.login(token, "manager", managerData);
+
+      setTimeout(() => {
         navigate("/manager/dashboard");
-        return true;
-      });
+      }, 50);
     };
 
     return <ManagerAuth onLogin={handleLogin} />;
@@ -147,11 +200,18 @@ function App() {
     const navigate = useNavigate();
 
     const handleLogin = (credentials) => {
-      const success = handleAdminLogin(credentials);
-      if (success) {
-        navigate("/admin/dashboard");
+      // Simple test authentication
+      if (
+        credentials.username === TEST_ADMIN.username &&
+        credentials.password === TEST_ADMIN.password
+      ) {
+        auth.adminLogin("test-token-123");
+        setTimeout(() => {
+          navigate("/admin/dashboard");
+        }, 50);
+        return true;
       }
-      return success;
+      return false;
     };
 
     return <AdminAuth onLogin={handleLogin} />;
@@ -162,22 +222,148 @@ function App() {
     const navigate = useNavigate();
 
     const handleLogin = () => {
-      setLoggedIn(true);
-      navigate("/user/dashboard");
+      // Guest login - create a temporary token
+      const tempToken = "guest-" + Date.now();
+      auth.login(tempToken, "guest");
+
+      setTimeout(() => {
+        navigate("/user/dashboard");
+      }, 50);
     };
 
     return <GuestAuth onLogin={handleLogin} />;
   };
 
-  // Admin Protected Route Component
-  const AdminProtectedRoute = ({ children }) => {
-    if (!adminAuthenticated) {
-      return <Navigate to="/auth/admin" />;
+  // Protected Route Component
+  const ProtectedRoute = ({ children, requiredRole }) => {
+    if (auth.isLoading) {
+      return <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading...</p>
+        </div>
+      </div>;
     }
+
+    if (!auth.isAuthenticated) {
+      return <Navigate to="/" />;
+    }
+
+    if (requiredRole && auth.userRole !== requiredRole) {
+      // Redirect to appropriate dashboard based on actual role
+      if (auth.userRole === "owner") {
+        return <Navigate to="/owner/dashboard" />;
+      } else if (auth.userRole === "manager") {
+        return <Navigate to="/manager/dashboard" />;
+      } else if (auth.userRole === "admin") {
+        return <Navigate to="/admin/dashboard" />;
+      } else {
+        return <Navigate to="/user/dashboard" />;
+      }
+    }
+
     return children;
   };
 
-  // Login Selection Component - Updated with new registration option
+  // Admin Layout Wrapper
+  const AdminWrapper = () => {
+    return (
+      <AdminLayout onLogout={auth.adminLogout}>
+        <Routes>
+          <Route index element={<Navigate to="dashboard" />} />
+          <Route path="dashboard" element={<AdminDashboard />} />
+          <Route path="arenas" element={<ArenasManagement />} />
+          <Route path="users" element={<UsersManagement />} />
+          <Route path="owners" element={<OwnersManagement />} />
+          <Route path="financial-reports" element={<FinancialReports />} />
+          <Route path="commission-payments" element={<CommissionPayments />} />
+        </Routes>
+      </AdminLayout>
+    );
+  };
+
+  // User Dashboard Layout
+  const UserDashboard = () => {
+    const navigate = useNavigate();
+    const [currentTab, setCurrentTab] = useState("home");
+
+    const handleLogout = () => {
+      auth.logout();
+      navigate("/");
+    };
+
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <header className="bg-white shadow-sm">
+          <div className="max-w-7xl mx-auto px-4 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <button
+                  onClick={() => navigate("/")}
+                  className="text-xl font-bold text-gray-900"
+                >
+                  ArenaFinder Pro
+                </button>
+                <div className="ml-8 flex space-x-4">
+                  <button
+                    onClick={() => setCurrentTab("home")}
+                    className={`px-3 py-2 rounded-lg ${currentTab === "home"
+                        ? "bg-blue-100 text-blue-700"
+                        : "text-gray-700 hover:bg-gray-100"
+                      }`}
+                  >
+                    Home
+                  </button>
+                  <button
+                    onClick={() => setCurrentTab("teams")}
+                    className={`px-3 py-2 rounded-lg ${currentTab === "teams"
+                        ? "bg-blue-100 text-blue-700"
+                        : "text-gray-700 hover:bg-gray-100"
+                      }`}
+                  >
+                    Teams
+                  </button>
+                  <button
+                    onClick={() => setCurrentTab("booking")}
+                    className={`px-3 py-2 rounded-lg ${currentTab === "booking"
+                        ? "bg-blue-100 text-blue-700"
+                        : "text-gray-700 hover:bg-gray-100"
+                      }`}
+                  >
+                    Booking
+                  </button>
+                  <button
+                    onClick={() => setCurrentTab("profile")}
+                    className={`px-3 py-2 rounded-lg ${currentTab === "profile"
+                        ? "bg-blue-100 text-blue-700"
+                        : "text-gray-700 hover:bg-gray-100"
+                      }`}
+                  >
+                    Profile
+                  </button>
+                </div>
+              </div>
+              <button
+                onClick={handleLogout}
+                className="px-4 py-2 text-gray-600 hover:text-gray-900"
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <main>
+          {currentTab === "home" && <UserHome />}
+          {currentTab === "teams" && <UserTeams />}
+          {currentTab === "booking" && <UserBooking />}
+          {currentTab === "profile" && <UserProfile />}
+        </main>
+      </div>
+    );
+  };
+
+  // Login Selection Component
   const LoginSelection = () => {
     const navigate = useNavigate();
 
@@ -361,110 +547,6 @@ function App() {
     );
   };
 
-  // User Dashboard Layout
-  const UserDashboard = () => {
-    const navigate = useNavigate();
-    const [currentTab, setCurrentTab] = useState("home");
-
-    const handleLogout = () => {
-      handleGeneralLogout();
-      navigate("/");
-    };
-
-    return (
-      <div className="min-h-screen bg-gray-50">
-        {/* Simple Header */}
-        <header className="bg-white shadow-sm">
-          <div className="max-w-7xl mx-auto px-4 py-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                <button
-                  onClick={() => navigate("/")}
-                  className="text-xl font-bold text-gray-900"
-                >
-                  ArenaFinder Pro
-                </button>
-                <div className="ml-8 flex space-x-4">
-                  <button
-                    onClick={() => setCurrentTab("home")}
-                    className={`px-3 py-2 rounded-lg ${
-                      currentTab === "home"
-                        ? "bg-blue-100 text-blue-700"
-                        : "text-gray-700 hover:bg-gray-100"
-                    }`}
-                  >
-                    Home
-                  </button>
-                  <button
-                    onClick={() => setCurrentTab("teams")}
-                    className={`px-3 py-2 rounded-lg ${
-                      currentTab === "teams"
-                        ? "bg-blue-100 text-blue-700"
-                        : "text-gray-700 hover:bg-gray-100"
-                    }`}
-                  >
-                    Teams
-                  </button>
-                  <button
-                    onClick={() => setCurrentTab("booking")}
-                    className={`px-3 py-2 rounded-lg ${
-                      currentTab === "booking"
-                        ? "bg-blue-100 text-blue-700"
-                        : "text-gray-700 hover:bg-gray-100"
-                    }`}
-                  >
-                    Booking
-                  </button>
-                  <button
-                    onClick={() => setCurrentTab("profile")}
-                    className={`px-3 py-2 rounded-lg ${
-                      currentTab === "profile"
-                        ? "bg-blue-100 text-blue-700"
-                        : "text-gray-700 hover:bg-gray-100"
-                    }`}
-                  >
-                    Profile
-                  </button>
-                </div>
-              </div>
-              <button
-                onClick={handleLogout}
-                className="px-4 py-2 text-gray-600 hover:text-gray-900"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
-        </header>
-
-        {/* Main Content */}
-        <main>
-          {currentTab === "home" && <UserHome />}
-          {currentTab === "teams" && <UserTeams />}
-          {currentTab === "booking" && <UserBooking />}
-          {currentTab === "profile" && <UserProfile />}
-        </main>
-      </div>
-    );
-  };
-
-  // Admin Layout Wrapper
-  const AdminWrapper = () => {
-    return (
-      <AdminLayout onLogout={handleAdminLogout}>
-        <Routes>
-          <Route index element={<Navigate to="dashboard" />} />
-          <Route path="dashboard" element={<AdminDashboard />} />
-          <Route path="arenas" element={<ArenasManagement />} />
-          <Route path="users" element={<UsersManagement />} />
-          <Route path="owners" element={<OwnersManagement />} />
-          <Route path="financial-reports" element={<FinancialReports />} />
-          <Route path="commission-payments" element={<CommissionPayments />} />
-        </Routes>
-      </AdminLayout>
-    );
-  };
-
   return (
     <Router>
       <Routes>
@@ -475,41 +557,33 @@ function App() {
         <Route path="/auth/admin" element={<AdminAuthWrapper />} />
         <Route path="/auth/manager" element={<ManagerAuthWrapper />} />
         <Route path="/auth/guest" element={<GuestAuthWrapper />} />
-
-        {/* New Owner Registration Route */}
         <Route path="/owner/register" element={<OwnerRegistration />} />
 
         {/* Protected User Routes */}
         <Route
           path="/user/dashboard"
           element={
-            getInitialAuthStatus("user") ? (
+            <ProtectedRoute requiredRole="user">
               <UserDashboard />
-            ) : (
-              <Navigate to="/" />
-            )
+            </ProtectedRoute>
           }
         />
 
-        {/* New User Routes */}
         <Route
           path="/user/arenas/:arenaId"
           element={
-            getInitialAuthStatus("user") ? (
+            <ProtectedRoute requiredRole="user">
               <UserArenaDetails />
-            ) : (
-              <Navigate to="/" />
-            )
+            </ProtectedRoute>
           }
         />
+
         <Route
           path="/user/bookings/:bookingId/chat"
           element={
-            getInitialAuthStatus("user") ? (
+            <ProtectedRoute requiredRole="user">
               <UserBookingChat />
-            ) : (
-              <Navigate to="/" />
-            )
+            </ProtectedRoute>
           }
         />
 
@@ -517,11 +591,9 @@ function App() {
         <Route
           path="/owner/dashboard"
           element={
-            getInitialAuthStatus("owner") ? (
+            <ProtectedRoute requiredRole="owner">
               <OwnerDashboard />
-            ) : (
-              <Navigate to="/auth/owner" />
-            )
+            </ProtectedRoute>
           }
         />
 
@@ -529,11 +601,9 @@ function App() {
         <Route
           path="/manager/dashboard"
           element={
-            getInitialAuthStatus("manager") ? (
+            <ProtectedRoute requiredRole="manager">
               <ManagerDashboard />
-            ) : (
-              <Navigate to="/auth/manager" />
-            )
+            </ProtectedRoute>
           }
         />
 
@@ -541,11 +611,9 @@ function App() {
         <Route
           path="/admin/*"
           element={
-            adminAuthenticated ? (
+            <ProtectedRoute requiredRole="admin">
               <AdminWrapper />
-            ) : (
-              <Navigate to="/auth/admin" />
-            )
+            </ProtectedRoute>
           }
         />
 

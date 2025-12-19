@@ -194,8 +194,8 @@ const ownerController = {
               court.court_name || `Court ${court.court_number || 1}`,
               parseFloat(court.size_sqft) || 2000,
               parseFloat(court.price_per_hour) ||
-                parseFloat(base_price_per_hour) ||
-                500,
+              parseFloat(base_price_per_hour) ||
+              500,
               court.description || "",
             ]
           );
@@ -734,6 +734,272 @@ const ownerController = {
     }
   },
 
+  // Get courts for an arena
+  getCourts: async (req, res) => {
+    try {
+      const { arena_id } = req.params;
+
+      // Verify owner owns this arena
+      const [arenaCheck] = await pool.execute(
+        "SELECT arena_id FROM arenas WHERE arena_id = ? AND owner_id = ?",
+        [arena_id, req.user.id]
+      );
+
+      if (arenaCheck.length === 0) {
+        return res.status(404).json({ message: "Arena not found or access denied" });
+      }
+
+      // Get all courts with their sports and images
+      const [courts] = await pool.execute(
+        `SELECT 
+        cd.*,
+        GROUP_CONCAT(DISTINCT cs.sport_id) as sports,
+        GROUP_CONCAT(DISTINCT st.name) as sports_names,
+        (SELECT image_url FROM court_images WHERE court_id = cd.court_id AND is_primary = TRUE LIMIT 1) as primary_image,
+        GROUP_CONCAT(DISTINCT ci.image_url) as additional_images
+      FROM court_details cd
+      LEFT JOIN court_sports cs ON cd.court_id = cs.court_id
+      LEFT JOIN sports_types st ON cs.sport_id = st.sport_id
+      LEFT JOIN court_images ci ON cd.court_id = ci.court_id AND ci.is_primary = FALSE
+      WHERE cd.arena_id = ?
+      GROUP BY cd.court_id
+      ORDER BY cd.court_number`,
+        [arena_id]
+      );
+
+      // Parse the sports and images
+      const formattedCourts = courts.map(court => ({
+        ...court,
+        sports: court.sports ? court.sports.split(',').map(Number) : [],
+        sports_names: court.sports_names ? court.sports_names.split(',') : [],
+        additional_images: court.additional_images ? court.additional_images.split(',') : []
+      }));
+
+      res.json(formattedCourts);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+
+  // Update court details
+  updateCourt: async (req, res) => {
+    try {
+      const { court_id } = req.params;
+      const { court_name, size_sqft, price_per_hour, description, sports } = req.body;
+
+      // Verify court belongs to owner's arena
+      const [courtCheck] = await pool.execute(
+        `SELECT cd.court_id FROM court_details cd
+       JOIN arenas a ON cd.arena_id = a.arena_id
+       WHERE cd.court_id = ? AND a.owner_id = ?`,
+        [court_id, req.user.id]
+      );
+
+      if (courtCheck.length === 0) {
+        return res.status(404).json({ message: "Court not found or access denied" });
+      }
+
+      // Start transaction
+      const connection = await pool.getConnection();
+      await connection.beginTransaction();
+
+      try {
+        // Update court details
+        const updateFields = [];
+        const values = [];
+
+        if (court_name !== undefined) {
+          updateFields.push("court_name = ?");
+          values.push(court_name);
+        }
+        if (size_sqft !== undefined) {
+          updateFields.push("size_sqft = ?");
+          values.push(parseFloat(size_sqft));
+        }
+        if (price_per_hour !== undefined) {
+          updateFields.push("price_per_hour = ?");
+          values.push(parseFloat(price_per_hour));
+        }
+        if (description !== undefined) {
+          updateFields.push("description = ?");
+          values.push(description);
+        }
+
+        if (updateFields.length > 0) {
+          values.push(court_id);
+          await connection.execute(
+            `UPDATE court_details SET ${updateFields.join(", ")} WHERE court_id = ?`,
+            values
+          );
+        }
+
+        // Update sports if provided
+        if (sports !== undefined) {
+          // Delete existing sports
+          await connection.execute(
+            "DELETE FROM court_sports WHERE court_id = ?",
+            [court_id]
+          );
+
+          // Add new sports
+          const sportsArray = Array.isArray(sports) ? sports : sports.split(',').map(Number);
+          for (const sport_id of sportsArray) {
+            if (sport_id) {
+              await connection.execute(
+                "INSERT INTO court_sports (court_id, sport_id) VALUES (?, ?)",
+                [court_id, sport_id]
+              );
+            }
+          }
+        }
+
+        await connection.commit();
+        res.json({ message: "Court updated successfully" });
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      } finally {
+        connection.release();
+      }
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+
+  // Add new court to arena
+  addCourt: async (req, res) => {
+    try {
+      const { arena_id } = req.params;
+      const { court_number, court_name, size_sqft, price_per_hour, description, sports } = req.body;
+
+      // Verify owner owns this arena
+      const [arenaCheck] = await pool.execute(
+        "SELECT arena_id FROM arenas WHERE arena_id = ? AND owner_id = ?",
+        [arena_id, req.user.id]
+      );
+
+      if (arenaCheck.length === 0) {
+        return res.status(404).json({ message: "Arena not found or access denied" });
+      }
+
+      // Start transaction
+      const connection = await pool.getConnection();
+      await connection.beginTransaction();
+
+      try {
+        // Get the next court number if not provided
+        let nextCourtNumber = court_number;
+        if (!nextCourtNumber) {
+          const [maxCourt] = await connection.execute(
+            "SELECT MAX(court_number) as max_num FROM court_details WHERE arena_id = ?",
+            [arena_id]
+          );
+          nextCourtNumber = (maxCourt[0].max_num || 0) + 1;
+        }
+
+        // Insert new court
+        const [courtResult] = await connection.execute(
+          `INSERT INTO court_details 
+         (arena_id, court_number, court_name, size_sqft, price_per_hour, description)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+          [
+            arena_id,
+            nextCourtNumber,
+            court_name || `Court ${nextCourtNumber}`,
+            parseFloat(size_sqft) || 2000,
+            parseFloat(price_per_hour) || 500,
+            description || ""
+          ]
+        );
+
+        const newCourtId = courtResult.insertId;
+
+        // Add sports if provided
+        if (sports && sports.length > 0) {
+          const sportsArray = Array.isArray(sports) ? sports : sports.split(',').map(Number);
+          for (const sport_id of sportsArray) {
+            if (sport_id) {
+              await connection.execute(
+                "INSERT INTO court_sports (court_id, sport_id) VALUES (?, ?)",
+                [newCourtId, sport_id]
+              );
+            }
+          }
+        }
+
+        await connection.commit();
+
+        res.status(201).json({
+          message: "Court added successfully",
+          court_id: newCourtId,
+          court_number: nextCourtNumber
+        });
+      } catch (error) {
+        await connection.rollback();
+
+        // Handle duplicate court number error
+        if (error.code === 'ER_DUP_ENTRY') {
+          return res.status(400).json({
+            message: "Court number already exists for this arena"
+          });
+        }
+
+        throw error;
+      } finally {
+        connection.release();
+      }
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+
+  // Delete court photo
+  deleteCourtPhoto: async (req, res) => {
+    try {
+      const { court_id } = req.params;
+      const { photo_path } = req.body;
+
+      // Verify court belongs to owner's arena
+      const [courtCheck] = await pool.execute(
+        `SELECT cd.court_id FROM court_details cd
+       JOIN arenas a ON cd.arena_id = a.arena_id
+       WHERE cd.court_id = ? AND a.owner_id = ?`,
+        [court_id, req.user.id]
+      );
+
+      if (courtCheck.length === 0) {
+        return res.status(404).json({ message: "Court not found or access denied" });
+      }
+
+      // Delete the photo
+      await pool.execute(
+        "DELETE FROM court_images WHERE court_id = ? AND image_url = ?",
+        [court_id, photo_path]
+      );
+
+      // If we deleted the primary photo, set a new primary if available
+      const [remainingPhotos] = await pool.execute(
+        "SELECT image_id FROM court_images WHERE court_id = ? ORDER BY uploaded_at LIMIT 1",
+        [court_id]
+      );
+
+      if (remainingPhotos.length > 0) {
+        await pool.execute(
+          "UPDATE court_images SET is_primary = TRUE WHERE image_id = ?",
+          [remainingPhotos[0].image_id]
+        );
+      }
+
+      res.json({ message: "Photo deleted successfully" });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+
   // Update arena details
   updateArena: async (req, res) => {
     try {
@@ -1163,9 +1429,8 @@ const ownerController = {
       const [bookings] = await pool.execute(query, params);
 
       res.json({
-        filename: `bookings_export_${
-          new Date().toISOString().split("T")[0]
-        }.json`,
+        filename: `bookings_export_${new Date().toISOString().split("T")[0]
+          }.json`,
         data: bookings,
         total_records: bookings.length,
         total_revenue: bookings.reduce(

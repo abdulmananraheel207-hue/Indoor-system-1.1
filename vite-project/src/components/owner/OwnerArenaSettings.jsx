@@ -8,7 +8,15 @@ const OwnerArenaSettings = ({ dashboardData }) => {
   const [loading, setLoading] = useState(false);
   const [uploadingPhotos, setUploadingPhotos] = useState({});
   const [editCourt, setEditCourt] = useState(null);
+  const [showAddCourt, setShowAddCourt] = useState(false);
   const [courtForm, setCourtForm] = useState({
+    court_name: "",
+    size_sqft: "",
+    price_per_hour: "",
+    description: "",
+    sports: [],
+  });
+  const [newCourtForm, setNewCourtForm] = useState({
     court_name: "",
     size_sqft: "",
     price_per_hour: "",
@@ -45,8 +53,7 @@ const OwnerArenaSettings = ({ dashboardData }) => {
   const fetchCourts = async () => {
     try {
       const response = await ownerAPI.getCourts(selectedArena);
-      // The courts from registration should be here
-      setCourts(response.data);
+      setCourts(response.data || []);
     } catch (error) {
       console.error("Error fetching courts:", error);
     }
@@ -59,7 +66,7 @@ const OwnerArenaSettings = ({ dashboardData }) => {
       size_sqft: court.size_sqft || "",
       price_per_hour: court.price_per_hour || "",
       description: court.description || "",
-      sports: court.sports ? court.sports.split(",").map(Number) : [],
+      sports: court.sports || [],
     });
   };
 
@@ -68,11 +75,11 @@ const OwnerArenaSettings = ({ dashboardData }) => {
     setLoading(true);
     try {
       await ownerAPI.updateCourt(editCourt.court_id, {
-        name: courtForm.court_name,
-        size_sqft: courtForm.size_sqft, // ADDED: Include size_sqft
-        base_price_per_hour: courtForm.price_per_hour,
+        court_name: courtForm.court_name,
+        size_sqft: courtForm.size_sqft,
+        price_per_hour: courtForm.price_per_hour,
         description: courtForm.description,
-        sports: courtForm.sports.join(","),
+        sports: courtForm.sports,
       });
 
       alert("Court details updated successfully");
@@ -80,7 +87,36 @@ const OwnerArenaSettings = ({ dashboardData }) => {
       fetchCourts();
     } catch (error) {
       console.error("Error updating court:", error);
-      alert(error.response?.data?.message || "Failed to update");
+      alert(error.response?.data?.message || "Failed to update court details");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddCourt = async () => {
+    setLoading(true);
+    try {
+      await ownerAPI.addCourt(selectedArena, {
+        court_name: newCourtForm.court_name,
+        size_sqft: newCourtForm.size_sqft,
+        price_per_hour: newCourtForm.price_per_hour,
+        description: newCourtForm.description,
+        sports: newCourtForm.sports,
+      });
+
+      alert("Court added successfully");
+      setShowAddCourt(false);
+      setNewCourtForm({
+        court_name: "",
+        size_sqft: "",
+        price_per_hour: "",
+        description: "",
+        sports: [],
+      });
+      fetchCourts();
+    } catch (error) {
+      console.error("Error adding court:", error);
+      alert(error.response?.data?.message || "Failed to add court");
     } finally {
       setLoading(false);
     }
@@ -93,7 +129,6 @@ const OwnerArenaSettings = ({ dashboardData }) => {
     setUploadingPhotos({ ...uploadingPhotos, [courtId]: true });
 
     const formData = new FormData();
-    // Key MUST be "photos" to match backend upload.array('photos', 10)
     for (let i = 0; i < files.length; i++) {
       formData.append("photos", files[i]);
     }
@@ -101,41 +136,49 @@ const OwnerArenaSettings = ({ dashboardData }) => {
     try {
       const response = await ownerAPI.uploadCourtPhotos(courtId, formData);
       alert("Photos uploaded successfully");
-      fetchCourts(); // Refresh to get new photos
+      fetchCourts();
     } catch (error) {
       console.error("Error uploading photos:", error);
       alert(error.response?.data?.message || "Failed to upload photos");
     } finally {
       setUploadingPhotos({ ...uploadingPhotos, [courtId]: false });
-      event.target.value = ""; // Reset file input
+      event.target.value = "";
     }
   };
 
-  // ADDED: Function to handle photo deletion
   const handleDeletePhoto = async (courtId, photoPath) => {
     if (!window.confirm("Are you sure you want to delete this photo?")) return;
 
     try {
       await ownerAPI.deleteCourtPhoto(courtId, { photo_path: photoPath });
       alert("Photo deleted successfully");
-      fetchCourts(); // Refresh to update photos
+      fetchCourts();
     } catch (error) {
       console.error("Error deleting photo:", error);
       alert(error.response?.data?.message || "Failed to delete photo");
     }
   };
 
-  const toggleSport = (sportId) => {
-    const isSelected = courtForm.sports.includes(sportId);
-    setCourtForm({
-      ...courtForm,
-      sports: isSelected
-        ? courtForm.sports.filter((id) => id !== sportId)
-        : [...courtForm.sports, sportId],
-    });
+  const toggleSport = (sportId, formType = "edit") => {
+    if (formType === "edit") {
+      const isSelected = courtForm.sports.includes(sportId);
+      setCourtForm({
+        ...courtForm,
+        sports: isSelected
+          ? courtForm.sports.filter((id) => id !== sportId)
+          : [...courtForm.sports, sportId],
+      });
+    } else {
+      const isSelected = newCourtForm.sports.includes(sportId);
+      setNewCourtForm({
+        ...newCourtForm,
+        sports: isSelected
+          ? newCourtForm.sports.filter((id) => id !== sportId)
+          : [...newCourtForm.sports, sportId],
+      });
+    }
   };
 
-  // ADDED: Function to get all court photos (primary + additional)
   const getAllCourtPhotos = (court) => {
     const photos = [];
 
@@ -147,13 +190,9 @@ const OwnerArenaSettings = ({ dashboardData }) => {
       });
     }
 
-    // Add additional images if exist
-    if (court.additional_images) {
-      const additional = Array.isArray(court.additional_images)
-        ? court.additional_images
-        : JSON.parse(court.additional_images || "[]");
-
-      additional.forEach((img) => {
+    // Add additional images
+    if (court.additional_images && court.additional_images.length > 0) {
+      court.additional_images.forEach((img) => {
         photos.push({
           path: img,
           is_primary: false,
@@ -188,10 +227,16 @@ const OwnerArenaSettings = ({ dashboardData }) => {
               ))}
             </select>
           </div>
-          <div className="mt-2 md:mt-0">
-            <p className="text-sm text-gray-600">
-              {courts.length} court{courts.length !== 1 ? "s" : ""} detected
-            </p>
+          <div className="flex items-center space-x-3 mt-4 md:mt-0">
+            <div className="text-sm text-gray-600">
+              {courts.length} court{courts.length !== 1 ? "s" : ""}
+            </div>
+            <button
+              onClick={() => setShowAddCourt(true)}
+              className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700"
+            >
+              + Add Court
+            </button>
           </div>
         </div>
       </div>
@@ -211,6 +256,12 @@ const OwnerArenaSettings = ({ dashboardData }) => {
             <div className="text-center py-12">
               <div className="text-gray-400 text-4xl mb-4">🏟️</div>
               <p className="text-gray-600">No courts found for this arena.</p>
+              <button
+                onClick={() => setShowAddCourt(true)}
+                className="mt-4 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Add Your First Court
+              </button>
             </div>
           ) : (
             <div className="space-y-6">
@@ -231,18 +282,30 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                         <span className="px-2 py-1 bg-green-50 text-green-700 text-xs font-semibold rounded">
                           ₹{court.price_per_hour}/HOUR
                         </span>
+                        <span className="px-2 py-1 bg-purple-50 text-purple-700 text-xs font-semibold rounded">
+                          Court #{court.court_number}
+                        </span>
                       </div>
                       <p className="text-sm text-gray-600 mt-3">
                         {court.description || "No description provided."}
                       </p>
-                      <div className="mt-3">
-                        <span className="text-xs font-bold text-gray-400 uppercase">
-                          Sports:{" "}
-                        </span>
-                        <span className="text-sm text-gray-700">
-                          {court.sports || "None"}
-                        </span>
-                      </div>
+                      {court.sports_names && court.sports_names.length > 0 && (
+                        <div className="mt-3">
+                          <span className="text-xs font-bold text-gray-400 uppercase">
+                            Sports:{" "}
+                          </span>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {court.sports_names.map((sport, index) => (
+                              <span
+                                key={index}
+                                className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded"
+                              >
+                                {sport}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <button
                       onClick={() => handleCourtEdit(court)}
@@ -273,7 +336,6 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                       </label>
                     </div>
 
-                    {/* UPDATED: Photo Gallery Display */}
                     {(() => {
                       const allPhotos = getAllCourtPhotos(court);
 
@@ -284,9 +346,7 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                               <div key={index} className="relative group">
                                 <img
                                   src={`http://localhost:5000${photo.path}`}
-                                  alt={`Court ${court.court_name} - ${
-                                    index + 1
-                                  }`}
+                                  alt={`Court ${court.court_name} - ${index + 1}`}
                                   className="w-full h-32 object-cover rounded-xl shadow-sm border border-gray-100"
                                   onError={(e) => {
                                     e.target.onerror = null;
@@ -320,8 +380,7 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                         return (
                           <div className="bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl p-8 text-center">
                             <p className="text-sm text-gray-400">
-                              No photos available. Upload your first court
-                              photo.
+                              No photos available. Upload your first court photo.
                             </p>
                           </div>
                         );
@@ -335,6 +394,7 @@ const OwnerArenaSettings = ({ dashboardData }) => {
         </div>
       </div>
 
+      {/* Edit Court Modal */}
       {editCourt && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden">
@@ -351,7 +411,6 @@ const OwnerArenaSettings = ({ dashboardData }) => {
             </div>
 
             <div className="p-6 space-y-5">
-              {/* UPDATED: Added size_sqft field */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                 <div>
                   <label className="block text-xs font-bold text-gray-500 uppercase mb-1">
@@ -414,7 +473,6 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                 />
               </div>
 
-              {/* ADDED: Sports Selection in Edit Modal */}
               <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase mb-3">
                   Available Sports
@@ -424,12 +482,11 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                     <button
                       key={sport.id}
                       type="button"
-                      onClick={() => toggleSport(sport.id)}
-                      className={`flex flex-col items-center p-3 border-2 rounded-lg transition ${
-                        courtForm.sports.includes(sport.id)
+                      onClick={() => toggleSport(sport.id, "edit")}
+                      className={`flex flex-col items-center p-3 border-2 rounded-lg transition ${courtForm.sports.includes(sport.id)
                           ? "border-blue-500 bg-blue-50"
                           : "border-gray-200 hover:border-gray-300"
-                      }`}
+                        }`}
                     >
                       <span className="text-2xl">{sport.icon}</span>
                       <span className="text-xs mt-1">{sport.name}</span>
@@ -474,6 +531,157 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                   className="px-8 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 disabled:bg-blue-300"
                 >
                   {loading ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Court Modal */}
+      {showAddCourt && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+              <h3 className="text-lg font-bold text-gray-900">
+                Add New Court
+              </h3>
+              <button
+                onClick={() => setShowAddCourt(false)}
+                className="text-gray-400 hover:text-gray-600 text-2xl"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">
+                    Court Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={newCourtForm.court_name}
+                    onChange={(e) =>
+                      setNewCourtForm({ ...newCourtForm, court_name: e.target.value })
+                    }
+                    placeholder="e.g., Court A, Main Court"
+                    className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">
+                    Size (SQ FT) *
+                  </label>
+                  <input
+                    type="number"
+                    value={newCourtForm.size_sqft}
+                    onChange={(e) =>
+                      setNewCourtForm({
+                        ...newCourtForm,
+                        size_sqft: e.target.value,
+                      })
+                    }
+                    placeholder="e.g., 2000"
+                    className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">
+                    Price (₹/Hour) *
+                  </label>
+                  <input
+                    type="number"
+                    value={newCourtForm.price_per_hour}
+                    onChange={(e) =>
+                      setNewCourtForm({
+                        ...newCourtForm,
+                        price_per_hour: e.target.value,
+                      })
+                    }
+                    placeholder="e.g., 500"
+                    className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">
+                  Description
+                </label>
+                <textarea
+                  value={newCourtForm.description}
+                  onChange={(e) =>
+                    setNewCourtForm({ ...newCourtForm, description: e.target.value })
+                  }
+                  rows="3"
+                  placeholder="Describe the court features..."
+                  className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase mb-3">
+                  Available Sports
+                </label>
+                <div className="grid grid-cols-4 gap-2">
+                  {availableSports.map((sport) => (
+                    <button
+                      key={sport.id}
+                      type="button"
+                      onClick={() => toggleSport(sport.id, "add")}
+                      className={`flex flex-col items-center p-3 border-2 rounded-lg transition ${newCourtForm.sports.includes(sport.id)
+                          ? "border-blue-500 bg-blue-50"
+                          : "border-gray-200 hover:border-gray-300"
+                        }`}
+                    >
+                      <span className="text-2xl">{sport.icon}</span>
+                      <span className="text-xs mt-1">{sport.name}</span>
+                    </button>
+                  ))}
+                </div>
+                {newCourtForm.sports.length > 0 && (
+                  <div className="mt-3 p-3 bg-blue-50 rounded-lg">
+                    <p className="text-sm font-medium text-blue-900 mb-2">
+                      Selected Sports:
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {newCourtForm.sports.map((sportId) => {
+                        const sport = availableSports.find(
+                          (s) => s.id === sportId
+                        );
+                        return sport ? (
+                          <span
+                            key={sportId}
+                            className="px-3 py-1 bg-white border border-blue-200 rounded-full text-sm flex items-center"
+                          >
+                            <span className="mr-2">{sport.icon}</span>
+                            {sport.name}
+                          </span>
+                        ) : null;
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end space-x-3 pt-6 border-t">
+                <button
+                  onClick={() => setShowAddCourt(false)}
+                  className="px-6 py-2.5 text-sm font-bold text-gray-500 hover:text-gray-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddCourt}
+                  disabled={loading || !newCourtForm.court_name || !newCourtForm.size_sqft || !newCourtForm.price_per_hour}
+                  className="px-8 py-2.5 bg-green-600 text-white text-sm font-bold rounded-xl hover:bg-green-700 shadow-lg shadow-green-200 disabled:bg-green-300"
+                >
+                  {loading ? "Adding..." : "Add Court"}
                 </button>
               </div>
             </div>
