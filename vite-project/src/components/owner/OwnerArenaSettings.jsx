@@ -179,10 +179,21 @@ const OwnerArenaSettings = ({ dashboardData }) => {
     }
   };
 
+  // In OwnerArenaSettings.jsx, update the getAllCourtPhotos function:
   const getAllCourtPhotos = (court) => {
     const photos = [];
 
-    // Add primary image if exists
+    // Check if court has images array (from API)
+    if (court.images && court.images.length > 0) {
+      court.images.forEach((img, index) => {
+        photos.push({
+          path: img.image_url,
+          is_primary: img.is_primary || index === 0,
+        });
+      });
+    }
+
+    // Fallback to old structure if exists
     if (court.primary_image) {
       photos.push({
         path: court.primary_image,
@@ -190,7 +201,6 @@ const OwnerArenaSettings = ({ dashboardData }) => {
       });
     }
 
-    // Add additional images
     if (court.additional_images && court.additional_images.length > 0) {
       court.additional_images.forEach((img) => {
         photos.push({
@@ -346,7 +356,9 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                               <div key={index} className="relative group">
                                 <img
                                   src={`http://localhost:5000${photo.path}`}
-                                  alt={`Court ${court.court_name} - ${index + 1}`}
+                                  alt={`Court ${court.court_name} - ${
+                                    index + 1
+                                  }`}
                                   className="w-full h-32 object-cover rounded-xl shadow-sm border border-gray-100"
                                   onError={(e) => {
                                     e.target.onerror = null;
@@ -380,7 +392,8 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                         return (
                           <div className="bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl p-8 text-center">
                             <p className="text-sm text-gray-400">
-                              No photos available. Upload your first court photo.
+                              No photos available. Upload your first court
+                              photo.
                             </p>
                           </div>
                         );
@@ -483,10 +496,11 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                       key={sport.id}
                       type="button"
                       onClick={() => toggleSport(sport.id, "edit")}
-                      className={`flex flex-col items-center p-3 border-2 rounded-lg transition ${courtForm.sports.includes(sport.id)
+                      className={`flex flex-col items-center p-3 border-2 rounded-lg transition ${
+                        courtForm.sports.includes(sport.id)
                           ? "border-blue-500 bg-blue-50"
                           : "border-gray-200 hover:border-gray-300"
-                        }`}
+                      }`}
                     >
                       <span className="text-2xl">{sport.icon}</span>
                       <span className="text-xs mt-1">{sport.name}</span>
@@ -543,9 +557,7 @@ const OwnerArenaSettings = ({ dashboardData }) => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-              <h3 className="text-lg font-bold text-gray-900">
-                Add New Court
-              </h3>
+              <h3 className="text-lg font-bold text-gray-900">Add New Court</h3>
               <button
                 onClick={() => setShowAddCourt(false)}
                 className="text-gray-400 hover:text-gray-600 text-2xl"
@@ -564,7 +576,10 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                     type="text"
                     value={newCourtForm.court_name}
                     onChange={(e) =>
-                      setNewCourtForm({ ...newCourtForm, court_name: e.target.value })
+                      setNewCourtForm({
+                        ...newCourtForm,
+                        court_name: e.target.value,
+                      })
                     }
                     placeholder="e.g., Court A, Main Court"
                     className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
@@ -616,7 +631,10 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                 <textarea
                   value={newCourtForm.description}
                   onChange={(e) =>
-                    setNewCourtForm({ ...newCourtForm, description: e.target.value })
+                    setNewCourtForm({
+                      ...newCourtForm,
+                      description: e.target.value,
+                    })
                   }
                   rows="3"
                   placeholder="Describe the court features..."
@@ -634,10 +652,11 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                       key={sport.id}
                       type="button"
                       onClick={() => toggleSport(sport.id, "add")}
-                      className={`flex flex-col items-center p-3 border-2 rounded-lg transition ${newCourtForm.sports.includes(sport.id)
+                      className={`flex flex-col items-center p-3 border-2 rounded-lg transition ${
+                        newCourtForm.sports.includes(sport.id)
                           ? "border-blue-500 bg-blue-50"
                           : "border-gray-200 hover:border-gray-300"
-                        }`}
+                      }`}
                     >
                       <span className="text-2xl">{sport.icon}</span>
                       <span className="text-xs mt-1">{sport.name}</span>
@@ -678,7 +697,12 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                 </button>
                 <button
                   onClick={handleAddCourt}
-                  disabled={loading || !newCourtForm.court_name || !newCourtForm.size_sqft || !newCourtForm.price_per_hour}
+                  disabled={
+                    loading ||
+                    !newCourtForm.court_name ||
+                    !newCourtForm.size_sqft ||
+                    !newCourtForm.price_per_hour
+                  }
                   className="px-8 py-2.5 bg-green-600 text-white text-sm font-bold rounded-xl hover:bg-green-700 shadow-lg shadow-green-200 disabled:bg-green-300"
                 >
                   {loading ? "Adding..." : "Add Court"}

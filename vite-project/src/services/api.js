@@ -1,3 +1,4 @@
+// api.js - UPDATED VERSION
 import axios from "axios";
 
 const API = axios.create({
@@ -19,6 +20,7 @@ API.interceptors.request.use((config) => {
 export const arenaAPI = {
   getSportsCategories: () => API.get("/arenas/sports"),
   getArenaDetails: (arenaId) => API.get(`/arenas/${arenaId}`),
+  getArenaCourts: (arenaId) => API.get(`/arenas/${arenaId}/courts`), // NEW: Get courts for arena
   getAvailableSlots: (arenaId, date, sportId) =>
     API.get(`/arenas/${arenaId}/slots`, {
       params: { date, sport_id: sportId },
@@ -48,8 +50,11 @@ export const userAPI = {
   getNearbyArenas: (params) => API.get("/user/arenas/nearby", { params }),
   addFavorite: (arenaId) => API.post(`/user/arenas/${arenaId}/favorite`),
   removeFavorite: (arenaId) => API.delete(`/user/arenas/${arenaId}/favorite`),
+  getFavorites: () => API.get("/user/arenas/favorites"), // NEW: Get all favorites
   updateProfilePicture: (data) => API.put("/user/profile/picture", data),
   changePassword: (data) => API.put("/user/profile/password", data),
+  createTeam: (data) => API.post("/user/teams", data), // NEW: Create team
+  getTeams: () => API.get("/user/teams"), // NEW: Get user teams
 };
 
 export const authAPI = {
@@ -59,7 +64,6 @@ export const authAPI = {
   logout: () => API.post("/auth/logout"),
 };
 
-// Add these to your existing api.js
 export const reviewAPI = {
   submitReview: (arenaId, data) => API.post(`/arenas/${arenaId}/reviews`, data),
   getReviews: (arenaId) => API.get(`/arenas/${arenaId}/reviews`),
@@ -82,6 +86,7 @@ export const ownerAPI = {
   addManager: (data) => API.post("/owners/managers", data),
   updateManager: (managerId, data) =>
     API.put(`/owners/managers/${managerId}`, data),
+  deleteManager: (managerId) => API.delete(`/owners/managers/${managerId}`),
 
   // Bookings
   getOwnerBookings: (params) => API.get("/owners/bookings", { params }),
@@ -91,20 +96,32 @@ export const ownerAPI = {
     API.post(`/owners/bookings/${bookingId}/reject`, data),
 
   // Arena & Court Management
-  // FIX THIS LINE: Change from /arenas/ to /owners/arenas/
-  getCourts: (arenaId) => API.get(`/owners/arenas/${arenaId}/courts`), // FIXED!
+  getArenas: () => API.get("/owners/arenas"), // NEW: Get owner's arenas
+  getCourts: (arenaId) => API.get(`/owners/arenas/${arenaId}/courts`),
   updateArena: (arenaId, data) => API.put(`/owners/arenas/${arenaId}`, data),
   uploadCourtPhotos: (courtId, data) =>
     API.post(`/owners/courts/${courtId}/photos`, data),
-  updateCourt: (courtId, data) => API.put(`/owners/courts/${courtId}`, data), // This is correct
-  addCourt: (arenaId, data) => API.post(`/owners/arenas/${arenaId}/courts`, data), // This is correct
-  deleteCourtPhoto: (courtId, data) => API.delete(`/owners/courts/${courtId}/photos`, { data }), // This is correct
+  updateCourt: (courtId, data) => API.put(`/owners/courts/${courtId}`, data),
+  addCourt: (arenaId, data) =>
+    API.post(`/owners/arenas/${arenaId}/courts`, data),
+  deleteCourtPhoto: (courtId, data) =>
+    API.delete(`/owners/courts/${courtId}/photos`, { data }),
 
   // Time Slots
   getTimeSlots: (arenaId, date) =>
     API.get(`/arenas/${arenaId}/slots`, { params: { date } }),
   updateTimeSlots: (arenaId, data) =>
     API.put(`/owners/arenas/${arenaId}/slots`, data),
+
+  // Tournaments
+  getTournamentRequests: () => API.get("/owners/tournaments"), // NEW
+  respondToTournament: (tournamentId, data) =>
+    API.post(`/owners/tournaments/${tournamentId}/respond`, data), // NEW
+};
+
+export const tournamentAPI = {
+  createTournament: (data) => API.post("/tournaments", data), // NEW
+  getUserTournaments: () => API.get("/user/tournaments"), // NEW
 };
 
 export default API;

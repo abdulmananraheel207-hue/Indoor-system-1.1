@@ -231,9 +231,15 @@ const UserHome = () => {
                   onClick={() => handleViewDetails(arena.arena_id)}
                 >
                   <div className="h-48 bg-gray-300 overflow-hidden relative">
-                    {arena.images && arena.images[0] ? (
+                    {arena.images && arena.images.length > 0 ? (
                       <img
                         src={arena.images[0].image_url}
+                        alt={arena.name}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : arena.arena_images && arena.arena_images.length > 0 ? (
+                      <img
+                        src={arena.arena_images[0].image_url}
                         alt={arena.name}
                         className="w-full h-full object-cover"
                       />

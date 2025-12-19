@@ -29,13 +29,44 @@ const UserArenaDetails = () => {
     }
   }, [arena, selectedDate]);
 
+  // In UserArenaDetails.jsx, replace the fetchArenaDetails function:
   const fetchArenaDetails = async () => {
     try {
       setLoading(true);
-      const response = await arenaAPI.getArenaDetails(arenaId);
-      setArena(response.data);
-      if (response.data.courts && response.data.courts.length > 0) {
-        setSelectedCourt(response.data.courts[0]);
+
+      // Fetch arena details
+      const arenaResponse = await arenaAPI.getArenaDetails(arenaId);
+      const arenaData = arenaResponse.data;
+
+      // Fetch courts for this arena
+      let courtsData = [];
+      try {
+        const courtsResponse = await arenaAPI.getArenaCourts(arenaId);
+        courtsData = courtsResponse.data.courts || [];
+      } catch (courtError) {
+        console.error("Error fetching courts:", courtError);
+        courtsData = [];
+      }
+
+      // Transform court data to match expected format
+      const transformedCourts = courtsData.map((court) => ({
+        court_id: court.court_id,
+        court_name: court.court_name || `Court ${court.court_number}`,
+        court_number: court.court_number,
+        size_sqft: court.size_sqft,
+        price_per_hour: court.price_per_hour,
+        description: court.description,
+        sports: court.sports || [],
+        sports_names: court.sports_names || [],
+      }));
+
+      setArena({
+        ...arenaData,
+        courts: transformedCourts,
+      });
+
+      if (transformedCourts.length > 0) {
+        setSelectedCourt(transformedCourts[0]);
       }
     } catch (error) {
       console.error("Error fetching arena details:", error);

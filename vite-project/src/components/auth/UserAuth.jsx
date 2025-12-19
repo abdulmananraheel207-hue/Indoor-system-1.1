@@ -1,6 +1,8 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom"; // Add this import
 
 const UserAuth = ({ onLogin }) => {
+  const navigate = useNavigate(); // Add this hook
   const [isLogin, setIsLogin] = useState(true);
   const [formData, setFormData] = useState({
     name: "",
@@ -18,7 +20,6 @@ const UserAuth = ({ onLogin }) => {
     });
   };
 
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -26,21 +27,21 @@ const UserAuth = ({ onLogin }) => {
     try {
       // Determine the endpoint based on login or registration
       const endpoint = isLogin
-        ? "http://localhost:5000/api/auth/login" // Login endpoint
-        : "http://localhost:5000/api/auth/register/user"; // User registration endpoint
+        ? "http://localhost:5000/api/auth/login"
+        : "http://localhost:5000/api/auth/register/user";
 
       const payload = isLogin
         ? {
-          email: formData.email,
-          password: formData.password,
-          userType: "user", // IMPORTANT: Your backend expects this!
-        }
+            email: formData.email,
+            password: formData.password,
+            userType: "user",
+          }
         : {
-          name: formData.name,
-          email: formData.email,
-          password: formData.password,
-          phone_number: formData.phone, // Note: backend expects phone_number, not phone
-        };
+            name: formData.name,
+            email: formData.email,
+            password: formData.password,
+            phone_number: formData.phone,
+          };
 
       const response = await fetch(endpoint, {
         method: "POST",
@@ -59,29 +60,11 @@ const UserAuth = ({ onLogin }) => {
           localStorage.setItem("userRole", data.user.role || "user");
           localStorage.setItem("userData", JSON.stringify(data.user));
         }
-
-        // Show success message
-        alert(isLogin ? "Login successful!" : "Registration successful!");
-
-        // Determine where to redirect based on user role
-        const userRole = data.user?.role || "user";
-
-        // Add a small delay for better UX
-        setTimeout(() => {
-          if (onLogin) {
-            onLogin(); // This should trigger parent component to update
-          }
-
-          // Force redirect based on role
-          if (userRole === "owner") {
-            window.location.href = "/owner-dashboard"; // Redirect to owner dashboard
-          } else {
-            window.location.href = "/user-dashboard"; // Redirect to user dashboard
-          }
-        }, 1000);
-
+        // Call the parent's onLogin handler with the token and user data
+        if (onLogin) {
+          onLogin(data.token, data.user);
+        }
       } else {
-        // Show error message from backend
         alert(data.message || `Failed to ${isLogin ? "login" : "register"}.`);
       }
     } catch (error) {
@@ -282,10 +265,11 @@ const UserAuth = ({ onLogin }) => {
             <button
               type="submit"
               disabled={loading}
-              className={`group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white ${loading
-                ? "bg-blue-400 cursor-not-allowed"
-                : "bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                } transition-colors duration-200`}
+              className={`group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white ${
+                loading
+                  ? "bg-blue-400 cursor-not-allowed"
+                  : "bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              } transition-colors duration-200`}
             >
               {loading ? (
                 <>
