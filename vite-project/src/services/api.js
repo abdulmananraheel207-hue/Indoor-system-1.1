@@ -26,8 +26,25 @@ export const arenaAPI = {
       params: { date, sport_id: sportId },
     }),
   searchArenas: (params) => API.get("/arenas/search", { params }),
-  lockTimeSlot: (slotId) => API.post(`/user/slots/${slotId}/lock`),
-  releaseTimeSlot: (slotId) => API.delete(`/user/slots/${slotId}/lock`),
+  lockTimeSlot: (slotId) => {
+    return axios.post(
+      `/api/arenas/slots/${slotId}/lock`,
+      {},
+      {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+      }
+    );
+  },
+
+  releaseTimeSlot: (slotId) => {
+    return axios.post(
+      `/api/arenas/slots/${slotId}/release`,
+      {},
+      {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+      }
+    );
+  },
 };
 
 export const bookingAPI = {

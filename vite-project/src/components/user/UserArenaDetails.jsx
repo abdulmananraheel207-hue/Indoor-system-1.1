@@ -106,31 +106,19 @@ const UserArenaDetails = () => {
   const handleSlotSelect = async (slot) => {
     if (slot.is_available && !slot.is_blocked) {
       setSelectedSlot(slot);
-
-      // Lock the slot temporarily
-      try {
-        await arenaAPI.lockTimeSlot(slot.slot_id);
-
-        // Start countdown for slot lock (10 minutes)
-        setTimeout(() => {
-          if (bookingInProgress) {
-            arenaAPI.releaseTimeSlot(slot.slot_id);
-            setSelectedSlot(null);
-            alert("Time slot released due to timeout");
-            setBookingInProgress(false);
-          }
-        }, 10 * 60 * 1000);
-
-        setBookingInProgress(true);
-      } catch (error) {
-        console.error("Error locking slot:", error);
-      }
+      setBookingInProgress(true); // Just mark as in progress
+      // Remove all locking/release logic for now
     }
   };
-
   const handleBooking = async () => {
     if (!selectedSlot) {
       alert("Please select a time slot");
+      return;
+    }
+
+    // Add validation for selectedCourt
+    if (!selectedCourt || !selectedCourt.court_id) {
+      alert("Please select a court first");
       return;
     }
 
@@ -143,18 +131,54 @@ const UserArenaDetails = () => {
         end_time: selectedSlot.end_time,
         total_amount: selectedSlot.price,
         payment_method: "manual",
+        requires_advance: false, // ADD THIS FIELD
+        sport_id: selectedCourt.sports?.[0] || selectedSlot.sport_id,
       };
+
+      // ADD DEBUG LOGGING
+      console.log("Sending booking data:", bookingData);
 
       const response = await bookingAPI.createBooking(bookingData);
 
       if (response.status === 201) {
-        alert("Booking request sent successfully!");
-        // Open chat with owner (you'll need to implement this)
-        navigate(`/user/bookings/${response.data.booking_id}/chat`);
+        alert(response.data?.message || "Booking request sent successfully!");
+        // Release the slot lock using correct endpoint
+        if (selectedSlot.slot_id) {
+          alert(response.data?.message || "Booking request sent successfully!");
+        }
+        navigate(`/user/bookings`);
+      } else {
+        alert(response.data?.message || "Failed to create booking");
       }
     } catch (error) {
       console.error("Error creating booking:", error);
-      alert(error.response?.data?.message || "Failed to create booking");
+      console.error("Error details:", error.response?.data);
+      // More specific error handling
+      if (error.response?.data?.message) {
+        alert(error.response.data.message);
+      } else if (error.response?.status === 400) {
+        alert("Invalid booking data");
+      } else {
+        alert("Failed to create booking. Please try again.");
+      }
+
+      // Release slot lock on error
+      if (selectedSlot?.slot_id) {
+        try {
+          await fetch(
+            `http://localhost:5000/api/arenas/slots/${selectedSlot.slot_id}/release`,
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${localStorage.getItem("token")}`,
+              },
+            }
+          );
+        } catch (releaseError) {
+          console.error("Error releasing slot:", releaseError);
+        }
+      }
+      setBookingInProgress(false);
     }
   };
 
@@ -487,10 +511,9 @@ const UserArenaDetails = () => {
           {/* Right Column - Booking Section */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-xl shadow-sm p-6 sticky top-6">
-              <h3 className="text-xl font-semibold text-gray-900 mb-6">
+              <h3 className="text-xl font-semibold text-blue-600 mb-6">
                 Book Now
               </h3>
-
               {/* Date Picker */}
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">

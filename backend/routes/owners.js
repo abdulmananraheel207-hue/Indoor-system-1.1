@@ -38,7 +38,7 @@ router.put("/courts/:court_id", ownerController.updateCourt);
 router.delete("/courts/:court_id/photos", ownerController.deleteCourtPhoto);
 
 // Booking management
-router.get("/bookings", ownerController.getBookingRequests);
+router.get("/bookings", ownerController.getOwnerBookings);
 router.get("/bookings/stats", ownerController.getBookingStats);
 router.post("/bookings/:booking_id/accept", ownerController.acceptBooking);
 router.post("/bookings/:booking_id/reject", ownerController.rejectBooking);

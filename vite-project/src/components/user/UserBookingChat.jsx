@@ -31,6 +31,12 @@ const UserBookingChat = () => {
       );
       const data = await response.json();
       if (response.ok) {
+        // Check if booking status allows chat
+        if (!["pending", "approved"].includes(data.status)) {
+          alert("Chat is only available for pending or approved bookings");
+          window.history.back();
+          return;
+        }
         setBooking(data);
       }
     } catch (error) {
@@ -41,13 +47,22 @@ const UserBookingChat = () => {
   const fetchMessages = async () => {
     try {
       const response = await fetch(
-        `http://localhost:5000/api/bookings/${bookingId}/messages`,
+        `http://localhost:5000/api/chats/${bookingId}`, // CHANGED THIS
         {
           headers: {
             Authorization: `Bearer ${localStorage.getItem("token")}`,
           },
         }
       );
+
+      if (response.status === 403) {
+        // Handle chat not available due to status
+        const errorData = await response.json();
+        alert(errorData.message || "Chat not available for this booking");
+        window.history.back();
+        return;
+      }
+
       const data = await response.json();
       if (response.ok) {
         setMessages(data.messages || []);
@@ -65,7 +80,7 @@ const UserBookingChat = () => {
 
     try {
       const response = await fetch(
-        `http://localhost:5000/api/bookings/${bookingId}/messages`,
+        `http://localhost:5000/api/chats/${bookingId}/message`, // CHANGED THIS
         {
           method: "POST",
           headers: {
@@ -78,7 +93,10 @@ const UserBookingChat = () => {
 
       if (response.ok) {
         setNewMessage("");
-        fetchMessages(); // Refresh messages
+        fetchMessages();
+      } else if (response.status === 403) {
+        const errorData = await response.json();
+        alert(errorData.message || "Cannot send message for this booking");
       }
     } catch (error) {
       console.error("Error sending message:", error);
