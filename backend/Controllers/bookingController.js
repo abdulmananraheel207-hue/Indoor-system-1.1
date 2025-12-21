@@ -23,6 +23,12 @@ const bookingController = {
       let sportIdToUse = sport_id;
       let slotIdToUse = slot_id;
 
+      // Validate payment_method
+      const validPaymentMethods = ["pay_now", "pay_after", "advance_payment"];
+      const finalPaymentMethod = validPaymentMethods.includes(payment_method)
+        ? payment_method
+        : "pay_after"; // Default to 'pay_after' instead of 'manual'
+
       // If using new format (court_id + time), find or create slot
       if (court_id && date && start_time && end_time) {
         // Get sport_id from court - FIX: Get first sport or use provided sport_id
@@ -44,16 +50,16 @@ const bookingController = {
         // Find existing time slot or create one
         const [existingSlots] = await pool.execute(
           `SELECT ts.*, a.base_price_per_hour, a.owner_id
-   FROM time_slots ts
-   JOIN arenas a ON ts.arena_id = a.arena_id
-   WHERE ts.arena_id = ?
-     AND ts.date = ?
-     AND ts.start_time = ?
-     AND ts.end_time = ?
-     AND ts.sport_id = ?
-     AND ts.is_blocked_by_owner = FALSE
-     AND ts.is_holiday = FALSE
-     AND (ts.locked_until IS NULL OR ts.locked_until < NOW() OR ts.locked_by_user_id = ?)`,
+         FROM time_slots ts
+         JOIN arenas a ON ts.arena_id = a.arena_id
+         WHERE ts.arena_id = ?
+           AND ts.date = ?
+           AND ts.start_time = ?
+           AND ts.end_time = ?
+           AND ts.sport_id = ?
+           AND ts.is_blocked_by_owner = FALSE
+           AND ts.is_holiday = FALSE
+           AND (ts.locked_until IS NULL OR ts.locked_until < NOW() OR ts.locked_by_user_id = ?)`,
           [arena_id, date, start_time, end_time, sportIdToUse, req.user.id]
         );
 
@@ -82,8 +88,8 @@ const bookingController = {
           // Create new slot - MARK IT AS UNAVAILABLE from the start
           const [slotResult] = await pool.execute(
             `INSERT INTO time_slots 
-     (arena_id, sport_id, date, start_time, end_time, price, is_available, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, FALSE, NOW())`, // Changed TRUE to FALSE
+           (arena_id, sport_id, date, start_time, end_time, price, is_available, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, FALSE, NOW())`,
             [arena_id, sportIdToUse, date, start_time, end_time, slotPrice]
           );
 
@@ -92,9 +98,9 @@ const bookingController = {
           // Get the newly created slot
           const [newSlots] = await pool.execute(
             `SELECT ts.*, a.base_price_per_hour, a.owner_id
-     FROM time_slots ts
-     JOIN arenas a ON ts.arena_id = a.arena_id
-     WHERE ts.slot_id = ?`,
+           FROM time_slots ts
+           JOIN arenas a ON ts.arena_id = a.arena_id
+           WHERE ts.slot_id = ?`,
             [slotIdToUse]
           );
 
@@ -105,15 +111,15 @@ const bookingController = {
         // Check if slot exists and is available
         const [slots] = await pool.execute(
           `SELECT ts.*, a.base_price_per_hour, a.owner_id
-                 FROM time_slots ts
-                 JOIN arenas a ON ts.arena_id = a.arena_id
-                 WHERE ts.slot_id = ? 
-                   AND ts.arena_id = ?
-                   AND ts.sport_id = ?
-                   AND ts.is_available = TRUE
-                   AND ts.is_blocked_by_owner = FALSE
-                   AND ts.is_holiday = FALSE
-                   AND (ts.locked_until IS NULL OR ts.locked_until < NOW() OR ts.locked_by_user_id = ?)`,
+         FROM time_slots ts
+         JOIN arenas a ON ts.arena_id = a.arena_id
+         WHERE ts.slot_id = ? 
+           AND ts.arena_id = ?
+           AND ts.sport_id = ?
+           AND ts.is_available = TRUE
+           AND ts.is_blocked_by_owner = FALSE
+           AND ts.is_holiday = FALSE
+           AND (ts.locked_until IS NULL OR ts.locked_until < NOW() OR ts.locked_by_user_id = ?)`,
           [slot_id, arena_id, sport_id, req.user.id]
         );
 
@@ -141,9 +147,9 @@ const bookingController = {
         // Create booking with status 'pending' for owner approval
         const [bookingResult] = await connection.execute(
           `INSERT INTO bookings 
-                 (user_id, arena_id, slot_id, sport_id, total_amount, 
-                  commission_percentage, commission_amount, payment_method, requires_advance, status)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+         (user_id, arena_id, slot_id, sport_id, total_amount, 
+          commission_percentage, commission_amount, payment_method, requires_advance, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
           [
             req.user.id,
             arena_id,
@@ -152,7 +158,7 @@ const bookingController = {
             finalTotalAmount,
             commission_percentage,
             commission_amount,
-            payment_method || "manual",
+            finalPaymentMethod, // Use validated payment method
             requires_advance || false,
           ]
         );
@@ -162,18 +168,18 @@ const bookingController = {
         // Mark slot as unavailable (but not blocked - owner can still override if needed)
         await connection.execute(
           `UPDATE time_slots 
-                 SET is_available = FALSE,
-                     locked_until = NULL,
-                     locked_by_user_id = NULL
-                 WHERE slot_id = ?`,
+         SET is_available = FALSE,
+             locked_until = NULL,
+             locked_by_user_id = NULL
+         WHERE slot_id = ?`,
           [slotIdToUse]
         );
 
         // Update arena commission due
         await connection.execute(
           `UPDATE arenas 
-                 SET total_commission_due = total_commission_due + ?
-                 WHERE arena_id = ?`,
+         SET total_commission_due = total_commission_due + ?
+         WHERE arena_id = ?`,
           [commission_amount, arena_id]
         );
 
@@ -182,14 +188,14 @@ const bookingController = {
         // Get booking details
         const [bookings] = await pool.execute(
           `SELECT b.*, a.name as arena_name, st.name as sport_name,
-                        ts.date, ts.start_time, ts.end_time, ao.arena_name as owner_name,
-                        ao.owner_id, ao.email as owner_email
-                 FROM bookings b
-                 JOIN arenas a ON b.arena_id = a.arena_id
-                 JOIN arena_owners ao ON a.owner_id = ao.owner_id
-                 JOIN sports_types st ON b.sport_id = st.sport_id
-                 JOIN time_slots ts ON b.slot_id = ts.slot_id
-                 WHERE b.booking_id = ?`,
+                ts.date, ts.start_time, ts.end_time, ao.arena_name as owner_name,
+                ao.owner_id, ao.email as owner_email
+         FROM bookings b
+         JOIN arenas a ON b.arena_id = a.arena_id
+         JOIN arena_owners ao ON a.owner_id = ao.owner_id
+         JOIN sports_types st ON b.sport_id = st.sport_id
+         JOIN time_slots ts ON b.slot_id = ts.slot_id
+         WHERE b.booking_id = ?`,
           [booking_id]
         );
 
@@ -483,8 +489,7 @@ const bookingController = {
     }
   },
 
-  // Complete booking (mark as completed)
-  // Complete booking (mark as completed)
+  // In bookingController.js, fix the completeBooking function:
   completeBooking: async (req, res) => {
     try {
       const { booking_id } = req.params;
@@ -506,14 +511,12 @@ const bookingController = {
           .json({ message: "Booking not found or access denied" });
       }
 
-      // >>>>> ADD YOUR FIX HERE <<<<<
-      if (bookingCheck[0].status !== "approved") {
-        // Changed from 'accepted' to 'approved'
+      // FIX: Change 'approved' to 'accepted' to match database enum
+      if (bookingCheck[0].status !== "accepted") {
         return res
           .status(400)
-          .json({ message: "Booking must be approved before completing" });
+          .json({ message: "Booking must be accepted before completing" });
       }
-      // >>>>> END OF FIX <<<<<
 
       await pool.execute(
         'UPDATE bookings SET status = "completed" WHERE booking_id = ?',

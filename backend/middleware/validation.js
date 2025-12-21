@@ -111,12 +111,21 @@ const teamValidation = {
     body("sport_id").isInt({ gt: 0 }).withMessage("Valid sport ID required"),
   ]),
 };
+const checkOwnerRole = (req, res, next) => {
+  if (req.user.role !== "owner") {
+    return res
+      .status(403)
+      .json({ message: "Access denied. Owner role required." });
+  }
+  next();
+};
 
 module.exports = {
   userValidation,
   arenaValidation,
   bookingValidation,
   teamValidation,
-  ownerValidation, // MAKE SURE THIS IS EXPORTED
+  ownerValidation, // MAKE SURE THIS IS
+  checkOwnerRole,
   validate,
 };

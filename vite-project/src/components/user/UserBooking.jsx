@@ -18,7 +18,7 @@ const UserBooking = () => {
       // In the fetchBookings function, replace the status assignment:
       let status;
       if (activeTab === "upcoming") {
-        status = "pending,accepted,approved"; // Include both old and new status names
+        status = "pending,accepted"; // Include both old and new status names
       } else if (activeTab === "past") {
         status = "completed,cancelled,rejected";
       }

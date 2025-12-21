@@ -130,14 +130,12 @@ const UserArenaDetails = () => {
         start_time: selectedSlot.start_time,
         end_time: selectedSlot.end_time,
         total_amount: selectedSlot.price,
-        payment_method: "manual",
-        requires_advance: false, // ADD THIS FIELD
+        payment_method: "pay_after", // Changed from "manual" to valid enum value
+        requires_advance: false,
         sport_id: selectedCourt.sports?.[0] || selectedSlot.sport_id,
       };
 
-      // ADD DEBUG LOGGING
       console.log("Sending booking data:", bookingData);
-
       const response = await bookingAPI.createBooking(bookingData);
 
       if (response.status === 201) {
