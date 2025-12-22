@@ -92,17 +92,23 @@ export const integrationService = {
      */
     createBooking: async (bookingData) => {
         try {
-            const response = await bookingAPI.createBooking({
+            const payload = {
                 arena_id: bookingData.arenaId,
                 court_id: bookingData.courtId,
                 date: bookingData.date,
                 start_time: bookingData.startTime,
                 end_time: bookingData.endTime,
                 // backend expects `total_amount`
-                total_amount: bookingData.totalPrice,
-                sport_id: bookingData.sportId || undefined,
+                total_amount: bookingData.totalPrice || bookingData.total_amount,
+                sport_id: bookingData.sportId || bookingData.sport_id || undefined,
                 notes: bookingData.notes || "",
-            });
+            };
+
+            // Accept either `slot_id` or `slotId` when frontend supplies an existing slot
+            if (bookingData.slot_id) payload.slot_id = bookingData.slot_id;
+            if (bookingData.slotId) payload.slot_id = bookingData.slotId;
+
+            const response = await bookingAPI.createBooking(payload);
             return response.data;
         } catch (error) {
             console.error("Error creating booking:", error);
@@ -369,9 +375,7 @@ export const integrationService = {
         });
     },
 
-    /**
-     * Calculate price based on duration and rate
-     */
+
     calculatePrice: (startTime, endTime, pricePerHour) => {
         const start = new Date(`2000-01-01 ${startTime}`);
         const end = new Date(`2000-01-01 ${endTime}`);

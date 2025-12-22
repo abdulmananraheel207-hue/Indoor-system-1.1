@@ -114,7 +114,7 @@ export const ownerAPI = {
     API.post(`/owners/bookings/${bookingId}/reject`, data),
 
   // Arena & Court Management
-  getArenas: () => API.get("/owners/arenas"), // NEW: Get owner's arenas
+  getArenas: () => API.get("/owners/arenas"),
   getCourts: (arenaId) => API.get(`/owners/arenas/${arenaId}/courts`),
   updateArena: (arenaId, data) => API.put(`/owners/arenas/${arenaId}`, data),
   uploadCourtPhotos: (courtId, data) =>
@@ -132,14 +132,14 @@ export const ownerAPI = {
     API.put(`/owners/arenas/${arenaId}/slots`, data),
 
   // Tournaments
-  getTournamentRequests: () => API.get("/owners/tournaments"), // NEW
+  getTournamentRequests: () => API.get("/owners/tournaments"),
   respondToTournament: (tournamentId, data) =>
-    API.post(`/owners/tournaments/${tournamentId}/respond`, data), // NEW
+    API.post(`/owners/tournaments/${tournamentId}/respond`, data),
 };
 
 export const tournamentAPI = {
-  createTournament: (data) => API.post("/tournaments", data), // NEW
-  getUserTournaments: () => API.get("/user/tournaments"), // NEW
+  createTournament: (data) => API.post("/tournaments", data),
+  getUserTournaments: () => API.get("/user/tournaments"),
 };
 
 export default API;

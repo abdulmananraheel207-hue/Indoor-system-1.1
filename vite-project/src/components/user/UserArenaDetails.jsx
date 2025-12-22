@@ -173,16 +173,33 @@ const UserArenaDetails = () => {
         return;
       }
 
-      await integrationService.createBooking({
-        arenaId: parseInt(arenaId),
-        courtId: selectedCourt.court_id,
-        date: integrationService.formatDate(selectedDate),
-        startTime,
-        endTime,
-        totalPrice,
-        sportId: sportToSend,
-        notes: "",
-      });
+      // If user selected an existing slot, send its `slot_id` so backend will book it
+      if (selectedSlots.length === 1) {
+        await integrationService.createBooking({
+          arenaId: parseInt(arenaId),
+          slot_id: selectedSlots[0].slot_id,
+          sport_id: sportToSend,
+          totalPrice,
+          notes: "",
+        });
+      } else if (selectedSlots.length > 1) {
+        // Multi-slot selection not supported by owner-created slots flow yet
+        alert("Please select a single existing time slot to book.");
+        setBookingInProgress(false);
+        return;
+      } else {
+        // No explicit slot selected — fall back to time-range request (owners must create slots)
+        await integrationService.createBooking({
+          arenaId: parseInt(arenaId),
+          courtId: selectedCourt.court_id,
+          date: integrationService.formatDate(selectedDate),
+          startTime,
+          endTime,
+          totalPrice,
+          sportId: sportToSend,
+          notes: "",
+        });
+      }
 
       alert("Booking request sent successfully! The owner will review your request.");
       navigate("/user/bookings");
