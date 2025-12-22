@@ -195,6 +195,48 @@ const userController = {
         }
     },
 
+    // Get all active arenas (for user homepage)
+    getAllArenas: async (req, res) => {
+        try {
+            const { sport_id } = req.query;
+
+            let query = `
+            SELECT a.*, 
+                   AVG(ar.rating) as avg_rating,
+                   COUNT(ar.review_id) as review_count,
+                   GROUP_CONCAT(DISTINCT st.name) as sports,
+                   (SELECT image_url FROM arena_images WHERE arena_id = a.arena_id AND is_primary = TRUE LIMIT 1) as primary_image
+            FROM arenas a
+            LEFT JOIN arena_reviews ar ON a.arena_id = ar.arena_id
+            LEFT JOIN arena_sports asp ON a.arena_id = asp.arena_id
+            LEFT JOIN sports_types st ON asp.sport_id = st.sport_id
+            WHERE a.is_active = TRUE AND a.is_blocked = FALSE
+        `;
+
+            const params = [];
+
+            if (sport_id) {
+                query += ' AND asp.sport_id = ?';
+                params.push(sport_id);
+            }
+
+            query += ' GROUP BY a.arena_id ORDER BY a.created_at DESC LIMIT 50';
+
+            const [arenas] = await pool.execute(query, params);
+
+            // Format the sports field properly
+            const formattedArenas = arenas.map(arena => ({
+                ...arena,
+                sports: arena.sports ? arena.sports.split(',') : []
+            }));
+
+            res.json(formattedArenas);
+        } catch (error) {
+            console.error(error);
+            res.status(500).json({ message: 'Server error', error: error.message });
+        }
+    },
+
     // Search arenas
     searchArenas: async (req, res) => {
         try {

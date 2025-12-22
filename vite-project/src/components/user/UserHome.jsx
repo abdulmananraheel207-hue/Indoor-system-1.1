@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { arenaAPI } from "../../services/api";
+import integrationService from "../../services/integrationService";
 
 const UserHome = () => {
   const navigate = useNavigate();
@@ -9,11 +9,11 @@ const UserHome = () => {
   const [selectedSport, setSelectedSport] = useState(null);
   const [arenas, setArenas] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
-    fetchSports();
-    fetchArenas();
+    fetchInitialData();
 
     // Get user location
     if (navigator.geolocation) {
@@ -29,27 +29,28 @@ const UserHome = () => {
     }
   }, []);
 
-  const fetchSports = async () => {
+  const fetchInitialData = async () => {
     try {
-      const response = await arenaAPI.getSportsCategories();
-      setSports(response.data);
+      setLoading(true);
+      const sportsData = await integrationService.getSportsCategories();
+      setSports(sportsData);
+      await fetchArenas();
     } catch (error) {
-      console.error("Error fetching sports:", error);
+      console.error("Error fetching initial data:", error);
+      setError(error.response?.data?.message || "Failed to load arenas");
+    } finally {
+      setLoading(false);
     }
   };
 
-  const fetchArenas = async () => {
+  const fetchArenas = async (filters = {}) => {
     try {
-      const params = {};
-      if (location) {
-        params.lat = location.lat;
-        params.lng = location.lng;
-        params.radius = 10;
-      }
-      const response = await arenaAPI.searchArenas(params);
-      setArenas(response.data);
+      setLoading(true);
+      const arenasData = await integrationService.getAllArenas(filters);
+      setArenas(Array.isArray(arenasData) ? arenasData : arenasData.arenas || []);
     } catch (error) {
       console.error("Error fetching arenas:", error);
+      setError(error.response?.data?.message || "Failed to load arenas");
     } finally {
       setLoading(false);
     }
@@ -61,20 +62,21 @@ const UserHome = () => {
       const params = { query: searchQuery };
       if (selectedSport) params.sport_id = selectedSport.sport_id;
 
-      const response = await arenaAPI.searchArenas(params);
-      setArenas(response.data);
+      const results = await integrationService.searchArenas(params);
+      setArenas(Array.isArray(results) ? results : results.arenas || []);
     } catch (error) {
       console.error("Error searching arenas:", error);
+      alert("Search failed");
     }
   };
 
   const handleSportSelect = async (sport) => {
     setSelectedSport(sport);
     try {
-      const response = await arenaAPI.searchArenas({
+      const results = await integrationService.searchArenas({
         sport_id: sport.sport_id,
       });
-      setArenas(response.data);
+      setArenas(Array.isArray(results) ? results : results.arenas || []);
     } catch (error) {
       console.error("Error filtering arenas:", error);
     }
@@ -191,11 +193,10 @@ const UserHome = () => {
               <button
                 key={sport.sport_id}
                 onClick={() => handleSportSelect(sport)}
-                className={`flex flex-col items-center p-4 rounded-xl transition-all duration-200 ${
-                  selectedSport?.sport_id === sport.sport_id
-                    ? "bg-primary-50 border-2 border-primary-500"
-                    : "bg-white border border-gray-200 hover:border-primary-300"
-                }`}
+                className={`flex flex-col items-center p-4 rounded-xl transition-all duration-200 ${selectedSport?.sport_id === sport.sport_id
+                  ? "bg-primary-50 border-2 border-primary-500"
+                  : "bg-white border border-gray-200 hover:border-primary-300"
+                  }`}
               >
                 <span className="text-2xl mb-2">
                   {sport.icon_url ? "🏸" : "🎾"}
@@ -221,6 +222,33 @@ const UserHome = () => {
           {loading ? (
             <div className="flex justify-center py-12">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+            </div>
+          ) : error ? (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
+              <p className="text-red-600 font-semibold mb-4">{error}</p>
+              <button
+                onClick={() => {
+                  setError(null);
+                  fetchInitialData();
+                }}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+              >
+                Retry
+              </button>
+            </div>
+          ) : arenas.length === 0 ? (
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-12 text-center">
+              <p className="text-gray-600 mb-4">No arenas found</p>
+              <button
+                onClick={() => {
+                  setSelectedSport(null);
+                  setSearchQuery("");
+                  fetchArenas();
+                }}
+                className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+              >
+                View All Arenas
+              </button>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">

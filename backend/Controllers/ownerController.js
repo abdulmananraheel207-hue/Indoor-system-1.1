@@ -194,8 +194,8 @@ const ownerController = {
               court.court_name || `Court ${court.court_number || 1}`,
               parseFloat(court.size_sqft) || 2000,
               parseFloat(court.price_per_hour) ||
-                parseFloat(base_price_per_hour) ||
-                500,
+              parseFloat(base_price_per_hour) ||
+              500,
               court.description || "",
             ]
           );
@@ -637,6 +637,8 @@ const ownerController = {
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
+
+
   // Get owner's arenas
   getArenas: async (req, res) => {
     try {
@@ -1467,9 +1469,8 @@ const ownerController = {
       const [bookings] = await pool.execute(query, params);
 
       res.json({
-        filename: `bookings_export_${
-          new Date().toISOString().split("T")[0]
-        }.json`,
+        filename: `bookings_export_${new Date().toISOString().split("T")[0]
+          }.json`,
         data: bookings,
         total_records: bookings.length,
         total_revenue: bookings.reduce(

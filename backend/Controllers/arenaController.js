@@ -17,7 +17,7 @@ const arenaController = {
   // Get available time slots for an arena
   getAvailableSlots: async (req, res) => {
     try {
-      const { arena_id } = req.params;
+      const arena_id = parseInt(req.params.arena_id);
       const { date, sport_id } = req.query;
 
       let query = `
@@ -121,8 +121,9 @@ const arenaController = {
   // Get arena reviews
   getArenaReviews: async (req, res) => {
     try {
-      const { arena_id } = req.params;
-      const { page = 1, limit = 10 } = req.query;
+      const arena_id = parseInt(req.params.arena_id);
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 10;
       const offset = (page - 1) * limit;
 
       const [reviews] = await pool.execute(
@@ -131,8 +132,8 @@ const arenaController = {
          JOIN users u ON ar.user_id = u.user_id
          WHERE ar.arena_id = ?
          ORDER BY ar.created_at DESC
-         LIMIT ? OFFSET ?`,
-        [arena_id, parseInt(limit), offset]
+         LIMIT ${limit} OFFSET ${offset}`,
+        [arena_id]
       );
 
       // Get total count
@@ -247,6 +248,68 @@ const arenaController = {
       );
 
       res.json(courts);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+
+  // Get all arenas
+  getAllArenas: async (req, res) => {
+    try {
+      const { sport_id } = req.query;
+      let query = "SELECT * FROM arenas WHERE is_active = 1 AND is_blocked = 0";
+      const params = [];
+
+      query += " ORDER BY rating DESC, name ASC";
+
+      const [arenas] = await pool.execute(query, params);
+      res.json(arenas);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+
+  // Get arena details by ID
+  getArenaDetails: async (req, res) => {
+    try {
+      const { arena_id } = req.params;
+
+      const [arenas] = await pool.execute(
+        "SELECT * FROM arenas WHERE arena_id = ? AND is_active = 1 AND is_blocked = 0",
+        [arena_id]
+      );
+
+      if (arenas.length === 0) {
+        return res.status(404).json({ message: "Arena not found" });
+      }
+
+      res.json(arenas[0]);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+
+  // Search arenas
+  searchArenas: async (req, res) => {
+    try {
+      const { query } = req.query;
+
+      let sqlQuery = "SELECT * FROM arenas WHERE is_active = 1 AND is_blocked = 0";
+      const params = [];
+
+      if (query) {
+        sqlQuery += " AND (name LIKE ? OR address LIKE ? OR description LIKE ?)";
+        const searchTerm = `%${query}%`;
+        params.push(searchTerm, searchTerm, searchTerm);
+      }
+
+      sqlQuery += " ORDER BY rating DESC, name ASC";
+
+      const [arenas] = await pool.execute(sqlQuery, params);
+      res.json(arenas);
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Server error", error: error.message });

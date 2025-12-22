@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { bookingAPI } from "../../services/api";
+import integrationService from "../../services/integrationService";
 import { useNavigate } from "react-router-dom";
 
 const UserBooking = () => {
@@ -7,6 +7,7 @@ const UserBooking = () => {
   const [activeTab, setActiveTab] = useState("upcoming");
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     fetchBookings();
@@ -15,18 +16,19 @@ const UserBooking = () => {
   const fetchBookings = async () => {
     try {
       setLoading(true);
-      // In the fetchBookings function, replace the status assignment:
+      setError(null);
       let status;
       if (activeTab === "upcoming") {
-        status = "pending,accepted"; // Include both old and new status names
+        status = "pending,accepted";
       } else if (activeTab === "past") {
         status = "completed,cancelled,rejected";
       }
 
-      const response = await bookingAPI.getUserBookings({ status });
-      setBookings(response.data.bookings || []);
+      const data = await integrationService.getUserBookings({ status });
+      setBookings(data.bookings || []);
     } catch (error) {
       console.error("Error fetching bookings:", error);
+      setError(error.response?.data?.message || "Failed to load bookings");
     } finally {
       setLoading(false);
     }
@@ -55,7 +57,7 @@ const UserBooking = () => {
         const reason = prompt("Please enter reason for cancellation:");
         if (!reason) return;
 
-        await bookingAPI.cancelBooking(bookingId, { reason });
+        await integrationService.cancelBooking(bookingId, reason);
         alert("Booking cancelled successfully");
         fetchBookings();
       } catch (error) {
@@ -86,21 +88,19 @@ const UserBooking = () => {
           <nav className="-mb-px flex space-x-8">
             <button
               onClick={() => setActiveTab("upcoming")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "upcoming"
-                  ? "border-primary-500 text-primary-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-              }`}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === "upcoming"
+                ? "border-primary-500 text-primary-600"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                }`}
             >
               Upcoming Bookings
             </button>
             <button
               onClick={() => setActiveTab("past")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "past"
-                  ? "border-primary-500 text-primary-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-              }`}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === "past"
+                ? "border-primary-500 text-primary-600"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                }`}
             >
               Booking History
             </button>
@@ -109,6 +109,20 @@ const UserBooking = () => {
 
         {/* Bookings List */}
         <div className="space-y-6">
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-6">
+              <p className="text-red-600 font-semibold mb-4">{error}</p>
+              <button
+                onClick={() => {
+                  setError(null);
+                  fetchBookings();
+                }}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+              >
+                Retry
+              </button>
+            </div>
+          )}
           {loading ? (
             <div className="flex justify-center py-12">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>

@@ -96,10 +96,22 @@ const arenaValidation = {
 
 // Booking validation rules
 const bookingValidation = {
+  // Accept either legacy format (slot_id + sport_id) OR new format (court_id + date + start_time + end_time)
   createBooking: validate([
     body("arena_id").isInt({ gt: 0 }).withMessage("Valid arena ID required"),
-    body("slot_id").isInt({ gt: 0 }).withMessage("Valid slot ID required"),
-    body("sport_id").isInt({ gt: 0 }).withMessage("Valid sport ID required"),
+    body()
+      .custom((_, { req }) => {
+        const hasLegacy = req.body.slot_id && req.body.sport_id;
+        const hasNew = req.body.court_id && req.body.date && req.body.start_time && req.body.end_time;
+        if (hasLegacy) return true;
+        if (hasNew) return true;
+        throw new Error(
+          "Provide either slot_id & sport_id (legacy) or court_id + date + start_time + end_time (new)"
+        );
+      })
+      .withMessage(
+        "Provide either slot_id & sport_id (legacy) or court_id + date + start_time + end_time (new)"
+      ),
     body("court_id").optional().isInt({ gt: 0 }),
   ]),
 };

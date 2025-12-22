@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from "react";
+import integrationService from "../../services/integrationService";
 
 const OwnerBookings = () => {
   const [bookings, setBookings] = useState([]);
   const [filteredBookings, setFilteredBookings] = useState([]);
-  const [statusFilter, setStatusFilter] = useState("all"); // all, pending, accepted, completed, rejected, cancelled
+  const [statusFilter, setStatusFilter] = useState("pending"); // all, pending, accepted, completed, rejected, cancelled
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [selectedBooking, setSelectedBooking] = useState(null);
 
   useEffect(() => {
@@ -15,29 +17,19 @@ const OwnerBookings = () => {
 
   const fetchBookings = async () => {
     setLoading(true);
+    setError(null);
     try {
-      const token = localStorage.getItem("token");
-      let url = `http://localhost:5000/api/owners/bookings`;
+      const filters = {};
+      if (statusFilter !== "all") filters.status = statusFilter;
+      if (dateFrom) filters.date_from = dateFrom;
+      if (dateTo) filters.date_to = dateTo;
 
-      const params = new URLSearchParams();
-      if (statusFilter !== "all") params.append("status", statusFilter);
-      if (dateFrom) params.append("date_from", dateFrom);
-      if (dateTo) params.append("date_to", dateTo);
-
-      if (params.toString()) url += `?${params.toString()}`;
-
-      const response = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      const data = await response.json();
-      if (response.ok) {
-        setBookings(data);
-        setFilteredBookings(data);
-      }
+      const data = await integrationService.getOwnerBookingRequests(filters);
+      setBookings(data.bookings || data);
+      setFilteredBookings(data.bookings || data);
     } catch (error) {
       console.error("Error fetching bookings:", error);
+      setError(error.response?.data?.message || "Failed to load bookings");
     } finally {
       setLoading(false);
     }
@@ -45,28 +37,15 @@ const OwnerBookings = () => {
 
   const handleAcceptBooking = async (bookingId) => {
     try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(
-        `http://localhost:5000/api/owners/bookings/${bookingId}/accept`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
-
-      if (response.ok) {
-        alert("Booking accepted successfully");
-        fetchBookings(); // Refresh list
-      } else {
-        const data = await response.json();
-        alert(data.message || "Failed to accept booking");
-      }
+      setLoading(true);
+      await integrationService.acceptBookingRequest(bookingId);
+      alert("Booking accepted successfully!");
+      fetchBookings();
     } catch (error) {
       console.error("Error accepting booking:", error);
-      alert("An error occurred");
+      alert(error.response?.data?.message || "Failed to accept booking");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -75,29 +54,15 @@ const OwnerBookings = () => {
     if (!reason) return;
 
     try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(
-        `http://localhost:5000/api/owners/bookings/${bookingId}/reject`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ reason }),
-        }
-      );
-
-      if (response.ok) {
-        alert("Booking rejected successfully");
-        fetchBookings(); // Refresh list
-      } else {
-        const data = await response.json();
-        alert(data.message || "Failed to reject booking");
-      }
+      setLoading(true);
+      await integrationService.rejectBookingRequest(bookingId, reason);
+      alert("Booking rejected successfully");
+      fetchBookings();
     } catch (error) {
       console.error("Error rejecting booking:", error);
-      alert("An error occurred");
+      alert(error.response?.data?.message || "Failed to reject booking");
+    } finally {
+      setLoading(false);
     }
   };
 

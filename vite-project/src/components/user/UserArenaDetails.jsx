@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
-import { arenaAPI, bookingAPI } from "../../services/api";
+import integrationService from "../../services/integrationService";
 
 const UserArenaDetails = () => {
   const { arenaId } = useParams();
@@ -10,7 +10,9 @@ const UserArenaDetails = () => {
   const [arena, setArena] = useState(null);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedCourt, setSelectedCourt] = useState(null);
-  const [selectedSlot, setSelectedSlot] = useState(null);
+  const [selectedSlots, setSelectedSlots] = useState([]);
+  const [sportsList, setSportsList] = useState([]);
+  const [selectedSportId, setSelectedSportId] = useState(null);
   const [availableSlots, setAvailableSlots] = useState([]);
   const [loading, setLoading] = useState(true);
   const [bookingInProgress, setBookingInProgress] = useState(false);
@@ -21,35 +23,26 @@ const UserArenaDetails = () => {
   useEffect(() => {
     fetchArenaDetails();
     fetchReviews();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [arenaId]);
 
   useEffect(() => {
     if (arena && selectedDate) {
       fetchAvailableSlots();
+      // clear any previously selected slots when date changes
+      setSelectedSlots([]);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [arena, selectedDate]);
 
   // In UserArenaDetails.jsx, replace the fetchArenaDetails function:
   const fetchArenaDetails = async () => {
     try {
       setLoading(true);
-
-      // Fetch arena details
-      const arenaResponse = await arenaAPI.getArenaDetails(arenaId);
-      const arenaData = arenaResponse.data;
-
-      // Fetch courts for this arena
-      let courtsData = [];
-      try {
-        const courtsResponse = await arenaAPI.getArenaCourts(arenaId);
-        courtsData = courtsResponse.data.courts || [];
-      } catch (courtError) {
-        console.error("Error fetching courts:", courtError);
-        courtsData = [];
-      }
+      const details = await integrationService.getArenaDetails(arenaId);
 
       // Transform court data to match expected format
-      const transformedCourts = courtsData.map((court) => ({
+      const transformedCourts = details.courts.map((court) => ({
         court_id: court.court_id,
         court_name: court.court_name || `Court ${court.court_number}`,
         court_number: court.court_number,
@@ -61,12 +54,20 @@ const UserArenaDetails = () => {
       }));
 
       setArena({
-        ...arenaData,
+        ...details.arena,
         courts: transformedCourts,
       });
+      setReviews(details.reviews);
 
       if (transformedCourts.length > 0) {
         setSelectedCourt(transformedCourts[0]);
+      }
+      // fetch sports categories for sport selection
+      try {
+        const sports = await integrationService.getSportsCategories();
+        setSportsList(sports || []);
+      } catch (e) {
+        console.warn('Could not load sports list', e);
       }
     } catch (error) {
       console.error("Error fetching arena details:", error);
@@ -77,13 +78,13 @@ const UserArenaDetails = () => {
 
   const fetchAvailableSlots = async () => {
     try {
-      const dateStr = selectedDate.toISOString().split("T")[0];
-      const response = await arenaAPI.getAvailableSlots(
+      const dateStr = integrationService.formatDate(selectedDate);
+      const slots = await integrationService.getAvailableSlots(
         arenaId,
         dateStr,
         selectedCourt?.sports?.[0]
       );
-      setAvailableSlots(response.data);
+      setAvailableSlots(slots);
     } catch (error) {
       console.error("Error fetching slots:", error);
     }
@@ -103,118 +104,120 @@ const UserArenaDetails = () => {
     }
   };
 
-  const handleSlotSelect = async (slot) => {
-    if (slot.is_available && !slot.is_blocked) {
-      setSelectedSlot(slot);
-      setBookingInProgress(true); // Just mark as in progress
-      // Remove all locking/release logic for now
+  const handleSlotSelect = (slot) => {
+    if (!slot.is_available || slot.is_blocked) return;
+
+    // toggle selection
+    console.log("slot clicked", slot.slot_id, slot);
+    const exists = selectedSlots.some((s) => s.slot_id === slot.slot_id);
+    if (exists) {
+      const next = selectedSlots.filter((s) => s.slot_id !== slot.slot_id);
+      setSelectedSlots(next);
+      console.log("selectedSlots updated", next);
+    } else {
+      const next = [...selectedSlots, slot];
+      setSelectedSlots(next);
+      console.log("selectedSlots updated", next);
     }
   };
   const handleBooking = async () => {
-    if (!selectedSlot) {
-      alert("Please select a time slot");
+    if (!selectedSlots || selectedSlots.length === 0) {
+      alert("Please select at least one time slot");
       return;
     }
 
-    // Add validation for selectedCourt
     if (!selectedCourt || !selectedCourt.court_id) {
       alert("Please select a court first");
       return;
     }
 
     try {
-      const bookingData = {
-        arena_id: parseInt(arenaId),
-        court_id: selectedCourt.court_id,
-        date: selectedDate.toISOString().split("T")[0],
-        start_time: selectedSlot.start_time,
-        end_time: selectedSlot.end_time,
-        total_amount: selectedSlot.price,
-        payment_method: "pay_after", // Changed from "manual" to valid enum value
-        requires_advance: false,
-        sport_id: selectedCourt.sports?.[0] || selectedSlot.sport_id,
-      };
+      setBookingInProgress(true);
 
-      console.log("Sending booking data:", bookingData);
-      const response = await bookingAPI.createBooking(bookingData);
+      // compute booking range and total price from selected slots
+      const sorted = [...selectedSlots].sort((a, b) => a.start_time.localeCompare(b.start_time));
+      const startTime = sorted[0].start_time;
+      const endTime = sorted[sorted.length - 1].end_time;
+      const totalPrice = sorted.reduce((sum, s) => sum + Number(s.price || 0), 0);
 
-      if (response.status === 201) {
-        alert(response.data?.message || "Booking request sent successfully!");
-        // Release the slot lock using correct endpoint
-        if (selectedSlot.slot_id) {
-          alert(response.data?.message || "Booking request sent successfully!");
+      // Ensure we have a sport id to send. If user didn't pick one, try to derive a sensible default.
+      let sportToSend = selectedSportId;
+      if (!sportToSend) {
+        // Try to use court's assigned sports (matching by id or name against sportsList)
+        if (selectedCourt?.sports && selectedCourt.sports.length > 0 && sportsList && sportsList.length > 0) {
+          const firstCourtSport = selectedCourt.sports[0];
+          const matched = sportsList.find(
+            (s) => s.sport_id == firstCourtSport || s.id == firstCourtSport || s.name == firstCourtSport || s.sport_name == firstCourtSport
+          );
+          if (matched) {
+            sportToSend = matched.sport_id || matched.id || matched.sportId;
+            console.log("Derived sportToSend from court->sportsList:", sportToSend, matched);
+          } else if (/^\d+$/.test(String(firstCourtSport))) {
+            // court may store sport ids directly
+            sportToSend = Number(firstCourtSport);
+            console.log("Derived sportToSend from court sports id:", sportToSend);
+          }
         }
-        navigate(`/user/bookings`);
-      } else {
-        alert(response.data?.message || "Failed to create booking");
+
+        // Fallback to first available sport from sportsList
+        if (!sportToSend && sportsList && sportsList.length > 0) {
+          const first = sportsList[0];
+          sportToSend = first.sport_id || first.id || first.sportId;
+          console.log("Fallback sportToSend from sportsList:", sportToSend);
+        }
       }
+
+      if (!sportToSend) {
+        alert("Please select a sport before booking.");
+        setBookingInProgress(false);
+        return;
+      }
+
+      await integrationService.createBooking({
+        arenaId: parseInt(arenaId),
+        courtId: selectedCourt.court_id,
+        date: integrationService.formatDate(selectedDate),
+        startTime,
+        endTime,
+        totalPrice,
+        sportId: sportToSend,
+        notes: "",
+      });
+
+      alert("Booking request sent successfully! The owner will review your request.");
+      navigate("/user/bookings");
     } catch (error) {
       console.error("Error creating booking:", error);
-      console.error("Error details:", error.response?.data);
-      // More specific error handling
-      if (error.response?.data?.message) {
-        alert(error.response.data.message);
-      } else if (error.response?.status === 400) {
-        alert("Invalid booking data");
-      } else {
-        alert("Failed to create booking. Please try again.");
-      }
-
-      // Release slot lock on error
-      if (selectedSlot?.slot_id) {
-        try {
-          await fetch(
-            `http://localhost:5000/api/arenas/slots/${selectedSlot.slot_id}/release`,
-            {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${localStorage.getItem("token")}`,
-              },
-            }
-          );
-        } catch (releaseError) {
-          console.error("Error releasing slot:", releaseError);
-        }
-      }
+      alert(error.response?.data?.message || "Failed to create booking. Please try again.");
+    } finally {
       setBookingInProgress(false);
     }
   };
 
   const handleAddFavorite = async () => {
     try {
-      await fetch(`http://localhost:5000/api/user/arenas/${arenaId}/favorite`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
-        },
-      });
+      await integrationService.addToFavorites(arenaId);
       alert("Arena added to favorites!");
     } catch (error) {
       console.error("Error adding favorite:", error);
+      alert("Failed to add to favorites");
     }
   };
 
   const handleSubmitReview = async () => {
-    try {
-      const response = await fetch(
-        `http://localhost:5000/api/arenas/${arenaId}/reviews`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
-          body: JSON.stringify(newReview),
-        }
-      );
+    if (!newReview.comment.trim()) {
+      alert("Please enter a comment");
+      return;
+    }
 
-      if (response.ok) {
-        alert("Review submitted successfully!");
-        setNewReview({ rating: 5, comment: "" });
-        fetchReviews();
-      }
+    try {
+      await integrationService.submitReview(arenaId, newReview.rating, newReview.comment);
+      alert("Review submitted successfully!");
+      setNewReview({ rating: 5, comment: "" });
+      fetchReviews();
     } catch (error) {
       console.error("Error submitting review:", error);
+      alert("Failed to submit review");
     }
   };
 
@@ -241,6 +244,7 @@ const UserArenaDetails = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
             <button
+              type="button"
               onClick={() => navigate(-1)}
               className="flex items-center text-gray-600 hover:text-gray-900"
             >
@@ -260,6 +264,7 @@ const UserArenaDetails = () => {
               Back
             </button>
             <button
+              type="button"
               onClick={handleAddFavorite}
               className="text-red-500 hover:text-red-700"
             >
@@ -314,11 +319,10 @@ const UserArenaDetails = () => {
                       {[...Array(5)].map((_, i) => (
                         <svg
                           key={i}
-                          className={`h-5 w-5 ${
-                            i < Math.floor(arena.rating || 0)
-                              ? "text-yellow-400"
-                              : "text-gray-300"
-                          }`}
+                          className={`h-5 w-5 ${i < Math.floor(arena.rating || 0)
+                            ? "text-yellow-400"
+                            : "text-gray-300"
+                            }`}
                           fill="currentColor"
                           viewBox="0 0 20 20"
                         >
@@ -333,6 +337,7 @@ const UserArenaDetails = () => {
                       </span>
                     </div>
                     <button
+                      type="button"
                       onClick={() => setShowReviews(!showReviews)}
                       className="text-primary-600 hover:text-primary-700"
                     >
@@ -439,6 +444,7 @@ const UserArenaDetails = () => {
                       </span>
                       {[...Array(5)].map((_, i) => (
                         <button
+                          type="button"
                           key={i}
                           onClick={() =>
                             setNewReview({ ...newReview, rating: i + 1 })
@@ -460,6 +466,7 @@ const UserArenaDetails = () => {
                     />
                   </div>
                   <button
+                    type="button"
                     onClick={handleSubmitReview}
                     className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
                   >
@@ -481,11 +488,10 @@ const UserArenaDetails = () => {
                             {[...Array(5)].map((_, i) => (
                               <svg
                                 key={i}
-                                className={`h-4 w-4 ${
-                                  i < review.rating
-                                    ? "text-yellow-400"
-                                    : "text-gray-300"
-                                }`}
+                                className={`h-4 w-4 ${i < review.rating
+                                  ? "text-yellow-400"
+                                  : "text-gray-300"
+                                  }`}
                                 fill="currentColor"
                                 viewBox="0 0 20 20"
                               >
@@ -509,7 +515,7 @@ const UserArenaDetails = () => {
           {/* Right Column - Booking Section */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-xl shadow-sm p-6 sticky top-6">
-              <h3 className="text-xl font-semibold text-blue-600 mb-6">
+              <h3 className="text-xl font-semibold text-black-1000 mb-6">
                 Book Now
               </h3>
               {/* Date Picker */}
@@ -536,12 +542,12 @@ const UserArenaDetails = () => {
                     {arena.courts.map((court) => (
                       <button
                         key={court.court_id}
+                        type="button"
                         onClick={() => setSelectedCourt(court)}
-                        className={`w-full text-left p-3 rounded-lg border ${
-                          selectedCourt?.court_id === court.court_id
-                            ? "border-primary-500 bg-primary-50"
-                            : "border-gray-300 hover:bg-gray-50"
-                        }`}
+                        className={`w-full text-left p-3 rounded-lg border ${selectedCourt?.court_id === court.court_id
+                          ? "border-primary-500 bg-primary-50"
+                          : "border-gray-300 hover:bg-gray-50"
+                          }`}
                       >
                         <div className="flex justify-between items-center">
                           <div>
@@ -568,30 +574,33 @@ const UserArenaDetails = () => {
                   Available Time Slots
                 </label>
                 <div className="grid grid-cols-2 gap-2">
-                  {availableSlots.map((slot) => (
-                    <button
-                      key={slot.slot_id}
-                      onClick={() => handleSlotSelect(slot)}
-                      disabled={!slot.is_available || slot.is_blocked}
-                      className={`p-3 rounded-lg border text-center ${
-                        selectedSlot?.slot_id === slot.slot_id
+                  {availableSlots.map((slot) => {
+                    const isSelected = selectedSlots.some((s) => s.slot_id === slot.slot_id);
+                    return (
+                      <button
+                        key={slot.slot_id}
+                        type="button"
+                        onClick={() => handleSlotSelect(slot)}
+                        disabled={!slot.is_available || slot.is_blocked}
+                        className={`p-3 rounded-lg border text-center ${isSelected
                           ? "border-primary-500 bg-primary-50 text-primary-700"
                           : slot.is_available && !slot.is_blocked
-                          ? "border-gray-300 hover:bg-gray-50"
-                          : "border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed"
-                      }`}
-                    >
-                      <div className="font-medium">
-                        {slot.start_time} - {slot.end_time}
-                      </div>
-                      <div className="text-sm">Rs {slot.price}</div>
-                    </button>
-                  ))}
+                            ? "border-gray-300 hover:bg-gray-50"
+                            : "border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed"
+                          }`}
+                      >
+                        <div className="font-medium">
+                          {slot.start_time} - {slot.end_time}
+                        </div>
+                        <div className="text-sm">Rs {slot.price}</div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
               {/* Booking Summary */}
-              {selectedSlot && (
+              {selectedSlots && selectedSlots.length > 0 && (
                 <div className="mb-6 p-4 bg-gray-50 rounded-lg">
                   <h4 className="font-medium text-gray-900 mb-3">
                     Booking Summary
@@ -602,9 +611,12 @@ const UserArenaDetails = () => {
                       <span>{selectedDate.toLocaleDateString()}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Time:</span>
+                      <span className="text-gray-600">Time Range:</span>
                       <span>
-                        {selectedSlot.start_time} - {selectedSlot.end_time}
+                        {(() => {
+                          const sorted = [...selectedSlots].sort((a, b) => a.start_time.localeCompare(b.start_time));
+                          return `${sorted[0].start_time} - ${sorted[sorted.length - 1].end_time}`;
+                        })()}
                       </span>
                     </div>
                     <div className="flex justify-between">
@@ -613,34 +625,58 @@ const UserArenaDetails = () => {
                     </div>
                     <div className="flex justify-between font-medium">
                       <span>Total:</span>
-                      <span>Rs {selectedSlot.price}</span>
+                      <span>Rs {selectedSlots.reduce((s, it) => s + Number(it.price || 0), 0)}</span>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-600">Selected slots:</p>
+                      <div className="text-sm">
+                        {selectedSlots.map((s) => (
+                          <div key={s.slot_id}>{s.start_time} - {s.end_time}</div>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 </div>
               )}
 
               {/* Book Button */}
+              {selectedSlots.length > 0 && (
+                <div className="flex items-center justify-between mb-3">
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedSlots([]); console.log('cleared selectedSlots'); }}
+                    className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
+                  >
+                    Clear All
+                  </button>
+                  <div className="text-sm text-gray-600">Selected: {selectedSlots.length}</div>
+                </div>
+              )}
+
               <button
+                type="button"
                 onClick={handleBooking}
-                disabled={!selectedSlot || bookingInProgress}
-                className={`w-full py-3 rounded-lg font-medium ${
-                  selectedSlot && !bookingInProgress
-                    ? "bg-primary-600 text-white hover:bg-primary-700"
-                    : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                }`}
+                disabled={selectedSlots.length === 0 || bookingInProgress}
+                className={`w-full py-3 rounded-lg font-medium ${selectedSlots.length > 0 && !bookingInProgress
+                  ? "bg-primary-600 text-white hover:bg-primary-700"
+                  : "bg-gray-300 text-gray-500 cursor-not-allowed"
+                  }`}
               >
-                {bookingInProgress
-                  ? "Processing..."
-                  : selectedSlot
-                  ? "Book Now"
-                  : "Select a time slot"}
+                {bookingInProgress ? "Processing..." : selectedSlots.length > 0 ? "Book Now" : "Select a time slot"}
               </button>
 
-              {selectedSlot && bookingInProgress && (
-                <p className="mt-3 text-sm text-gray-600 text-center">
-                  Slot locked for 10 minutes
-                </p>
-              )}
+              {/* Debug panel visible on-page to help when console isn't available */}
+              <div className="mt-4 p-3 bg-gray-50 border rounded text-sm text-gray-700">
+                <div className="font-medium mb-2">Debug</div>
+                <div>sportsList: {sportsList ? sportsList.length : 0} items</div>
+                <div>selectedSportId: {String(selectedSportId)}</div>
+                <div>selectedCourt: {selectedCourt ? selectedCourt.court_id : "none"}</div>
+                <div>availableSlots: {availableSlots ? availableSlots.length : 0}</div>
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-xs text-gray-600">Show raw slots</summary>
+                  <pre className="text-xs whitespace-pre-wrap">{JSON.stringify(availableSlots, null, 2)}</pre>
+                </details>
+              </div>
             </div>
           </div>
         </div>

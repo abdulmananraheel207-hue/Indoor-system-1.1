@@ -5,19 +5,50 @@ const bookingController = {
   // Create a new booking - MODIFIED VERSION
   createBooking: async (req, res) => {
     try {
-      // Accept both old format (slot_id, sport_id) and new format (court_id, date, start_time, end_time)
-      const {
-        arena_id,
-        slot_id,
-        sport_id,
-        court_id,
+      console.log('createBooking called by user:', req.user?.id, 'raw body:', req.body);
+
+      // Normalize incoming fields (accept camelCase or snake_case)
+      const body = req.body || {};
+      const arena_id = body.arena_id || body.arenaId || body.arena || null;
+      const slot_id = body.slot_id || body.slotId || null;
+      const sport_id = body.sport_id || body.sportId || body.sport || null;
+      const court_id = body.court_id || body.courtId || null;
+      const date = body.date || body.bookingDate || null;
+      const start_time = body.start_time || body.startTime || null;
+      const end_time = body.end_time || body.endTime || null;
+      const total_amount = body.total_amount || body.totalAmount || body.totalPrice || null;
+      const payment_method = body.payment_method || body.paymentMethod || null;
+      const requires_advance = body.requires_advance || body.requiresAdvance || false;
+
+      // Basic validation: ensure either slot_id or new format (court_id + date + start_time + end_time) is present
+      const hasLegacy = slot_id !== null && sport_id !== null;
+      const hasNew = court_id !== null && date && start_time && end_time;
+      if (!hasLegacy && !hasNew) {
+        console.warn('createBooking missing required fields', { arena_id, slot_id, sport_id, court_id, date, start_time, end_time });
+        return res.status(400).json({ message: 'Missing booking parameters. Provide slot_id+sport_id or court_id+date+start_time+end_time.' });
+      }
+
+      // Coerce numeric ids
+      const arenaIdNum = arena_id ? Number(arena_id) : null;
+      const slotIdNum = slot_id ? Number(slot_id) : null;
+      const sportIdNum = sport_id ? Number(sport_id) : null;
+      const courtIdNum = court_id ? Number(court_id) : null;
+      const totalAmountNum = total_amount ? Number(total_amount) : null;
+
+      const normalized = {
+        arena_id: arenaIdNum,
+        slot_id: slotIdNum,
+        sport_id: sportIdNum,
+        court_id: courtIdNum,
         date,
         start_time,
         end_time,
-        total_amount,
+        total_amount: totalAmountNum,
         payment_method,
-        requires_advance,
-      } = req.body;
+        requires_advance: !!requires_advance,
+      };
+
+      console.log('createBooking normalized payload:', normalized);
 
       let slot;
       let sportIdToUse = sport_id;
@@ -216,11 +247,15 @@ const bookingController = {
     }
   },
 
-  // Get user bookings
+
   getUserBookings: async (req, res) => {
     try {
       const { status, limit = 10, page = 1 } = req.query;
-      const offset = (page - 1) * limit;
+
+      // FIX 1: Ensure pagination values are actual Integers
+      const limitInt = parseInt(limit);
+      const pageInt = parseInt(page);
+      const offset = (pageInt - 1) * limitInt;
 
       let query = `
         SELECT b.*, a.name as arena_name, a.address as arena_address,
@@ -236,24 +271,41 @@ const bookingController = {
 
       const params = [req.user.id];
 
+      // FIX 2: Handle status correctly
       if (status) {
-        query += " AND b.status = ?";
-        params.push(status);
+        if (status.includes(',')) {
+          // If multiple statuses (pending,accepted), use IN operator
+          const statusArray = status.split(',').map((s) => s.trim()).filter(Boolean);
+          if (statusArray.length > 0) {
+            query += ` AND b.status IN (${statusArray.map(() => '?').join(',')})`;
+            params.push(...statusArray);
+          }
+        } else {
+          query += " AND b.status = ?";
+          params.push(status.trim());
+        }
       }
 
-      query += " ORDER BY b.booking_date DESC LIMIT ? OFFSET ?";
-      params.push(parseInt(limit), offset);
+      // FIX 3: Push pagination as Numbers
+      // Inline LIMIT/OFFSET to avoid placeholder issues with some MySQL drivers
+      query += ` ORDER BY b.booking_date DESC LIMIT ${limitInt} OFFSET ${offset}`;
 
+      // This call at line 247 will now succeed
       const [bookings] = await pool.execute(query, params);
 
-      // Get total count
-      let countQuery =
-        "SELECT COUNT(*) as total FROM bookings WHERE user_id = ?";
+      // Get total count (apply same status logic)
+      let countQuery = "SELECT COUNT(*) as total FROM bookings WHERE user_id = ?";
       const countParams = [req.user.id];
 
       if (status) {
-        countQuery += " AND status = ?";
-        countParams.push(status);
+        if (status.includes(',')) {
+          const statusArray = status.split(',');
+          countQuery += ` AND status IN (${statusArray.map(() => '?').join(',')})`;
+          countParams.push(...statusArray);
+        } else {
+          countQuery += " AND status = ?";
+          countParams.push(status);
+        }
       }
 
       const [countResult] = await pool.execute(countQuery, countParams);
@@ -261,8 +313,8 @@ const bookingController = {
       res.json({
         bookings,
         total: countResult[0].total,
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: pageInt,
+        limit: limitInt,
       });
     } catch (error) {
       console.error(error);

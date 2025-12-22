@@ -18,6 +18,7 @@ router.put('/profile/password', userController.changePassword);
 router.get('/arenas/nearby', userController.getNearbyArenas);
 router.get('/arenas/search', userController.searchArenas);
 router.get('/arenas/:arena_id', userController.getArenaDetails);
+router.get('/arenas/all', userController.getAllArenas);
 
 // Favorites
 router.post('/arenas/:arena_id/favorite', userController.addToFavorites);

@@ -20,7 +20,8 @@ API.interceptors.request.use((config) => {
 export const arenaAPI = {
   getSportsCategories: () => API.get("/arenas/sports"),
   getArenaDetails: (arenaId) => API.get(`/arenas/${arenaId}`),
-  getArenaCourts: (arenaId) => API.get(`/arenas/${arenaId}/courts`), // NEW: Get courts for arena
+  getArenaCourts: (arenaId) => API.get(`/arenas/${arenaId}/courts`),
+  getAllArenas: (params) => API.get("/arenas/all", { params }),
   getAvailableSlots: (arenaId, date, sportId) =>
     API.get(`/arenas/${arenaId}/slots`, {
       params: { date, sport_id: sportId },
