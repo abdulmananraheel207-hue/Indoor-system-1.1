@@ -1,6 +1,7 @@
 const pool = require("../db");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const { generateTimeSlots } = require("../utils/timeSlotHelper");
 
 const ownerController = {
   // Complete owner registration with arena, courts, sports, and time slots
@@ -123,7 +124,6 @@ const ownerController = {
         const owner_id = ownerResult.insertId;
 
         // 2. Create arena record
-        // Match exactly the columns that exist in your arenas table
         const [arenaResult] = await connection.execute(
           `INSERT INTO arenas 
            (owner_id, name, description, location_lat, location_lng,
@@ -155,17 +155,17 @@ const ownerController = {
             });
           }
 
-          // Then proceed with your existing arena_sports insertion
+          // Add arena sports
           for (const sport_id of sports) {
             await connection.execute(
               `INSERT INTO arena_sports (arena_id, sport_id, price_per_hour)
-       VALUES (?, ?, ?)`,
+               VALUES (?, ?, ?)`,
               [arena_id, sport_id, parseFloat(base_price_per_hour) || 500]
             );
           }
         }
 
-        // 4. Create court details (if courts array provided)
+        // 3. Create court details (if courts array provided)
         let courtData = courts;
         if (courts.length === 0) {
           // Auto-generate courts based on number_of_courts
@@ -177,7 +177,7 @@ const ownerController = {
               size_sqft: 2000,
               price_per_hour: parseFloat(base_price_per_hour) || 500,
               description: "",
-              sports: sports, // Assign all selected sports to each court
+              sports: sports,
             })
           );
         }
@@ -215,7 +215,7 @@ const ownerController = {
           }
         }
 
-        // 5. Generate and create time slots for next 30 days
+        // 4. Generate and create time slots for next 30 days
         const timeSlots = generateTimeSlots(
           opening_time,
           closing_time,
@@ -249,7 +249,7 @@ const ownerController = {
           }
         }
 
-        // 6. Store time slots configuration in owner record (time_slots JSON exists in arena_owners)
+        // 5. Store time slots configuration in owner record
         const timeSlotsConfig = JSON.stringify({
           opening_time,
           closing_time,
@@ -311,7 +311,7 @@ const ownerController = {
   uploadArenaPhotos: async (req, res) => {
     try {
       const { arena_id } = req.params;
-      const files = req.files; // Assuming multer middleware
+      const files = req.files;
 
       if (!files || files.length === 0) {
         return res.status(400).json({ message: "No files uploaded" });
@@ -335,11 +335,7 @@ const ownerController = {
         await pool.execute(
           `INSERT INTO arena_images (arena_id, image_url, is_primary, uploaded_at)
            VALUES (?, ?, ?, NOW())`,
-          [
-            arena_id,
-            `/uploads/arenas/${file.filename}`,
-            i === 0, // First photo is primary
-          ]
+          [arena_id, `/uploads/arenas/${file.filename}`, i === 0]
         );
       }
 
@@ -384,11 +380,7 @@ const ownerController = {
         await pool.execute(
           `INSERT INTO court_images (court_id, image_url, is_primary, uploaded_at)
            VALUES (?, ?, ?, NOW())`,
-          [
-            court_id,
-            `/uploads/courts/${file.filename}`,
-            i === 0, // First photo is primary
-          ]
+          [court_id, `/uploads/courts/${file.filename}`, i === 0]
         );
       }
 
@@ -477,34 +469,33 @@ const ownerController = {
   },
 
   // Get all booking requests for owner
-  // Minimal owner bookings endpoint
   getOwnerBookings: async (req, res) => {
     try {
       const { status, date_from, date_to } = req.query;
-      const ownerId = req.user.id; // Assuming owner ID from auth
+      const ownerId = req.user.id;
 
       let query = `
-            SELECT 
-                b.booking_id,
-                b.status,
-                b.total_amount,
-                b.commission_amount,
-                b.created_at as booking_date,
-                u.name as user_name,
-                u.email as user_email,
-                u.phone_number as user_phone,
-                st.name as sport_name,
-                a.name as arena_name,
-                ts.date,
-                ts.start_time,
-                ts.end_time
-            FROM bookings b
-            JOIN users u ON b.user_id = u.user_id
-            JOIN sports_types st ON b.sport_id = st.sport_id
-            JOIN time_slots ts ON b.slot_id = ts.slot_id
-            JOIN arenas a ON b.arena_id = a.arena_id
-            WHERE a.owner_id = ?
-        `;
+        SELECT 
+          b.booking_id,
+          b.status,
+          b.total_amount,
+          b.commission_amount,
+          b.created_at as booking_date,
+          u.name as user_name,
+          u.email as user_email,
+          u.phone_number as user_phone,
+          st.name as sport_name,
+          a.name as arena_name,
+          ts.date,
+          ts.start_time,
+          ts.end_time
+        FROM bookings b
+        JOIN users u ON b.user_id = u.user_id
+        JOIN sports_types st ON b.sport_id = st.sport_id
+        JOIN time_slots ts ON b.slot_id = ts.slot_id
+        JOIN arenas a ON b.arena_id = a.arena_id
+        WHERE a.owner_id = ?
+      `;
 
       const params = [ownerId];
 
@@ -533,7 +524,7 @@ const ownerController = {
     }
   },
 
-  // Accept a booking request - MODIFIED
+  // Accept a booking request
   acceptBooking: async (req, res) => {
     try {
       const { booking_id } = req.params;
@@ -541,8 +532,8 @@ const ownerController = {
       // Verify owner owns this booking's arena
       const [bookingCheck] = await pool.execute(
         `SELECT b.* FROM bookings b
-             JOIN arenas a ON b.arena_id = a.arena_id
-             WHERE b.booking_id = ? AND a.owner_id = ?`,
+         JOIN arenas a ON b.arena_id = a.arena_id
+         WHERE b.booking_id = ? AND a.owner_id = ?`,
         [booking_id, req.user.id]
       );
 
@@ -558,7 +549,7 @@ const ownerController = {
           .json({ message: "Booking is not in pending status" });
       }
 
-      // Update booking status to 'approved' (was 'accepted')
+      // Update booking status to 'approved'
       await pool.execute(
         'UPDATE bookings SET status = "approved" WHERE booking_id = ?',
         [booking_id]
@@ -571,7 +562,7 @@ const ownerController = {
     }
   },
 
-  // Reject a booking request - MODIFIED
+  // Reject a booking request
   rejectBooking: async (req, res) => {
     try {
       const { booking_id } = req.params;
@@ -580,9 +571,9 @@ const ownerController = {
       // Verify owner owns this booking's arena
       const [bookingCheck] = await pool.execute(
         `SELECT b.*, ts.slot_id FROM bookings b
-             JOIN arenas a ON b.arena_id = a.arena_id
-             JOIN time_slots ts ON b.slot_id = ts.slot_id
-             WHERE b.booking_id = ? AND a.owner_id = ?`,
+         JOIN arenas a ON b.arena_id = a.arena_id
+         JOIN time_slots ts ON b.slot_id = ts.slot_id
+         WHERE b.booking_id = ? AND a.owner_id = ?`,
         [booking_id, req.user.id]
       );
 
@@ -606,21 +597,21 @@ const ownerController = {
         // Update booking status to 'rejected'
         await connection.execute(
           `UPDATE bookings 
-                 SET status = "rejected", 
-                     cancelled_by = "owner", 
-                     cancellation_time = NOW(),
-                     cancellation_reason = ?
-                 WHERE booking_id = ?`,
+           SET status = "rejected", 
+               cancelled_by = "owner", 
+               cancellation_time = NOW(),
+               cancellation_reason = ?
+           WHERE booking_id = ?`,
           [reason || "Rejected by owner", booking_id]
         );
 
         // Make the time slot available again
         await connection.execute(
           `UPDATE time_slots 
-                 SET is_available = TRUE,
-                     locked_until = NULL,
-                     locked_by_user_id = NULL
-                 WHERE slot_id = ?`,
+           SET is_available = TRUE,
+               locked_until = NULL,
+               locked_by_user_id = NULL
+           WHERE slot_id = ?`,
           [bookingCheck[0].slot_id]
         );
 
@@ -637,7 +628,6 @@ const ownerController = {
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
-
 
   // Get owner's arenas
   getArenas: async (req, res) => {
@@ -680,7 +670,7 @@ const ownerController = {
       await connection.beginTransaction();
 
       try {
-        // Create arena (match arenas table)
+        // Create arena
         const [arenaResult] = await connection.execute(
           `INSERT INTO arenas 
            (owner_id, name, description, location_lat, location_lng, 
@@ -770,18 +760,18 @@ const ownerController = {
       // Get all courts with their sports and images
       const [courts] = await pool.execute(
         `SELECT 
-        cd.*,
-        GROUP_CONCAT(DISTINCT cs.sport_id) as sports,
-        GROUP_CONCAT(DISTINCT st.name) as sports_names,
-        (SELECT image_url FROM court_images WHERE court_id = cd.court_id AND is_primary = TRUE LIMIT 1) as primary_image,
-        GROUP_CONCAT(DISTINCT ci.image_url) as additional_images
-      FROM court_details cd
-      LEFT JOIN court_sports cs ON cd.court_id = cs.court_id
-      LEFT JOIN sports_types st ON cs.sport_id = st.sport_id
-      LEFT JOIN court_images ci ON cd.court_id = ci.court_id AND ci.is_primary = FALSE
-      WHERE cd.arena_id = ?
-      GROUP BY cd.court_id
-      ORDER BY cd.court_number`,
+          cd.*,
+          GROUP_CONCAT(DISTINCT cs.sport_id) as sports,
+          GROUP_CONCAT(DISTINCT st.name) as sports_names,
+          (SELECT image_url FROM court_images WHERE court_id = cd.court_id AND is_primary = TRUE LIMIT 1) as primary_image,
+          GROUP_CONCAT(DISTINCT ci.image_url) as additional_images
+        FROM court_details cd
+        LEFT JOIN court_sports cs ON cd.court_id = cs.court_id
+        LEFT JOIN sports_types st ON cs.sport_id = st.sport_id
+        LEFT JOIN court_images ci ON cd.court_id = ci.court_id AND ci.is_primary = FALSE
+        WHERE cd.arena_id = ?
+        GROUP BY cd.court_id
+        ORDER BY cd.court_number`,
         [arena_id]
       );
 
@@ -812,8 +802,8 @@ const ownerController = {
       // Verify court belongs to owner's arena
       const [courtCheck] = await pool.execute(
         `SELECT cd.court_id FROM court_details cd
-       JOIN arenas a ON cd.arena_id = a.arena_id
-       WHERE cd.court_id = ? AND a.owner_id = ?`,
+         JOIN arenas a ON cd.arena_id = a.arena_id
+         WHERE cd.court_id = ? AND a.owner_id = ?`,
         [court_id, req.user.id]
       );
 
@@ -938,8 +928,8 @@ const ownerController = {
         // Insert new court
         const [courtResult] = await connection.execute(
           `INSERT INTO court_details 
-         (arena_id, court_number, court_name, size_sqft, price_per_hour, description)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+           (arena_id, court_number, court_name, size_sqft, price_per_hour, description)
+           VALUES (?, ?, ?, ?, ?, ?)`,
           [
             arena_id,
             nextCourtNumber,
@@ -1003,8 +993,8 @@ const ownerController = {
       // Verify court belongs to owner's arena
       const [courtCheck] = await pool.execute(
         `SELECT cd.court_id FROM court_details cd
-       JOIN arenas a ON cd.arena_id = a.arena_id
-       WHERE cd.court_id = ? AND a.owner_id = ?`,
+         JOIN arenas a ON cd.arena_id = a.arena_id
+         WHERE cd.court_id = ? AND a.owner_id = ?`,
         [court_id, req.user.id]
       );
 
@@ -1193,7 +1183,7 @@ const ownerController = {
   getBookingStats: async (req, res) => {
     try {
       const owner_id = req.user.id;
-      const { period = "month" } = req.query; // day, week, month, year
+      const { period = "month" } = req.query;
 
       let dateFilter = "";
       switch (period) {
@@ -1421,7 +1411,7 @@ const ownerController = {
     }
   },
 
-  // Export booking data as JSON (can be turned into CSV on frontend)
+  // Export booking data as JSON
   exportBookingData: async (req, res) => {
     try {
       const owner_id = req.user.id;
@@ -1469,8 +1459,7 @@ const ownerController = {
       const [bookings] = await pool.execute(query, params);
 
       res.json({
-        filename: `bookings_export_${new Date().toISOString().split("T")[0]
-          }.json`,
+        filename: `bookings_export_${new Date().toISOString().split("T")[0]}.json`,
         data: bookings,
         total_records: bookings.length,
         total_revenue: bookings.reduce(
@@ -1488,26 +1477,5 @@ const ownerController = {
     }
   },
 };
-
-// Helper function to generate time slots
-function generateTimeSlots(opening_time, closing_time, slot_duration) {
-  const slots = [];
-
-  const startHour = parseInt(opening_time.split(":")[0]);
-  const endHour = parseInt(closing_time.split(":")[0]);
-  const durationHours = slot_duration / 60;
-
-  for (let hour = startHour; hour < endHour; hour += durationHours) {
-    const startHourStr = hour.toString().padStart(2, "0");
-    const endHourStr = (hour + durationHours).toString().padStart(2, "0");
-
-    slots.push({
-      start_time: `${startHourStr}:00`,
-      end_time: `${endHourStr}:00`,
-    });
-  }
-
-  return slots;
-}
 
 module.exports = ownerController;

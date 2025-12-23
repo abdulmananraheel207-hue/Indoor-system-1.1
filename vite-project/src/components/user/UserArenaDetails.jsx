@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import integrationService from "../../services/integrationService";
+import { bookingAPI, arenaAPI } from "../../services/api";
 
 const UserArenaDetails = () => {
   const { arenaId } = useParams();
@@ -121,95 +122,39 @@ const UserArenaDetails = () => {
     }
   };
   const handleBooking = async () => {
-    if (!selectedSlots || selectedSlots.length === 0) {
-      alert("Please select at least one time slot");
-      return;
-    }
-
-    if (!selectedCourt || !selectedCourt.court_id) {
-      alert("Please select a court first");
-      return;
-    }
-
     try {
-      setBookingInProgress(true);
+      // STEP 1: Re-fetch currently available slots
+      const res = await arenaAPI.getAvailableSlots(arena.id, selectedDate, selectedSportId);
+      const availableSlotIds = res.data.map((slot) => slot.slot_id);
 
-      // compute booking range and total price from selected slots
-      const sorted = [...selectedSlots].sort((a, b) => a.start_time.localeCompare(b.start_time));
-      const startTime = sorted[0].start_time;
-      const endTime = sorted[sorted.length - 1].end_time;
-      const totalPrice = sorted.reduce((sum, s) => sum + Number(s.price || 0), 0);
+      // STEP 2: Compare selected vs available
+      const allSlotsStillAvailable = selectedSlots.every((slot) =>
+        availableSlotIds.includes(slot.slot_id)
+      );
 
-      // Ensure we have a sport id to send. If user didn't pick one, try to derive a sensible default.
-      let sportToSend = selectedSportId;
-      if (!sportToSend) {
-        // Try to use court's assigned sports (matching by id or name against sportsList)
-        if (selectedCourt?.sports && selectedCourt.sports.length > 0 && sportsList && sportsList.length > 0) {
-          const firstCourtSport = selectedCourt.sports[0];
-          const matched = sportsList.find(
-            (s) => s.sport_id == firstCourtSport || s.id == firstCourtSport || s.name == firstCourtSport || s.sport_name == firstCourtSport
-          );
-          if (matched) {
-            sportToSend = matched.sport_id || matched.id || matched.sportId;
-            console.log("Derived sportToSend from court->sportsList:", sportToSend, matched);
-          } else if (/^\d+$/.test(String(firstCourtSport))) {
-            // court may store sport ids directly
-            sportToSend = Number(firstCourtSport);
-            console.log("Derived sportToSend from court sports id:", sportToSend);
-          }
-        }
-
-        // Fallback to first available sport from sportsList
-        if (!sportToSend && sportsList && sportsList.length > 0) {
-          const first = sportsList[0];
-          sportToSend = first.sport_id || first.id || first.sportId;
-          console.log("Fallback sportToSend from sportsList:", sportToSend);
-        }
-      }
-
-      if (!sportToSend) {
-        alert("Please select a sport before booking.");
-        setBookingInProgress(false);
+      if (!allSlotsStillAvailable) {
+        alert("One or more of the selected time slots are no longer available. Please refresh and try again.");
         return;
       }
 
-      // If user selected an existing slot, send its `slot_id` so backend will book it
-      if (selectedSlots.length === 1) {
-        await integrationService.createBooking({
-          arenaId: parseInt(arenaId),
-          slot_id: selectedSlots[0].slot_id,
-          sport_id: sportToSend,
-          totalPrice,
-          notes: "",
-        });
-      } else if (selectedSlots.length > 1) {
-        // Multi-slot selection not supported by owner-created slots flow yet
-        alert("Please select a single existing time slot to book.");
-        setBookingInProgress(false);
-        return;
-      } else {
-        // No explicit slot selected — fall back to time-range request (owners must create slots)
-        await integrationService.createBooking({
-          arenaId: parseInt(arenaId),
-          courtId: selectedCourt.court_id,
-          date: integrationService.formatDate(selectedDate),
-          startTime,
-          endTime,
-          totalPrice,
-          sportId: sportToSend,
-          notes: "",
-        });
-      }
+      // STEP 3: Submit the booking
+      const bookingData = {
+        arena_id: arena.id,
+        slot_ids: selectedSlots,
+        date: selectedDate,
+        sport_id: selectedSportId,
+        // Add any additional fields your backend expects
+      };
 
-      alert("Booking request sent successfully! The owner will review your request.");
-      navigate("/user/bookings");
+      await bookingAPI.createBooking(bookingData);
+      alert("Booking request submitted successfully!");
+      // Optionally refresh the UI or navigate
     } catch (error) {
       console.error("Error creating booking:", error);
-      alert(error.response?.data?.message || "Failed to create booking. Please try again.");
-    } finally {
-      setBookingInProgress(false);
+      alert("Booking failed. Please try again.");
     }
   };
+
 
   const handleAddFavorite = async () => {
     try {
@@ -593,6 +538,22 @@ const UserArenaDetails = () => {
                 <div className="grid grid-cols-2 gap-2">
                   {availableSlots.map((slot) => {
                     const isSelected = selectedSlots.some((s) => s.slot_id === slot.slot_id);
+
+
+                    const fetchAvailableSlots = async () => {
+                      try {
+                        setLoading(true);
+                        const dateStr = selectedDate.toISOString().split("T")[0];
+                        const slots = await integrationService.getAvailableSlots(arenaId, dateStr, selectedSportId);
+                        setAvailableSlots(slots.filter(s => s.actually_available !== false));
+                      } catch (error) {
+                        console.error("Failed to fetch slots:", error);
+                      } finally {
+                        setLoading(false);
+                      }
+                    };
+
+
                     return (
                       <button
                         key={slot.slot_id}

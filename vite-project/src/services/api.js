@@ -127,7 +127,12 @@ export const ownerAPI = {
 
   // Time Slots
   getTimeSlots: (arenaId, date) =>
-    API.get(`/arenas/${arenaId}/slots`, { params: { date } }),
+    API.get(`/arenas/${arenaId}/slots`, {
+      params: {
+        date: typeof date === "object" ? date.date : date
+      }
+    }),
+
   updateTimeSlots: (arenaId, data) =>
     API.put(`/owners/arenas/${arenaId}/slots`, data),
 

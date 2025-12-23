@@ -23,7 +23,6 @@ const bookingController = {
       // Basic validation: ensure either slot_id or new format (court_id + date + start_time + end_time) is present
       const hasLegacy = slot_id !== null && sport_id !== null;
       const hasNew = court_id !== null && date && start_time && end_time;
-      console.log('createBooking - branch check', { hasLegacy, hasNew });
       if (!hasLegacy && !hasNew) {
         console.warn('createBooking missing required fields', { arena_id, slot_id, sport_id, court_id, date, start_time, end_time });
         return res.status(400).json({ message: 'Missing booking parameters. Provide slot_id+sport_id or court_id+date+start_time+end_time.' });
@@ -105,30 +104,42 @@ const bookingController = {
             return res.status(400).json({ message: "Time slot not available" });
           }
         } else {
-          // Do NOT create slots from user requests. Time slots must be created by owners.
-          return res.status(400).json({
-            message:
-              "Time slot not found. Users may only book existing owner-created slots.",
-          });
+          // Create new time slot
+          const [arenaInfo] = await pool.execute(
+            `SELECT base_price_per_hour, owner_id FROM arenas WHERE arena_id = ?`,
+            [arena_id]
+          );
+
+          if (arenaInfo.length === 0) {
+            return res.status(400).json({ message: "Arena not found" });
+          }
+
+          const slotPrice = total_amount || arenaInfo[0].base_price_per_hour;
+
+          // Create new slot - MARK IT AS UNAVAILABLE from the start
+          const [slotResult] = await pool.execute(
+            `INSERT INTO time_slots 
+           (arena_id, sport_id, date, start_time, end_time, price, is_available, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, FALSE, NOW())`,
+            [arena_id, sportIdToUse, date, start_time, end_time, slotPrice]
+          );
+
+          slotIdToUse = slotResult.insertId;
+
+          // Get the newly created slot
+          const [newSlots] = await pool.execute(
+            `SELECT ts.*, a.base_price_per_hour, a.owner_id
+           FROM time_slots ts
+           JOIN arenas a ON ts.arena_id = a.arena_id
+           WHERE ts.slot_id = ?`,
+            [slotIdToUse]
+          );
+
+          slot = newSlots[0];
         }
       } else {
         // Use old format (slot_id, sport_id)
-        // If slot_id is provided but sport_id is missing, fetch sport_id from the slot
-        console.log('legacy lookup params', { slot_id, arena_id, sport_id, userId: req.user.id });
-
-        let effectiveSportId = sport_id;
-        if (slot_id && !sport_id) {
-          // Fetch the slot to get its sport_id
-          const [slotInfo] = await pool.execute(
-            `SELECT sport_id FROM time_slots WHERE slot_id = ? AND arena_id = ?`,
-            [slot_id, arena_id]
-          );
-          if (slotInfo.length > 0) {
-            effectiveSportId = slotInfo[0].sport_id;
-            console.log('derived sport_id from slot:', effectiveSportId);
-          }
-        }
-
+        // Check if slot exists and is available
         const [slots] = await pool.execute(
           `SELECT ts.*, a.base_price_per_hour, a.owner_id
          FROM time_slots ts
@@ -136,21 +147,20 @@ const bookingController = {
          WHERE ts.slot_id = ? 
            AND ts.arena_id = ?
            AND ts.sport_id = ?
+           AND ts.is_available = TRUE
            AND ts.is_blocked_by_owner = FALSE
-           AND ts.is_holiday = FALSE`,
-          [slot_id, arena_id, effectiveSportId]
+           AND ts.is_holiday = FALSE
+           AND (ts.locked_until IS NULL OR ts.locked_until < NOW() OR ts.locked_by_user_id = ?)`,
+          [slot_id, arena_id, sport_id, req.user.id]
         );
 
-        console.log('legacy lookup result count', slots.length);
-
         if (slots.length === 0) {
-          // Provide a clearer error for debugging (non-sensitive)
-          return res.status(400).json({ message: "Time slot not available or not found for provided slot_id/arena/sport" });
+          return res.status(400).json({ message: "Time slot not available" });
         }
 
         slot = slots[0];
         slotIdToUse = slot_id;
-        sportIdToUse = effectiveSportId;
+        sportIdToUse = sport_id;
       }
 
       // Calculate amounts

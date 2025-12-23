@@ -18,20 +18,25 @@ const arenaController = {
   getAvailableSlots: async (req, res) => {
     try {
       const arena_id = parseInt(req.params.arena_id);
-      const { date, sport_id } = req.query;
+
+      let { date, sport_id } = req.query;
+
+      if (date && typeof date === "object") {
+        date = date.date;
+      }
 
       let query = `
-        SELECT ts.*, st.name as sport_name, 
-               CASE 
-                 WHEN ts.locked_until > NOW() THEN FALSE 
-                 ELSE ts.is_available 
-               END as actually_available
-        FROM time_slots ts
-        LEFT JOIN sports_types st ON ts.sport_id = st.sport_id
-        WHERE ts.arena_id = ? 
-          AND ts.is_blocked_by_owner = FALSE
-          AND ts.is_holiday = FALSE
-      `;
+      SELECT ts.*, st.name as sport_name,
+             CASE
+               WHEN ts.locked_until > NOW() THEN FALSE
+               ELSE ts.is_available
+             END as actually_available
+      FROM time_slots ts
+      LEFT JOIN sports_types st ON ts.sport_id = st.sport_id
+      WHERE ts.arena_id = ?
+        AND ts.is_blocked_by_owner = FALSE
+        AND ts.is_holiday = FALSE
+    `;
 
       const params = [arena_id];
 

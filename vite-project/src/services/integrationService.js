@@ -382,6 +382,67 @@ export const integrationService = {
         const duration = (end - start) / (1000 * 60 * 60);
         return Math.round(duration * pricePerHour);
     },
+
+
+    // ====== TIME SLOTS ======
+
+    getAvailableSlots: async (arenaId, date = null, sportId = null) => {
+        try {
+            const params = {};
+            if (date) params.date = date;
+            if (sportId) params.sport_id = sportId;
+            const response = await arenaAPI.getAvailableSlots(arenaId, params);
+            return response.data;
+        } catch (error) {
+            console.error("Error fetching available slots:", error);
+            throw error;
+        }
+    },
+
+    // ====== BOOKINGS ======
+
+    bookSlot: async (bookingData) => {
+        try {
+            const response = await bookingAPI.createBooking(bookingData);
+            return response.data;
+        } catch (error) {
+            console.error("Error booking slot:", error);
+            throw error;
+        }
+    },
+
+    getUserBookings: async () => {
+        try {
+            const response = await bookingAPI.getUserBookings();
+            return response.data;
+        } catch (error) {
+            console.error("Error fetching user bookings:", error);
+            throw error;
+        }
+    },
+
+    // ====== OWNER DASHBOARD ======
+
+    getOwnerBookings: async () => {
+        try {
+            const response = await ownerAPI.getOwnerBookings();
+            return response.data;
+        } catch (error) {
+            console.error("Error fetching owner bookings:", error);
+            throw error;
+        }
+    },
+
+    respondToBooking: async (bookingId, status) => {
+        try {
+            const response = await ownerAPI.respondToBooking(bookingId, status);
+            return response.data;
+        } catch (error) {
+            console.error("Error updating booking status:", error);
+            throw error;
+        }
+    },
+
 };
 
 export default integrationService;
