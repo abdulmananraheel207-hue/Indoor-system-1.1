@@ -290,7 +290,47 @@ const arenaController = {
         return res.status(404).json({ message: "Arena not found" });
       }
 
-      res.json(arenas[0]);
+      const arena = arenas[0];
+
+      // Fetch courts with their sports and primary image
+      const [courts] = await pool.execute(
+        `SELECT cd.*, 
+                GROUP_CONCAT(DISTINCT st.sport_id) as sport_ids,
+                GROUP_CONCAT(DISTINCT st.name) as sports,
+                (SELECT image_url FROM court_images WHERE court_id = cd.court_id AND is_primary = TRUE LIMIT 1) as primary_image
+         FROM court_details cd
+         LEFT JOIN court_sports cs ON cd.court_id = cs.court_id
+         LEFT JOIN sports_types st ON cs.sport_id = st.sport_id
+         WHERE cd.arena_id = ?
+         GROUP BY cd.court_id
+         ORDER BY cd.court_number`,
+        [arena_id]
+      );
+
+      // Normalize sports list for arena: distinct sports from courts and time_slots
+      const [sportsFromCourts] = await pool.execute(
+        `SELECT DISTINCT st.sport_id, st.name
+         FROM sports_types st
+         JOIN court_sports cs ON st.sport_id = cs.sport_id
+         JOIN court_details cd ON cs.court_id = cd.court_id
+         WHERE cd.arena_id = ?`,
+        [arena_id]
+      );
+
+      // Fallback: if no court sports, look for sports in time_slots
+      let sports = sportsFromCourts;
+      if (!sports || sports.length === 0) {
+        const [sportsFromSlots] = await pool.execute(
+          `SELECT DISTINCT st.sport_id, st.name
+           FROM sports_types st
+           JOIN time_slots ts ON st.sport_id = ts.sport_id
+           WHERE ts.arena_id = ?`,
+          [arena_id]
+        );
+        sports = sportsFromSlots;
+      }
+
+      res.json({ ...arena, courts, sports });
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Server error", error: error.message });

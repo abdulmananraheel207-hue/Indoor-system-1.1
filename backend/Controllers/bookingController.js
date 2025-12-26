@@ -23,6 +23,13 @@ const bookingController = {
       // Basic validation: ensure either slot_id or new format (court_id + date + start_time + end_time) is present
       const hasLegacy = slot_id !== null && sport_id !== null;
       const hasNew = court_id !== null && date && start_time && end_time;
+
+      // Support multiple existing slot bookings: `slot_ids` or `slotIds` array
+      const slotIdsArray = Array.isArray(body.slot_ids)
+        ? body.slot_ids
+        : Array.isArray(body.slotIds)
+          ? body.slotIds
+          : null;
       if (!hasLegacy && !hasNew) {
         console.warn('createBooking missing required fields', { arena_id, slot_id, sport_id, court_id, date, start_time, end_time });
         return res.status(400).json({ message: 'Missing booking parameters. Provide slot_id+sport_id or court_id+date+start_time+end_time.' });
@@ -53,6 +60,9 @@ const bookingController = {
       let slot;
       let sportIdToUse = sport_id;
       let slotIdToUse = slot_id;
+
+      // If multiple slot IDs provided, we'll process them later as array
+      const creatingMultiple = slotIdsArray && slotIdsArray.length > 0;
 
       // Validate payment_method
       const validPaymentMethods = ["pay_now", "pay_after", "advance_payment"];
@@ -163,77 +173,147 @@ const bookingController = {
         sportIdToUse = sport_id;
       }
 
-      // Calculate amounts
-      const finalTotalAmount =
-        total_amount || slot.price || slot.base_price_per_hour;
+      // Calculate amounts helper (per-slot)
       const commission_percentage = 5.0; // 5% commission
-      const commission_amount =
-        finalTotalAmount * (commission_percentage / 100);
 
       // Start transaction
       const connection = await pool.getConnection();
       await connection.beginTransaction();
 
       try {
-        // Create booking with status 'pending' for owner approval
-        const [bookingResult] = await connection.execute(
-          `INSERT INTO bookings 
-         (user_id, arena_id, slot_id, sport_id, total_amount, 
-          commission_percentage, commission_amount, payment_method, requires_advance, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
-          [
-            req.user.id,
-            arena_id,
-            slotIdToUse,
-            sportIdToUse,
-            finalTotalAmount,
-            commission_percentage,
-            commission_amount,
-            finalPaymentMethod, // Use validated payment method
-            requires_advance || false,
-          ]
-        );
+        const createdBookingIds = [];
+        let totalCommissionToAdd = 0;
 
-        const booking_id = bookingResult.insertId;
+        if (creatingMultiple) {
+          // Process each provided slot id
+          for (let rawSlotId of slotIdsArray) {
+            const sid = Number(rawSlotId);
+            if (isNaN(sid)) {
+              throw new Error("Invalid slot id in slotIds array");
+            }
 
-        // Mark slot as unavailable (but not blocked - owner can still override if needed)
-        await connection.execute(
-          `UPDATE time_slots 
-         SET is_available = FALSE,
-             locked_until = NULL,
-             locked_by_user_id = NULL
-         WHERE slot_id = ?`,
-          [slotIdToUse]
-        );
+            // Fetch slot to ensure availability
+            const [slotsCheck] = await connection.execute(
+              `SELECT ts.*, a.base_price_per_hour, a.owner_id
+               FROM time_slots ts
+               JOIN arenas a ON ts.arena_id = a.arena_id
+               WHERE ts.slot_id = ?
+                 AND ts.is_blocked_by_owner = FALSE
+                 AND ts.is_holiday = FALSE
+                 AND (ts.locked_until IS NULL OR ts.locked_until < NOW() OR ts.locked_by_user_id = ?)`,
+              [sid, req.user.id]
+            );
 
-        // Update arena commission due
-        await connection.execute(
-          `UPDATE arenas 
-         SET total_commission_due = total_commission_due + ?
-         WHERE arena_id = ?`,
-          [commission_amount, arena_id]
-        );
+            if (slotsCheck.length === 0) {
+              throw new Error(`Time slot ${sid} not available`);
+            }
+
+            const thisSlot = slotsCheck[0];
+            const finalTotalAmount = total_amount || thisSlot.price || thisSlot.base_price_per_hour;
+            const commission_amount = finalTotalAmount * (commission_percentage / 100);
+
+            const [bookingResult] = await connection.execute(
+              `INSERT INTO bookings 
+               (user_id, arena_id, slot_id, sport_id, total_amount, 
+                commission_percentage, commission_amount, payment_method, requires_advance, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+              [
+                req.user.id,
+                thisSlot.arena_id,
+                sid,
+                thisSlot.sport_id,
+                finalTotalAmount,
+                commission_percentage,
+                commission_amount,
+                finalPaymentMethod,
+                requires_advance || false,
+              ]
+            );
+
+            createdBookingIds.push(bookingResult.insertId);
+
+            // Mark slot unavailable
+            await connection.execute(
+              `UPDATE time_slots 
+               SET is_available = FALSE,
+                   locked_until = NULL,
+                   locked_by_user_id = NULL
+               WHERE slot_id = ?`,
+              [sid]
+            );
+
+            totalCommissionToAdd += commission_amount;
+          }
+
+          // Update arena commission due (use arena_id param)
+          await connection.execute(
+            `UPDATE arenas 
+             SET total_commission_due = total_commission_due + ?
+             WHERE arena_id = ?`,
+            [totalCommissionToAdd, arena_id]
+          );
+        } else {
+          // Single-slot flow (existing behavior)
+          const finalTotalAmount = total_amount || slot.price || slot.base_price_per_hour;
+          const commission_amount = finalTotalAmount * (commission_percentage / 100);
+
+          const [bookingResult] = await connection.execute(
+            `INSERT INTO bookings 
+             (user_id, arena_id, slot_id, sport_id, total_amount, 
+              commission_percentage, commission_amount, payment_method, requires_advance, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+            [
+              req.user.id,
+              arena_id,
+              slotIdToUse,
+              sportIdToUse,
+              finalTotalAmount,
+              commission_percentage,
+              commission_amount,
+              finalPaymentMethod,
+              requires_advance || false,
+            ]
+          );
+
+          const booking_id = bookingResult.insertId;
+          createdBookingIds.push(booking_id);
+
+          await connection.execute(
+            `UPDATE time_slots 
+             SET is_available = FALSE,
+                 locked_until = NULL,
+                 locked_by_user_id = NULL
+             WHERE slot_id = ?`,
+            [slotIdToUse]
+          );
+
+          await connection.execute(
+            `UPDATE arenas 
+             SET total_commission_due = total_commission_due + ?
+             WHERE arena_id = ?`,
+            [commission_amount, arena_id]
+          );
+        }
 
         await connection.commit();
 
-        // Get booking details
+        // Fetch created booking details
         const [bookings] = await pool.execute(
           `SELECT b.*, a.name as arena_name, st.name as sport_name,
-                ts.date, ts.start_time, ts.end_time, ao.arena_name as owner_name,
-                ao.owner_id, ao.email as owner_email
-         FROM bookings b
-         JOIN arenas a ON b.arena_id = a.arena_id
-         JOIN arena_owners ao ON a.owner_id = ao.owner_id
-         JOIN sports_types st ON b.sport_id = st.sport_id
-         JOIN time_slots ts ON b.slot_id = ts.slot_id
-         WHERE b.booking_id = ?`,
-          [booking_id]
+                  ts.date, ts.start_time, ts.end_time, ao.arena_name as owner_name,
+                  ao.owner_id, ao.email as owner_email
+           FROM bookings b
+           JOIN arenas a ON b.arena_id = a.arena_id
+           JOIN arena_owners ao ON a.owner_id = ao.owner_id
+           JOIN sports_types st ON b.sport_id = st.sport_id
+           JOIN time_slots ts ON b.slot_id = ts.slot_id
+           WHERE b.booking_id IN (${createdBookingIds.map(() => '?').join(',')})`,
+          createdBookingIds
         );
 
         res.status(201).json({
-          message:
-            "Booking request created successfully. Waiting for owner approval.",
-          booking: bookings[0],
+          message: "Booking request created successfully. Waiting for owner approval.",
+          bookings,
         });
       } catch (error) {
         await connection.rollback();

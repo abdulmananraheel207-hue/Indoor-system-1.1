@@ -3,7 +3,6 @@ const jwt = require("jsonwebtoken");
 const pool = require("../db");
 
 const managerAuth = {
-    // Verify manager token
     verifyToken: async (req, res, next) => {
         try {
             const authHeader = req.headers.authorization;
