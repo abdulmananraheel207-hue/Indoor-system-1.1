@@ -107,6 +107,7 @@ const UserArenaDetails = () => {
   const handleSlotSelect = (slot) => {
     const isSlotAvailable = slot.actually_available ?? slot.is_available;
     if (!isSlotAvailable || slot.is_blocked) return;
+
     // toggle selection
     console.log("slot clicked", slot.slot_id, slot);
     const exists = selectedSlots.some((s) => s.slot_id === slot.slot_id);
@@ -194,20 +195,25 @@ const UserArenaDetails = () => {
         return;
       }
 
-      // If user selected an existing slot, send its `slot_id` so backend will book it
-      if (selectedSlots.length === 1) {
+      // Collect all selected owner-created slot IDs for multi-slot booking
+      const slotIds = selectedSlots.map((s) => s.slot_id).filter(Boolean);
+
+      if (slotIds.length > 1) {
         await integrationService.createBooking({
           arenaId: parseInt(arenaId),
-          slot_id: selectedSlots[0].slot_id,
+          slot_ids: slotIds,
+          sportId: sportToSend,
+          totalPrice,
+          notes: "",
+        });
+      } else if (slotIds.length === 1) {
+        await integrationService.createBooking({
+          arenaId: parseInt(arenaId),
+          slot_id: slotIds[0],
           sport_id: sportToSend,
           totalPrice,
           notes: "",
         });
-      } else if (selectedSlots.length > 1) {
-        // Multi-slot selection not supported by owner-created slots flow yet
-        alert("Please select a single existing time slot to book.");
-        setBookingInProgress(false);
-        return;
       } else {
         // No explicit slot selected — fall back to time-range request (owners must create slots)
         await integrationService.createBooking({
@@ -225,12 +231,12 @@ const UserArenaDetails = () => {
       alert(
         "Booking request sent successfully! The owner will review your request."
       );
-      navigate("/user/bookings");
+      navigate("/user/dashboard");
     } catch (error) {
       console.error("Error creating booking:", error);
       alert(
         error.response?.data?.message ||
-          "Failed to create booking. Please try again."
+        "Failed to create booking. Please try again."
       );
     } finally {
       setBookingInProgress(false);
@@ -366,11 +372,10 @@ const UserArenaDetails = () => {
                       {[...Array(5)].map((_, i) => (
                         <svg
                           key={i}
-                          className={`h-5 w-5 ${
-                            i < Math.floor(arena.rating || 0)
+                          className={`h-5 w-5 ${i < Math.floor(arena.rating || 0)
                               ? "text-yellow-400"
                               : "text-gray-300"
-                          }`}
+                            }`}
                           fill="currentColor"
                           viewBox="0 0 20 20"
                         >
@@ -536,11 +541,10 @@ const UserArenaDetails = () => {
                             {[...Array(5)].map((_, i) => (
                               <svg
                                 key={i}
-                                className={`h-4 w-4 ${
-                                  i < review.rating
+                                className={`h-4 w-4 ${i < review.rating
                                     ? "text-yellow-400"
                                     : "text-gray-300"
-                                }`}
+                                  }`}
                                 fill="currentColor"
                                 viewBox="0 0 20 20"
                               >
@@ -593,11 +597,10 @@ const UserArenaDetails = () => {
                         key={court.court_id}
                         type="button"
                         onClick={() => setSelectedCourt(court)}
-                        className={`w-full text-left p-3 rounded-lg border ${
-                          selectedCourt?.court_id === court.court_id
+                        className={`w-full text-left p-3 rounded-lg border ${selectedCourt?.court_id === court.court_id
                             ? "border-primary-500 bg-primary-50"
                             : "border-gray-300 hover:bg-gray-50"
-                        }`}
+                          }`}
                       >
                         <div className="flex justify-between items-center">
                           <div>
@@ -628,19 +631,19 @@ const UserArenaDetails = () => {
                     const isSelected = selectedSlots.some(
                       (s) => s.slot_id === slot.slot_id
                     );
+                    const isAvailable = slot.actually_available ?? slot.is_available;
                     return (
                       <button
                         key={slot.slot_id}
                         type="button"
                         onClick={() => handleSlotSelect(slot)}
-                        disabled={!slot.is_available || slot.is_blocked}
-                        className={`p-3 rounded-lg border text-center ${
-                          isSelected
+                        disabled={!isAvailable || slot.is_blocked}
+                        className={`p-3 rounded-lg border text-center ${isSelected
                             ? "border-primary-500 bg-primary-50 text-primary-700"
-                            : slot.is_available && !slot.is_blocked
-                            ? "border-gray-300 hover:bg-gray-50"
-                            : "border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed"
-                        }`}
+                            : isAvailable && !slot.is_blocked
+                              ? "border-gray-300 hover:bg-gray-50"
+                              : "border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed"
+                          }`}
                       >
                         <div className="font-medium">
                           {slot.start_time} - {slot.end_time}
@@ -670,9 +673,8 @@ const UserArenaDetails = () => {
                           const sorted = [...selectedSlots].sort((a, b) =>
                             a.start_time.localeCompare(b.start_time)
                           );
-                          return `${sorted[0].start_time} - ${
-                            sorted[sorted.length - 1].end_time
-                          }`;
+                          return `${sorted[0].start_time} - ${sorted[sorted.length - 1].end_time
+                            }`;
                         })()}
                       </span>
                     </div>
@@ -727,17 +729,16 @@ const UserArenaDetails = () => {
                 type="button"
                 onClick={handleBooking}
                 disabled={selectedSlots.length === 0 || bookingInProgress}
-                className={`w-full py-3 rounded-lg font-medium ${
-                  selectedSlots.length > 0 && !bookingInProgress
+                className={`w-full py-3 rounded-lg font-medium ${selectedSlots.length > 0 && !bookingInProgress
                     ? "bg-primary-600 text-white hover:bg-primary-700"
                     : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                }`}
+                  }`}
               >
                 {bookingInProgress
                   ? "Processing..."
                   : selectedSlots.length > 0
-                  ? "Book Now"
-                  : "Select a time slot"}
+                    ? "Book Now"
+                    : "Select a time slot"}
               </button>
 
               {/* Debug panel visible on-page to help when console isn't available */}

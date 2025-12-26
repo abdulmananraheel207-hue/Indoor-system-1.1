@@ -107,6 +107,11 @@ export const integrationService = {
             // Accept either `slot_id` or `slotId` when frontend supplies an existing slot
             if (bookingData.slot_id) payload.slot_id = bookingData.slot_id;
             if (bookingData.slotId) payload.slot_id = bookingData.slotId;
+            if (bookingData.slotId) payload.slot_id = bookingData.slotId;
+            if (bookingData.slot_ids || bookingData.slotIds) {
+                const ids = bookingData.slot_ids || bookingData.slotIds;
+                payload.slot_ids = Array.isArray(ids) ? ids : [ids];
+            }
 
             const response = await bookingAPI.createBooking(payload);
             return response.data;
