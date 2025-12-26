@@ -77,11 +77,9 @@ const arenaController = {
       );
 
       if (slots.length === 0) {
-        return res
-          .status(400)
-          .json({
-            message: "Slot not available or already locked by another user",
-          });
+        return res.status(400).json({
+          message: "Slot not available or already locked by another user",
+        });
       }
 
       // Lock the slot
@@ -168,8 +166,7 @@ const arenaController = {
       const [bookings] = await pool.execute(
         `SELECT 1 FROM bookings 
          WHERE user_id = ? AND arena_id = ? AND booking_id = ? 
-         AND status IN ('completed', 'approved')`, // Allow both completed and approved bookings
-        [req.user.id, arena_id, booking_id]
+         AND status IN ('completed', 'accepted')` // Allow both completed and accepted bookings        [req.user.id, arena_id, booking_id]
       );
 
       if (bookings.length === 0) {
@@ -342,11 +339,13 @@ const arenaController = {
     try {
       const { query } = req.query;
 
-      let sqlQuery = "SELECT * FROM arenas WHERE is_active = 1 AND is_blocked = 0";
+      let sqlQuery =
+        "SELECT * FROM arenas WHERE is_active = 1 AND is_blocked = 0";
       const params = [];
 
       if (query) {
-        sqlQuery += " AND (name LIKE ? OR address LIKE ? OR description LIKE ?)";
+        sqlQuery +=
+          " AND (name LIKE ? OR address LIKE ? OR description LIKE ?)";
         const searchTerm = `%${query}%`;
         params.push(searchTerm, searchTerm, searchTerm);
       }

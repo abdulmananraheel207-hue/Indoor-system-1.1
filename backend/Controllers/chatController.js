@@ -21,9 +21,9 @@ const validateChatAccess = async (req, res, next) => {
     const bookingData = booking[0];
 
     // Check booking status
-    if (!["pending", "approved"].includes(bookingData.status)) {
+    if (!["pending", "accepted"].includes(bookingData.status)) {
       return res.status(403).json({
-        message: "Chat is only available for pending or approved bookings",
+        message: "Chat is only available for pending or accepted bookings",
       });
     }
 
@@ -58,9 +58,9 @@ const chatController = {
       const bookingData = booking[0];
 
       // 2. Check booking status - only pending or approved
-      if (!["pending", "approved"].includes(bookingData.status)) {
+      if (!["pending", "accepted"].includes(bookingData.status)) {
         return res.status(403).json({
-          message: "Chat is only available for pending or approved bookings",
+          message: "Chat is only available for pending or accepted bookings",
         });
       }
 
@@ -135,7 +135,7 @@ const chatController = {
       const bookingData = booking[0];
 
       // 2. Check booking status - only pending or approved
-      if (!["pending", "approved"].includes(bookingData.status)) {
+      if (!["pending", "accepted"].includes(bookingData.status)) {
         return res.status(403).json({
           message: "Cannot send messages for this booking status",
         });

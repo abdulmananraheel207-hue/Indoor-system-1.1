@@ -5,34 +5,57 @@ const bookingController = {
   // Create a new booking - MODIFIED VERSION
   createBooking: async (req, res) => {
     try {
-      console.log('createBooking called by user:', req.user?.id, 'raw body:', req.body);
+      console.log(
+        "createBooking called by user:",
+        req.user?.id,
+        "raw body:",
+        req.body
+      );
 
       // Normalize incoming fields (accept camelCase or snake_case)
       const body = req.body || {};
       const arena_id = body.arena_id || body.arenaId || body.arena || null;
       const slot_id = body.slot_id || body.slotId || null;
+      const slot_ids_input = body.slot_ids || body.slotIds || [];
+      const slot_ids = Array.isArray(slot_ids_input)
+        ? slot_ids_input.map(Number).filter(Boolean)
+        : [];
       const sport_id = body.sport_id || body.sportId || body.sport || null;
       const court_id = body.court_id || body.courtId || null;
       const date = body.date || body.bookingDate || null;
       const start_time = body.start_time || body.startTime || null;
       const end_time = body.end_time || body.endTime || null;
-      const total_amount = body.total_amount || body.totalAmount || body.totalPrice || null;
+      const total_amount =
+        body.total_amount || body.totalAmount || body.totalPrice || null;
       const payment_method = body.payment_method || body.paymentMethod || null;
-      const requires_advance = body.requires_advance || body.requiresAdvance || false;
+      const requires_advance =
+        body.requires_advance || body.requiresAdvance || false;
 
       // Basic validation: ensure either slot_id or new format (court_id + date + start_time + end_time) is present
       const hasLegacy = slot_id !== null && sport_id !== null;
       const hasNew = court_id !== null && date && start_time && end_time;
-
+      const hasMultipleSlots = slot_ids.length > 0;
       // Support multiple existing slot bookings: `slot_ids` or `slotIds` array
       const slotIdsArray = Array.isArray(body.slot_ids)
         ? body.slot_ids
         : Array.isArray(body.slotIds)
-          ? body.slotIds
-          : null;
-      if (!hasLegacy && !hasNew) {
-        console.warn('createBooking missing required fields', { arena_id, slot_id, sport_id, court_id, date, start_time, end_time });
-        return res.status(400).json({ message: 'Missing booking parameters. Provide slot_id+sport_id or court_id+date+start_time+end_time.' });
+        ? body.slotIds
+        : null;
+      if (!hasLegacy && !hasNew && !hasMultipleSlots) {
+        console.warn("createBooking missing required fields", {
+          arena_id,
+          slot_id,
+          sport_id,
+          court_id,
+          date,
+          start_time,
+          end_time,
+          slot_ids,
+        });
+        return res.status(400).json({
+          message:
+            "Missing booking parameters. Provide slot_id+sport_id, slot_ids[], or court_id+date+start_time+end_time.",
+        });
       }
 
       // Coerce numeric ids
@@ -55,7 +78,7 @@ const bookingController = {
         requires_advance: !!requires_advance,
       };
 
-      console.log('createBooking normalized payload:', normalized);
+      console.log("createBooking normalized payload:", normalized);
 
       let slot;
       let sportIdToUse = sport_id;
@@ -69,7 +92,136 @@ const bookingController = {
       const finalPaymentMethod = validPaymentMethods.includes(payment_method)
         ? payment_method
         : "pay_after"; // Default to 'pay_after' instead of 'manual'
+      // --- Multi-slot booking flow (user selected multiple owner-created slots) ---
+      if (hasMultipleSlots) {
+        if (!arenaIdNum) {
+          return res
+            .status(400)
+            .json({ message: "Arena is required for booking." });
+        }
 
+        const slotPlaceholders = slot_ids.map(() => "?").join(",");
+        const [slots] = await pool.execute(
+          `SELECT ts.*, a.base_price_per_hour, a.owner_id
+           FROM time_slots ts
+           JOIN arenas a ON ts.arena_id = a.arena_id
+           WHERE ts.slot_id IN (${slotPlaceholders})
+             AND ts.arena_id = ?
+             AND ts.is_blocked_by_owner = FALSE
+             AND ts.is_holiday = FALSE`,
+          [...slot_ids, arenaIdNum]
+        );
+
+        if (slots.length !== slot_ids.length) {
+          return res
+            .status(400)
+            .json({
+              message:
+                "One or more selected slots were not found for this arena.",
+            });
+        }
+
+        const unavailableSlot = slots.find((s) => !s.is_available);
+        if (unavailableSlot) {
+          return res
+            .status(400)
+            .json({
+              message: `Slot ${unavailableSlot.slot_id} is no longer available.`,
+            });
+        }
+
+        // Align sport selection across all slots
+        const slotSports = new Set(
+          slots.map((s) => s.sport_id).filter(Boolean)
+        );
+        const sportIdForBooking =
+          sportIdNum || (slotSports.size === 1 ? [...slotSports][0] : null);
+
+        if (!sportIdForBooking) {
+          return res
+            .status(400)
+            .json({ message: "Please choose a sport for these slots." });
+        }
+
+        // Start transaction for atomic multi-slot booking
+        const connection = await pool.getConnection();
+        await connection.beginTransaction();
+
+        try {
+          const createdBookingIds = [];
+
+          for (const slot of slots) {
+            const priceForSlot =
+              totalAmountNum || slot.price || slot.base_price_per_hour;
+            const commission_percentage = 5.0;
+            const commission_amount =
+              priceForSlot * (commission_percentage / 100);
+
+            const [bookingResult] = await connection.execute(
+              `INSERT INTO bookings 
+               (user_id, arena_id, slot_id, sport_id, total_amount, 
+                commission_percentage, commission_amount, payment_method, requires_advance, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+              [
+                req.user.id,
+                arenaIdNum,
+                slot.slot_id,
+                slot.sport_id || sportIdForBooking,
+                priceForSlot,
+                commission_percentage,
+                commission_amount,
+                finalPaymentMethod,
+                requires_advance || false,
+              ]
+            );
+
+            createdBookingIds.push(bookingResult.insertId);
+
+            await connection.execute(
+              `UPDATE time_slots 
+               SET is_available = FALSE,
+                   locked_until = NULL,
+                   locked_by_user_id = NULL
+               WHERE slot_id = ?`,
+              [slot.slot_id]
+            );
+
+            await connection.execute(
+              `UPDATE arenas 
+               SET total_commission_due = total_commission_due + ?
+               WHERE arena_id = ?`,
+              [commission_amount, arenaIdNum]
+            );
+          }
+
+          await connection.commit();
+
+          const detailPlaceholders = createdBookingIds.map(() => "?").join(",");
+          const [createdBookings] = await pool.execute(
+            `SELECT b.*, a.name as arena_name, st.name as sport_name,
+                    ts.date, ts.start_time, ts.end_time, ao.arena_name as owner_name,
+                    ao.owner_id, ao.email as owner_email
+             FROM bookings b
+             JOIN arenas a ON b.arena_id = a.arena_id
+             JOIN arena_owners ao ON a.owner_id = ao.owner_id
+             JOIN sports_types st ON b.sport_id = st.sport_id
+             JOIN time_slots ts ON b.slot_id = ts.slot_id
+             WHERE b.booking_id IN (${detailPlaceholders})`,
+            createdBookingIds
+          );
+
+          return res.status(201).json({
+            message:
+              "Booking requests created successfully. Waiting for owner approval.",
+            bookings: createdBookings,
+          });
+        } catch (error) {
+          await connection.rollback();
+          throw error;
+        } finally {
+          connection.release();
+        }
+      }
       // If using new format (court_id + time), find or create slot
       if (court_id && date && start_time && end_time) {
         // Get sport_id from court - FIX: Get first sport or use provided sport_id
@@ -209,8 +361,10 @@ const bookingController = {
             }
 
             const thisSlot = slotsCheck[0];
-            const finalTotalAmount = total_amount || thisSlot.price || thisSlot.base_price_per_hour;
-            const commission_amount = finalTotalAmount * (commission_percentage / 100);
+            const finalTotalAmount =
+              total_amount || thisSlot.price || thisSlot.base_price_per_hour;
+            const commission_amount =
+              finalTotalAmount * (commission_percentage / 100);
 
             const [bookingResult] = await connection.execute(
               `INSERT INTO bookings 
@@ -254,8 +408,10 @@ const bookingController = {
           );
         } else {
           // Single-slot flow (existing behavior)
-          const finalTotalAmount = total_amount || slot.price || slot.base_price_per_hour;
-          const commission_amount = finalTotalAmount * (commission_percentage / 100);
+          const finalTotalAmount =
+            total_amount || slot.price || slot.base_price_per_hour;
+          const commission_amount =
+            finalTotalAmount * (commission_percentage / 100);
 
           const [bookingResult] = await connection.execute(
             `INSERT INTO bookings 
@@ -307,12 +463,15 @@ const bookingController = {
            JOIN arena_owners ao ON a.owner_id = ao.owner_id
            JOIN sports_types st ON b.sport_id = st.sport_id
            JOIN time_slots ts ON b.slot_id = ts.slot_id
-           WHERE b.booking_id IN (${createdBookingIds.map(() => '?').join(',')})`,
+           WHERE b.booking_id IN (${createdBookingIds
+             .map(() => "?")
+             .join(",")})`,
           createdBookingIds
         );
 
         res.status(201).json({
-          message: "Booking request created successfully. Waiting for owner approval.",
+          message:
+            "Booking request created successfully. Waiting for owner approval.",
           bookings,
         });
       } catch (error) {
@@ -326,7 +485,6 @@ const bookingController = {
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
-
 
   getUserBookings: async (req, res) => {
     try {
@@ -353,11 +511,16 @@ const bookingController = {
 
       // FIX 2: Handle status correctly
       if (status) {
-        if (status.includes(',')) {
+        if (status.includes(",")) {
           // If multiple statuses (pending,accepted), use IN operator
-          const statusArray = status.split(',').map((s) => s.trim()).filter(Boolean);
+          const statusArray = status
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
           if (statusArray.length > 0) {
-            query += ` AND b.status IN (${statusArray.map(() => '?').join(',')})`;
+            query += ` AND b.status IN (${statusArray
+              .map(() => "?")
+              .join(",")})`;
             params.push(...statusArray);
           }
         } else {
@@ -374,13 +537,16 @@ const bookingController = {
       const [bookings] = await pool.execute(query, params);
 
       // Get total count (apply same status logic)
-      let countQuery = "SELECT COUNT(*) as total FROM bookings WHERE user_id = ?";
+      let countQuery =
+        "SELECT COUNT(*) as total FROM bookings WHERE user_id = ?";
       const countParams = [req.user.id];
 
       if (status) {
-        if (status.includes(',')) {
-          const statusArray = status.split(',');
-          countQuery += ` AND status IN (${statusArray.map(() => '?').join(',')})`;
+        if (status.includes(",")) {
+          const statusArray = status.split(",");
+          countQuery += ` AND status IN (${statusArray
+            .map(() => "?")
+            .join(",")})`;
           countParams.push(...statusArray);
         } else {
           countQuery += " AND status = ?";

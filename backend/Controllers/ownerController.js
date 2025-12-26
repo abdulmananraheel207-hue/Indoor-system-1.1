@@ -194,8 +194,8 @@ const ownerController = {
               court.court_name || `Court ${court.court_number || 1}`,
               parseFloat(court.size_sqft) || 2000,
               parseFloat(court.price_per_hour) ||
-              parseFloat(base_price_per_hour) ||
-              500,
+                parseFloat(base_price_per_hour) ||
+                500,
               court.description || "",
             ]
           );
@@ -551,11 +551,11 @@ const ownerController = {
 
       // Update booking status to 'approved'
       await pool.execute(
-        'UPDATE bookings SET status = "approved" WHERE booking_id = ?',
+        'UPDATE bookings SET status = "accepted" WHERE booking_id = ?',
         [booking_id]
       );
 
-      res.json({ message: "Booking approved successfully" });
+      res.json({ message: "Booking accepted successfully" });
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Server error", error: error.message });
@@ -1459,7 +1459,9 @@ const ownerController = {
       const [bookings] = await pool.execute(query, params);
 
       res.json({
-        filename: `bookings_export_${new Date().toISOString().split("T")[0]}.json`,
+        filename: `bookings_export_${
+          new Date().toISOString().split("T")[0]
+        }.json`,
         data: bookings,
         total_records: bookings.length,
         total_revenue: bookings.reduce(
