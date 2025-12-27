@@ -66,9 +66,12 @@ export const integrationService = {
   /**
    * Get available time slots for an arena on a specific date
    */
-  getAvailableSlots: async (arenaId, date, sportId) => {
+  getAvailableSlots: async (arenaId, date = null, sportId = null) => {
     try {
-      const response = await arenaAPI.getAvailableSlots(arenaId, date, sportId);
+      const params = {};
+      if (date) params.date = date;
+      if (sportId) params.sport_id = sportId;
+      const response = await arenaAPI.getAvailableSlots(arenaId, params);
       return response.data;
     } catch (error) {
       console.error("Error fetching available slots:", error);
@@ -103,7 +106,6 @@ export const integrationService = {
         date: bookingData.date,
         start_time: bookingData.startTime,
         end_time: bookingData.endTime,
-        // backend expects `total_amount`
         total_amount: bookingData.totalPrice || bookingData.total_amount,
         sport_id: bookingData.sportId || bookingData.sport_id || undefined,
         notes: bookingData.notes || "",
@@ -111,7 +113,6 @@ export const integrationService = {
 
       // Accept either `slot_id` or `slotId` when frontend supplies an existing slot
       if (bookingData.slot_id) payload.slot_id = bookingData.slot_id;
-      if (bookingData.slotId) payload.slot_id = bookingData.slotId;
       if (bookingData.slotId) payload.slot_id = bookingData.slotId;
       if (bookingData.slot_ids || bookingData.slotIds) {
         const ids = bookingData.slot_ids || bookingData.slotIds;
@@ -394,61 +395,44 @@ export const integrationService = {
 
   // ====== TIME SLOTS ======
 
-  getAvailableSlots: async (arenaId, date = null, sportId = null) => {
-    try {
-      const params = {};
-      if (date) params.date = date;
-      if (sportId) params.sport_id = sportId;
-      const response = await arenaAPI.getAvailableSlots(arenaId, params);
-      return response.data;
-    } catch (error) {
-      console.error("Error fetching available slots:", error);
-      throw error;
-    }
+  lockSlot: async (slotId) => {
+    const response = await arenaAPI.lockTimeSlot(slotId);
+    return response.data;
   },
 
   // ====== BOOKINGS ======
 
-  bookSlot: async (bookingData) => {
-    try {
-      const response = await bookingAPI.createBooking(bookingData);
-      return response.data;
-    } catch (error) {
-      console.error("Error booking slot:", error);
-      throw error;
-    }
+  releaseSlot: async (slotId) => {
+    const response = await arenaAPI.releaseTimeSlot(slotId);
+    return response.data;
   },
 
-  getUserBookings: async () => {
-    try {
-      const response = await bookingAPI.getUserBookings();
-      return response.data;
-    } catch (error) {
-      console.error("Error fetching user bookings:", error);
-      throw error;
-    }
+  // ====== ADMIN ======
+  getAdminDashboard: async () => {
+    const response = await import("./api").then(({ adminAPI }) =>
+      adminAPI.getDashboard()
+    );
+    return response.data;
   },
 
-  // ====== OWNER DASHBOARD ======
-
-  getOwnerBookings: async () => {
-    try {
-      const response = await ownerAPI.getOwnerBookings();
-      return response.data;
-    } catch (error) {
-      console.error("Error fetching owner bookings:", error);
-      throw error;
-    }
+  getAdminArenas: async (params = {}) => {
+    const response = await import("./api").then(({ adminAPI }) =>
+      adminAPI.getArenas(params)
+    );
+    return response.data;
+  },
+  toggleArenaBlock: async (arenaId, isBlocked, reason = "") => {
+    const response = await import("./api").then(({ adminAPI }) =>
+      adminAPI.toggleArenaBlock(arenaId, isBlocked, reason)
+    );
+    return response.data;
   },
 
-  respondToBooking: async (bookingId, status) => {
-    try {
-      const response = await ownerAPI.respondToBooking(bookingId, status);
-      return response.data;
-    } catch (error) {
-      console.error("Error updating booking status:", error);
-      throw error;
-    }
+  markArenaPayment: async (arenaId, payload) => {
+    const response = await import("./api").then(({ adminAPI }) =>
+      adminAPI.markPaymentCompleted(arenaId, payload)
+    );
+    return response.data;
   },
 };
 

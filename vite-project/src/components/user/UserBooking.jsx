@@ -8,9 +8,12 @@ const UserBooking = () => {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
+  const previousStatuses = useRef({});
   useEffect(() => {
     fetchBookings();
+    const interval = setInterval(fetchBookings, 10000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
   const fetchBookings = async () => {
@@ -25,7 +28,21 @@ const UserBooking = () => {
       }
 
       const data = await integrationService.getUserBookings({ status });
-      setBookings(data.bookings || []);
+      const list = data.bookings || [];
+
+      list.forEach((booking) => {
+        const prev = previousStatuses.current[booking.booking_id];
+        if (prev && prev !== booking.status) {
+          alert(
+            `Booking #${
+              booking.booking_id
+            } is now ${booking.status.toUpperCase()}`
+          );
+        }
+        previousStatuses.current[booking.booking_id] = booking.status;
+      });
+
+      setBookings(list);
     } catch (error) {
       console.error("Error fetching bookings:", error);
       setError(error.response?.data?.message || "Failed to load bookings");
@@ -88,19 +105,21 @@ const UserBooking = () => {
           <nav className="-mb-px flex space-x-8">
             <button
               onClick={() => setActiveTab("upcoming")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === "upcoming"
-                ? "border-primary-500 text-primary-600"
-                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                }`}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === "upcoming"
+                  ? "border-primary-500 text-primary-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+              }`}
             >
               Upcoming Bookings
             </button>
             <button
               onClick={() => setActiveTab("past")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === "past"
-                ? "border-primary-500 text-primary-600"
-                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                }`}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === "past"
+                  ? "border-primary-500 text-primary-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+              }`}
             >
               Booking History
             </button>

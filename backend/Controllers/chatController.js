@@ -350,5 +350,13 @@ function filterContactInfo(message) {
 
   return filtered;
 }
+function checkForContactInfo(message) {
+  const contactPatterns = [
+    /\b\d{10,13}\b/g,
+    /\S+@\S+\.\S+/g,
+    /(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/g,
+  ];
 
+  return contactPatterns.some((pattern) => pattern.test(message));
+}
 module.exports = chatController;

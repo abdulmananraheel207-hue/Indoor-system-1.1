@@ -1,4 +1,6 @@
 const pool = require("../db");
+const { lockSlot } = require("../utils/slotLockService");
+const { sendNotification } = require("../utils/notificationService");
 
 const bookingController = {
   // Create a new booking
@@ -91,7 +93,21 @@ const bookingController = {
       const validPaymentMethods = ["pay_now", "pay_after", "advance_payment"];
       const finalPaymentMethod = validPaymentMethods.includes(payment_method)
         ? payment_method
-        : "pay_after"; // Default to 'pay_after' instead of 'manual'
+        : "pay_after";
+
+      // Prevent booking on blocked arenas
+      const [arenaStatus] = await pool.execute(
+        "SELECT owner_id, is_blocked FROM arenas WHERE arena_id = ?",
+        [arenaIdNum || arena_id]
+      );
+
+      if (!arenaStatus || arenaStatus.length === 0) {
+        return res.status(404).json({ message: "Arena not found" });
+      }
+
+      if (arenaStatus[0].is_blocked) {
+        return res.status(403).json({ message: "Arena is blocked" });
+      }
       // --- Multi-slot booking flow (user selected multiple owner-created slots) ---
       if (hasMultipleSlots) {
         if (!arenaIdNum) {
@@ -113,21 +129,17 @@ const bookingController = {
         );
 
         if (slots.length !== slot_ids.length) {
-          return res
-            .status(400)
-            .json({
-              message:
-                "One or more selected slots were not found for this arena.",
-            });
+          return res.status(400).json({
+            message:
+              "One or more selected slots were not found for this arena.",
+          });
         }
 
         const unavailableSlot = slots.find((s) => !s.is_available);
         if (unavailableSlot) {
-          return res
-            .status(400)
-            .json({
-              message: `Slot ${unavailableSlot.slot_id} is no longer available.`,
-            });
+          return res.status(400).json({
+            message: `Slot ${unavailableSlot.slot_id} is no longer available.`,
+          });
         }
 
         // Align sport selection across all slots
@@ -160,8 +172,8 @@ const bookingController = {
             const [bookingResult] = await connection.execute(
               `INSERT INTO bookings 
                (user_id, arena_id, slot_id, sport_id, total_amount, 
-                commission_percentage, commission_amount, payment_method, requires_advance, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+                commission_percentage, commission_amount, payment_method, requires_advance, status, owner_id, court_id, lock_expires_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE))`,
               [
                 req.user.id,
                 arenaIdNum,
@@ -172,6 +184,8 @@ const bookingController = {
                 commission_amount,
                 finalPaymentMethod,
                 requires_advance || false,
+                slot.owner_id,
+                slot.court_id || null,
               ]
             );
 
@@ -180,10 +194,10 @@ const bookingController = {
             await connection.execute(
               `UPDATE time_slots 
                SET is_available = FALSE,
-                   locked_until = NULL,
-                   locked_by_user_id = NULL
+                  locked_until = DATE_ADD(NOW(), INTERVAL 10 MINUTE),
+                   locked_by_user_id = ?
                WHERE slot_id = ?`,
-              [slot.slot_id]
+              [req.user.id, slot.slot_id]
             );
 
             await connection.execute(
@@ -369,8 +383,8 @@ const bookingController = {
             const [bookingResult] = await connection.execute(
               `INSERT INTO bookings 
                (user_id, arena_id, slot_id, sport_id, total_amount, 
-                commission_percentage, commission_amount, payment_method, requires_advance, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+                commission_percentage, commission_amount, payment_method, requires_advance, status, owner_id, court_id, lock_expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE))`,
               [
                 req.user.id,
                 thisSlot.arena_id,
@@ -381,6 +395,8 @@ const bookingController = {
                 commission_amount,
                 finalPaymentMethod,
                 requires_advance || false,
+                thisSlot.owner_id,
+                thisSlot.court_id || null,
               ]
             );
 
@@ -390,10 +406,10 @@ const bookingController = {
             await connection.execute(
               `UPDATE time_slots 
                SET is_available = FALSE,
-                   locked_until = NULL,
-                   locked_by_user_id = NULL
+   locked_until = DATE_ADD(NOW(), INTERVAL 10 MINUTE),
+                   locked_by_user_id = ?
                WHERE slot_id = ?`,
-              [sid]
+              [req.user.id, sid]
             );
 
             totalCommissionToAdd += commission_amount;
@@ -416,8 +432,8 @@ const bookingController = {
           const [bookingResult] = await connection.execute(
             `INSERT INTO bookings 
              (user_id, arena_id, slot_id, sport_id, total_amount, 
-              commission_percentage, commission_amount, payment_method, requires_advance, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+               commission_percentage, commission_amount, payment_method, requires_advance, status, owner_id, court_id, lock_expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE))`,
             [
               req.user.id,
               arena_id,
@@ -428,27 +444,22 @@ const bookingController = {
               commission_amount,
               finalPaymentMethod,
               requires_advance || false,
+              slot.owner_id || arenaStatus[0].owner_id,
+              slot.court_id || court_id || null,
             ]
           );
 
           const booking_id = bookingResult.insertId;
           createdBookingIds.push(booking_id);
 
-          await connection.execute(
-            `UPDATE time_slots 
-             SET is_available = FALSE,
-                 locked_until = NULL,
-                 locked_by_user_id = NULL
-             WHERE slot_id = ?`,
-            [slotIdToUse]
-          );
-
-          await connection.execute(
-            `UPDATE arenas 
+          slot.owner_id || arenaStatus[0].owner_id,
+            slot.court_id || court_id || null,
+            await connection.execute(
+              `UPDATE arenas 
              SET total_commission_due = total_commission_due + ?
              WHERE arena_id = ?`,
-            [commission_amount, arena_id]
-          );
+              [commission_amount, arena_id]
+            );
         }
 
         await connection.commit();
@@ -468,6 +479,31 @@ const bookingController = {
              .join(",")})`,
           createdBookingIds
         );
+        // Seed chat threads and notify owners
+        await Promise.all(
+          bookings.map((booking) =>
+            pool.execute(
+              `INSERT INTO chats (booking_id, sender_id, sender_type, message, contains_contact_info)
+               VALUES (?, ?, 'system', ?, FALSE)`,
+              [
+                booking.booking_id,
+                req.user.id,
+                "Booking chat opened. Please keep communication within the app.",
+              ]
+            )
+          )
+        );
+
+        for (const booking of bookings) {
+          await sendNotification({
+            ownerId: booking.owner_id || booking.ownerId,
+            userId: req.user.id,
+            bookingId: booking.booking_id,
+            type: "booking.pending",
+            title: "New booking request",
+            message: `New booking request for ${booking.date} ${booking.start_time}-${booking.end_time}`,
+          });
+        }
 
         res.status(201).json({
           message:

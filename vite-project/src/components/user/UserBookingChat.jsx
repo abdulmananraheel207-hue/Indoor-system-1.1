@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
-
+import { chatAPI, bookingAPI } from "../../services/api";
 const UserBookingChat = () => {
   const { bookingId } = useParams();
   const [messages, setMessages] = useState([]);
@@ -21,24 +21,14 @@ const UserBookingChat = () => {
 
   const fetchBookingDetails = async () => {
     try {
-      const response = await fetch(
-        `http://localhost:5000/api/bookings/${bookingId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
-        }
-      );
-      const data = await response.json();
-      if (response.ok) {
-        // Check if booking status allows chat
-        if (!["pending", "approved"].includes(data.status)) {
-          alert("Chat is only available for pending or approved bookings");
-          window.history.back();
-          return;
-        }
-        setBooking(data);
+      const response = await bookingAPI.getBookingDetails(bookingId);
+      const data = response.data;
+      if (!["pending", "accepted"].includes(data.status)) {
+        alert("Chat is only available for pending or accepted bookings");
+        window.history.back();
+        return;
       }
+      setBooking(data);
     } catch (error) {
       console.error("Error fetching booking:", error);
     }
@@ -46,28 +36,10 @@ const UserBookingChat = () => {
 
   const fetchMessages = async () => {
     try {
-      const response = await fetch(
-        `http://localhost:5000/api/chats/${bookingId}`, // CHANGED THIS
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
-        }
-      );
-
-      if (response.status === 403) {
-        // Handle chat not available due to status
-        const errorData = await response.json();
-        alert(errorData.message || "Chat not available for this booking");
-        window.history.back();
-        return;
-      }
-
-      const data = await response.json();
-      if (response.ok) {
-        setMessages(data.messages || []);
-        setLoading(false);
-      }
+      const response = await chatAPI.getMessages(bookingId);
+      const data = response.data;
+      setMessages(data.messages || data.chats || []);
+      setLoading(false);
     } catch (error) {
       console.error("Error fetching messages:", error);
       setLoading(false);
@@ -77,27 +49,17 @@ const UserBookingChat = () => {
   const sendMessage = async (e) => {
     e.preventDefault();
     if (!newMessage.trim()) return;
+    const contactPattern =
+      /\b\d{7,}\b|(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}|\S+@\S+\.\S+/g;
+    if (contactPattern.test(newMessage)) {
+      alert("Messages cannot contain phone numbers or email addresses.");
+      return;
+    }
 
     try {
-      const response = await fetch(
-        `http://localhost:5000/api/chats/${bookingId}/message`, // CHANGED THIS
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
-          body: JSON.stringify({ message: newMessage }),
-        }
-      );
-
-      if (response.ok) {
-        setNewMessage("");
-        fetchMessages();
-      } else if (response.status === 403) {
-        const errorData = await response.json();
-        alert(errorData.message || "Cannot send message for this booking");
-      }
+      await chatAPI.sendMessage(bookingId, { message: newMessage });
+      setNewMessage("");
+      fetchMessages();
     } catch (error) {
       console.error("Error sending message:", error);
     }

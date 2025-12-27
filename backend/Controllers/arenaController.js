@@ -337,22 +337,63 @@ const arenaController = {
   // Search arenas
   searchArenas: async (req, res) => {
     try {
-      const { query } = req.query;
+      const { query, lat, lng, radius_km, skip_location } = req.query;
 
-      let sqlQuery =
-        "SELECT * FROM arenas WHERE is_active = 1 AND is_blocked = 0";
-      const params = [];
+      const baseRadius = parseFloat(radius_km) || 8;
+      const latitude = lat ? parseFloat(lat) : null;
+      const longitude = lng ? parseFloat(lng) : null;
+      const locationProvided =
+        !skip_location && !Number.isNaN(latitude) && !Number.isNaN(longitude);
 
-      if (query) {
+      const runSearch = async (radius) => {
+        const distanceExpr = locationProvided
+          ? ` (6371 * ACOS(
+                COS(RADIANS(?)) * COS(RADIANS(a.location_lat)) *
+                COS(RADIANS(a.location_lng) - RADIANS(?)) +
+                SIN(RADIANS(?)) * SIN(RADIANS(a.location_lat))
+              ))`
+          : "NULL";
+
+        let sqlQuery = `
+          SELECT a.*, ${distanceExpr} AS distance_km
+          FROM arenas a
+        `;
+        const whereConditions = ["a.is_active = 1", "a.is_blocked = 0"];
+        const params = [];
+
+        if (locationProvided) {
+          params.push(latitude, longitude, latitude);
+        }
+
+        if (query) {
+          const searchTerm = `%${query}%`;
+          whereConditions.push(
+            "(a.name LIKE ? OR a.address LIKE ? OR a.description LIKE ?)"
+          );
+          params.push(searchTerm, searchTerm, searchTerm);
+        }
+
+        if (whereConditions.length > 0) {
+          sqlQuery += ` WHERE ${whereConditions.join(" AND ")}`;
+        }
+
+        if (locationProvided) {
+          sqlQuery += " HAVING distance_km <= ?";
+          params.push(radius);
+        }
         sqlQuery +=
-          " AND (name LIKE ? OR address LIKE ? OR description LIKE ?)";
-        const searchTerm = `%${query}%`;
-        params.push(searchTerm, searchTerm, searchTerm);
+          " ORDER BY distance_km IS NULL, distance_km ASC, rating DESC, name ASC";
+        const [arenas] = await pool.execute(sqlQuery, params);
+        return arenas;
+      };
+
+      let arenas = await runSearch(baseRadius);
+
+      // Expand radius if none found and location provided
+      if (locationProvided && arenas.length === 0) {
+        arenas = await runSearch(baseRadius * 2);
       }
 
-      sqlQuery += " ORDER BY rating DESC, name ASC";
-
-      const [arenas] = await pool.execute(sqlQuery, params);
       res.json(arenas);
     } catch (error) {
       console.error(error);

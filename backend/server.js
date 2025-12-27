@@ -19,6 +19,8 @@ const chatRoutes = require("./routes/chats");
 const managerRoutes = require("./routes/managers");
 const ownerBookingsRoutes = require("./routes/ownerBookings");
 const app = express();
+const { applySchemaPatches } = require("./utils/schemaPatches");
+const { startLockExpiryJob } = require("./utils/slotLockService");
 
 // Middleware
 app.use(helmet());
@@ -39,6 +41,10 @@ db.getConnection()
   .then((connection) => {
     console.log("✅ Database connected to:", config.DB_DATABASE);
     connection.release();
+    applySchemaPatches()
+      .then(() => console.log("✅ Schema patches applied"))
+      .catch((err) => console.warn("⚠️ Schema patch failed", err.message));
+    startLockExpiryJob();
   })
   .catch((err) => {
     console.error("❌ Database connection failed:", err.message);

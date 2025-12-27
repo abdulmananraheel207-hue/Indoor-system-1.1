@@ -13,6 +13,9 @@ const OwnerBookings = () => {
 
   useEffect(() => {
     fetchBookings();
+    const interval = setInterval(fetchBookings, 10000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter, dateFrom, dateTo]);
 
   const fetchBookings = async () => {
@@ -40,7 +43,16 @@ const OwnerBookings = () => {
       setLoading(true);
       await integrationService.acceptBookingRequest(bookingId);
       alert("Booking accepted successfully!");
-      fetchBookings();
+      setBookings((prev) =>
+        prev.map((b) =>
+          b.booking_id === bookingId ? { ...b, status: "accepted" } : b
+        )
+      );
+      setFilteredBookings((prev) =>
+        prev.map((b) =>
+          b.booking_id === bookingId ? { ...b, status: "accepted" } : b
+        )
+      );
     } catch (error) {
       console.error("Error accepting booking:", error);
       alert(error.response?.data?.message || "Failed to accept booking");
@@ -57,7 +69,16 @@ const OwnerBookings = () => {
       setLoading(true);
       await integrationService.rejectBookingRequest(bookingId, reason);
       alert("Booking rejected successfully");
-      fetchBookings();
+      setBookings((prev) =>
+        prev.map((b) =>
+          b.booking_id === bookingId ? { ...b, status: "rejected" } : b
+        )
+      );
+      setFilteredBookings((prev) =>
+        prev.map((b) =>
+          b.booking_id === bookingId ? { ...b, status: "rejected" } : b
+        )
+      );
     } catch (error) {
       console.error("Error rejecting booking:", error);
       alert(error.response?.data?.message || "Failed to reject booking");

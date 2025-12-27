@@ -19,6 +19,8 @@ const UserArenaDetails = () => {
   const [reviews, setReviews] = useState([]);
   const [showReviews, setShowReviews] = useState(false);
   const [newReview, setNewReview] = useState({ rating: 5, comment: "" });
+  const [lockExpiry, setLockExpiry] = useState(null);
+  const [timeLeft, setTimeLeft] = useState(null);
 
   useEffect(() => {
     fetchArenaDetails();
@@ -31,9 +33,34 @@ const UserArenaDetails = () => {
       fetchAvailableSlots();
       // clear any previously selected slots when date changes
       setSelectedSlots([]);
+      setLockExpiry(null);
+      setTimeLeft(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [arena, selectedDate]);
+
+  useEffect(() => {
+    if (!lockExpiry) return;
+    const interval = setInterval(() => {
+      const diff = new Date(lockExpiry).getTime() - Date.now();
+      if (diff <= 0) {
+        setTimeLeft("00:00");
+        setLockExpiry(null);
+        setSelectedSlots([]);
+        fetchAvailableSlots();
+        clearInterval(interval);
+      } else {
+        const minutes = Math.floor(diff / 60000);
+        const seconds = Math.floor((diff % 60000) / 1000);
+        setTimeLeft(
+          `${minutes.toString().padStart(2, "0")}:${seconds
+            .toString()
+            .padStart(2, "0")}`
+        );
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [lockExpiry]);
 
   // In UserArenaDetails.jsx, replace the fetchArenaDetails function:
   const fetchArenaDetails = async () => {
@@ -82,7 +109,7 @@ const UserArenaDetails = () => {
       const slots = await integrationService.getAvailableSlots(
         arenaId,
         dateStr,
-        selectedCourt?.sports?.[0]
+        selectedSportId || selectedCourt?.sports?.[0]
       );
       setAvailableSlots(slots);
     } catch (error) {
@@ -109,17 +136,33 @@ const UserArenaDetails = () => {
     if (!isSlotAvailable || slot.is_blocked) return;
 
     // toggle selection
-    console.log("slot clicked", slot.slot_id, slot);
     const exists = selectedSlots.some((s) => s.slot_id === slot.slot_id);
-    if (exists) {
-      const next = selectedSlots.filter((s) => s.slot_id !== slot.slot_id);
-      setSelectedSlots(next);
-      console.log("selectedSlots updated", next);
-    } else {
-      const next = [...selectedSlots, slot];
-      setSelectedSlots(next);
-      console.log("selectedSlots updated", next);
-    }
+    const toggleSelection = async () => {
+      try {
+        if (exists) {
+          setSelectedSlots((prev) =>
+            prev.filter((s) => s.slot_id !== slot.slot_id)
+          );
+          await integrationService.releaseSlot(slot.slot_id);
+          return;
+        }
+
+        await integrationService.lockSlot(slot.slot_id);
+        const nextExpiry = new Date(Date.now() + 10 * 60 * 1000);
+        setLockExpiry(nextExpiry);
+        setTimeLeft("10:00");
+        setSelectedSlots((prev) => [...prev, slot]);
+      } catch (error) {
+        console.error("Error locking slot", error);
+        alert(
+          error.response?.data?.message ||
+            "Slot is no longer available. Please choose another slot."
+        );
+        fetchAvailableSlots();
+      }
+    };
+
+    toggleSelection();
   };
   const handleBooking = async () => {
     if (!selectedSlots || selectedSlots.length === 0) {
@@ -197,9 +240,9 @@ const UserArenaDetails = () => {
 
       // Collect all selected owner-created slot IDs for multi-slot booking
       const slotIds = selectedSlots.map((s) => s.slot_id).filter(Boolean);
-
+      let bookingResponse;
       if (slotIds.length > 1) {
-        await integrationService.createBooking({
+        bookingResponse = await integrationService.createBooking({
           arenaId: parseInt(arenaId),
           slot_ids: slotIds,
           sportId: sportToSend,
@@ -207,7 +250,7 @@ const UserArenaDetails = () => {
           notes: "",
         });
       } else if (slotIds.length === 1) {
-        await integrationService.createBooking({
+        bookingResponse = await integrationService.createBooking({
           arenaId: parseInt(arenaId),
           slot_id: slotIds[0],
           sport_id: sportToSend,
@@ -216,7 +259,7 @@ const UserArenaDetails = () => {
         });
       } else {
         // No explicit slot selected — fall back to time-range request (owners must create slots)
-        await integrationService.createBooking({
+        bookingResponse = await integrationService.createBooking({
           arenaId: parseInt(arenaId),
           courtId: selectedCourt.court_id,
           date: integrationService.formatDate(selectedDate),
@@ -228,10 +271,15 @@ const UserArenaDetails = () => {
         });
       }
 
-      alert(
-        "Booking request sent successfully! The owner will review your request."
-      );
-      navigate("/user/dashboard");
+      const bookingId =
+        bookingResponse?.bookings?.[0]?.booking_id ||
+        bookingResponse?.booking?.booking_id;
+
+      if (bookingId) {
+        navigate(`/user/bookings/${bookingId}/chat`);
+      } else {
+        navigate("/user/dashboard");
+      }
     } catch (error) {
       console.error("Error creating booking:", error);
       alert(
@@ -638,6 +686,8 @@ const UserArenaDetails = () => {
                     );
                     const isAvailable =
                       slot.actually_available ?? slot.is_available;
+                    const lockedLabel =
+                      !isAvailable || slot.is_blocked ? "Locked" : null;
                     return (
                       <button
                         key={slot.slot_id}
@@ -656,11 +706,21 @@ const UserArenaDetails = () => {
                           {slot.start_time} - {slot.end_time}
                         </div>
                         <div className="text-sm">Rs {slot.price}</div>
+                        {!isAvailable && (
+                          <div className="text-xs text-red-500">
+                            {lockedLabel || "Unavailable"}
+                          </div>
+                        )}
                       </button>
                     );
                   })}
                 </div>
               </div>
+              {timeLeft && (
+                <div className="mt-2 text-sm text-primary-700">
+                  Slot held for you: {timeLeft} remaining
+                </div>
+              )}
 
               {/* Booking Summary */}
               {selectedSlots && selectedSlots.length > 0 && (
@@ -720,15 +780,27 @@ const UserArenaDetails = () => {
                   <button
                     type="button"
                     onClick={() => {
+                      selectedSlots.forEach((s) =>
+                        integrationService
+                          .releaseSlot(s.slot_id)
+                          .catch(() => {})
+                      );
                       setSelectedSlots([]);
-                      console.log("cleared selectedSlots");
+                      setLockExpiry(null);
+                      setTimeLeft(null);
+                      fetchAvailableSlots();
                     }}
                     className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
                   >
                     Clear All
                   </button>
                   <div className="text-sm text-gray-600">
-                    Selected: {selectedSlots.length}
+                    Selected: {selectedSlots.length}{" "}
+                    {timeLeft && (
+                      <span className="text-primary-600 ml-2">
+                        Hold expires in {timeLeft}
+                      </span>
+                    )}{" "}
                   </div>
                 </div>
               )}

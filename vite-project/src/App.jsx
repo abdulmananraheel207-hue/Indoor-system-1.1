@@ -27,7 +27,7 @@ import AdminLayout from "./components/admin/AdminLayout";
 import ManagerDashboard from "./components/manager/ManagerDashboard";
 import UserArenaDetails from "./components/user/UserArenaDetails";
 import UserBookingChat from "./components/user/UserBookingChat";
-
+import { authAPI } from "./services/api";
 // Test admin credentials
 const TEST_ADMIN = {
   username: "admin",
@@ -53,14 +53,14 @@ const useAuth = () => {
       checkAuthStatus();
     };
 
-    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener("storage", handleStorageChange);
 
     // Also check on focus
-    window.addEventListener('focus', checkAuthStatus);
+    window.addEventListener("focus", checkAuthStatus);
 
     return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener('focus', checkAuthStatus);
+      window.removeEventListener("storage", handleStorageChange);
+      window.removeEventListener("focus", checkAuthStatus);
     };
   }, []);
 
@@ -120,6 +120,7 @@ const useAuth = () => {
 
   const adminLogout = () => {
     localStorage.removeItem("adminToken");
+    localStorage.removeItem("token");
     localStorage.removeItem("userRole");
     setAuthState({
       isAuthenticated: false,
@@ -199,19 +200,27 @@ function App() {
   const AdminAuthWrapper = () => {
     const navigate = useNavigate();
 
-    const handleLogin = (credentials) => {
-      // Simple test authentication
-      if (
-        credentials.username === TEST_ADMIN.username &&
-        credentials.password === TEST_ADMIN.password
-      ) {
-        auth.adminLogin("test-token-123");
-        setTimeout(() => {
-          navigate("/admin/dashboard");
-        }, 50);
-        return true;
+    const handleLogin = async (credentials) => {
+      try {
+        const response = await authAPI.login({
+          email: credentials.username,
+          password: credentials.password,
+        });
+        const token = response.data?.token;
+        const role = response.data?.user?.role;
+        if (token && role === "admin") {
+          localStorage.setItem("adminToken", token);
+          auth.login(token, "admin", response.data.user);
+          setTimeout(() => {
+            navigate("/admin/dashboard");
+          }, 50);
+          return true;
+        }
+        return false;
+      } catch (error) {
+        console.error("Admin login failed", error);
+        return false;
       }
-      return false;
     };
 
     return <AdminAuth onLogin={handleLogin} />;
@@ -237,12 +246,14 @@ function App() {
   // Protected Route Component
   const ProtectedRoute = ({ children, requiredRole }) => {
     if (auth.isLoading) {
-      return <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
+      return (
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600">Loading...</p>
+          </div>
         </div>
-      </div>;
+      );
     }
 
     if (!auth.isAuthenticated) {
@@ -307,37 +318,41 @@ function App() {
                 <div className="ml-8 flex space-x-4">
                   <button
                     onClick={() => setCurrentTab("home")}
-                    className={`px-3 py-2 rounded-lg ${currentTab === "home"
+                    className={`px-3 py-2 rounded-lg ${
+                      currentTab === "home"
                         ? "bg-blue-100 text-blue-700"
                         : "text-gray-700 hover:bg-gray-100"
-                      }`}
+                    }`}
                   >
                     Home
                   </button>
                   <button
                     onClick={() => setCurrentTab("teams")}
-                    className={`px-3 py-2 rounded-lg ${currentTab === "teams"
+                    className={`px-3 py-2 rounded-lg ${
+                      currentTab === "teams"
                         ? "bg-blue-100 text-blue-700"
                         : "text-gray-700 hover:bg-gray-100"
-                      }`}
+                    }`}
                   >
                     Teams
                   </button>
                   <button
                     onClick={() => setCurrentTab("booking")}
-                    className={`px-3 py-2 rounded-lg ${currentTab === "booking"
+                    className={`px-3 py-2 rounded-lg ${
+                      currentTab === "booking"
                         ? "bg-blue-100 text-blue-700"
                         : "text-gray-700 hover:bg-gray-100"
-                      }`}
+                    }`}
                   >
                     Booking
                   </button>
                   <button
                     onClick={() => setCurrentTab("profile")}
-                    className={`px-3 py-2 rounded-lg ${currentTab === "profile"
+                    className={`px-3 py-2 rounded-lg ${
+                      currentTab === "profile"
                         ? "bg-blue-100 text-blue-700"
                         : "text-gray-700 hover:bg-gray-100"
-                      }`}
+                    }`}
                   >
                     Profile
                   </button>

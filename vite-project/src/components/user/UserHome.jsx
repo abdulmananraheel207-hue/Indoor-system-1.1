@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import integrationService from "../../services/integrationService";
-
+const [skipLocation, setSkipLocation] = useState(false);
 const UserHome = () => {
   const navigate = useNavigate();
   const [location, setLocation] = useState(null);
@@ -22,6 +22,11 @@ const UserHome = () => {
           setLocation({
             lat: position.coords.latitude,
             lng: position.coords.longitude,
+          });
+          fetchArenas({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            radius_km: 8,
           });
         },
         (error) => console.error("Error getting location:", error)
@@ -45,11 +50,31 @@ const UserHome = () => {
 
   const fetchArenas = async (filters = {}) => {
     try {
-      setLoading(true);
-      const arenasData = await integrationService.getAllArenas(filters);
-      setArenas(
-        Array.isArray(arenasData) ? arenasData : arenasData.arenas || []
-      );
+      const params = { ...filters };
+
+      if (location && !skipLocation) {
+        params.lat = location.lat;
+        params.lng = location.lng;
+        params.radius_km = params.radius_km || 8;
+      }
+
+      let arenasData = await integrationService.searchArenas(params);
+      let parsed = Array.isArray(arenasData)
+        ? arenasData
+        : arenasData.arenas || [];
+
+      if ((!parsed || parsed.length === 0) && params.lat && params.lng) {
+        const widerParams = {
+          ...params,
+          radius_km: (params.radius_km || 8) * 2,
+        };
+        arenasData = await integrationService.searchArenas(widerParams);
+        parsed = Array.isArray(arenasData)
+          ? arenasData
+          : arenasData.arenas || [];
+      }
+
+      setArenas((parsed || []).filter((arena) => !arena.is_blocked));
     } catch (error) {
       console.error("Error fetching arenas:", error);
       setError(error.response?.data?.message || "Failed to load arenas");
@@ -63,9 +88,17 @@ const UserHome = () => {
     try {
       const params = { query: searchQuery };
       if (selectedSport) params.sport_id = selectedSport.sport_id;
-
+      if (location && !skipLocation) {
+        params.lat = location.lat;
+        params.lng = location.lng;
+        params.radius_km = 8;
+      }
       const results = await integrationService.searchArenas(params);
-      setArenas(Array.isArray(results) ? results : results.arenas || []);
+      if (location && !skipLocation) {
+        params.lat = location.lat;
+        params.lng = location.lng;
+        params.radius_km = 8;
+      }
     } catch (error) {
       console.error("Error searching arenas:", error);
       alert("Search failed");
@@ -75,10 +108,15 @@ const UserHome = () => {
   const handleSportSelect = async (sport) => {
     setSelectedSport(sport);
     try {
-      const results = await integrationService.searchArenas({
-        sport_id: sport.sport_id,
-      });
-      setArenas(Array.isArray(results) ? results : results.arenas || []);
+      const params = { sport_id: sport.sport_id };
+      if (location && !skipLocation) {
+        params.lat = location.lat;
+        params.lng = location.lng;
+        params.radius_km = 8;
+      }
+      const results = await integrationService.searchArenas(params);
+      const parsed = Array.isArray(results) ? results : results.arenas || [];
+      setArenas(parsed.filter((arena) => !arena.is_blocked));
     } catch (error) {
       console.error("Error filtering arenas:", error);
     }
@@ -96,39 +134,76 @@ const UserHome = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Find Arena</h1>
-              {location ? (
-                <div className="flex items-center mt-1 text-gray-600">
-                  <svg
-                    className="h-4 w-4 mr-1"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
+              {location && !skipLocation ? (
+                <div className="flex items-center mt-1 text-gray-600 space-x-3">
+                  <div className="flex items-center">
+                    <svg
+                      className="h-4 w-4 mr-1"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                    <span className="text-sm">Using your location</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSkipLocation(true);
+                      fetchArenas({});
+                    }}
+                    className="text-xs text-primary-600 hover:text-primary-500 underline"
                   >
-                    <path
-                      fillRule="evenodd"
-                      d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  <span className="text-sm">Near your location</span>
+                    Skip location
+                  </button>
                 </div>
               ) : (
-                <button
-                  onClick={() => {
-                    if (navigator.geolocation) {
-                      navigator.geolocation.getCurrentPosition(
-                        (pos) =>
-                          setLocation({
-                            lat: pos.coords.latitude,
-                            lng: pos.coords.longitude,
-                          }),
-                        console.error
-                      );
-                    }
-                  }}
-                  className="mt-1 text-sm text-primary-600 hover:text-primary-500"
-                >
-                  Enable location to find nearby arenas
-                </button>
+                <div className="flex flex-col mt-1 space-y-1">
+                  <button
+                    onClick={() => {
+                      if (navigator.geolocation) {
+                        navigator.geolocation.getCurrentPosition(
+                          (pos) => {
+                            setLocation({
+                              lat: pos.coords.latitude,
+                              lng: pos.coords.longitude,
+                            });
+                            setSkipLocation(false);
+                            fetchArenas({
+                              lat: pos.coords.latitude,
+                              lng: pos.coords.longitude,
+                              radius_km: 8,
+                            });
+                          },
+                          () => {
+                            setSkipLocation(true);
+                            fetchArenas({});
+                          }
+                        );
+                      } else {
+                        setSkipLocation(true);
+                        fetchArenas({});
+                      }
+                    }}
+                    className="text-sm text-primary-600 hover:text-primary-500"
+                  >
+                    Enable location to find nearby arenas
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSkipLocation(true);
+                      fetchArenas({});
+                    }}
+                    className="text-xs text-primary-600 hover:text-primary-500 underline"
+                  >
+                    Continue without location
+                  </button>
+                </div>
               )}
             </div>
           </div>
