@@ -109,16 +109,25 @@ const bookingValidation = {
 
     body()
       .custom((_, { req }) => {
-        const hasLegacy = (req.body.slot_id || req.body.slotId) && (req.body.sport_id || req.body.sportId);
-        const hasNew = (req.body.court_id || req.body.courtId) && (req.body.date || req.body.bookingDate) && (req.body.start_time || req.body.startTime) && (req.body.end_time || req.body.endTime);
+        const hasLegacy =
+          (req.body.slot_id || req.body.slotId) &&
+          (req.body.sport_id || req.body.sportId);
+        const hasNew =
+          (req.body.court_id || req.body.courtId) &&
+          (req.body.date || req.body.bookingDate) &&
+          (req.body.start_time || req.body.startTime) &&
+          (req.body.end_time || req.body.endTime);
+        const slotIds = req.body.slot_ids || req.body.slotIds;
+        const hasSlotIds = Array.isArray(slotIds) && slotIds.length > 0;
         if (hasLegacy) return true;
         if (hasNew) return true;
+        if (hasSlotIds) return true;
         throw new Error(
           "Provide either slot_id & sport_id (legacy) or court_id + date + start_time + end_time (new)"
         );
       })
       .withMessage(
-        "Provide either slot_id & sport_id (legacy) or court_id + date + start_time + end_time (new)"
+        "Provide either slot_id & sport_id (legacy), slot_ids[], or court_id + date + start_time + end_time (new)"
       ),
 
     // Optional numeric checks for both naming styles
@@ -129,6 +138,16 @@ const bookingValidation = {
     body("sport_id").optional().isInt({ gt: 0 }),
     body("sportId").optional().isInt({ gt: 0 }),
     body("arenaId").optional().isInt({ gt: 0 }),
+    body(["slot_ids", "slotIds"]) // Allow multi-slot bookings
+      .optional()
+      .isArray({ min: 1 })
+      .withMessage("slot_ids must be an array of slot IDs")
+      .custom(
+        (value) =>
+          Array.isArray(value) &&
+          value.every((id) => Number.isInteger(Number(id)) && Number(id) > 0)
+      )
+      .withMessage("slot_ids must contain valid numeric IDs"),
   ]),
 };
 
