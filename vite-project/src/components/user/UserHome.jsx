@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import integrationService from "../../services/integrationService";
-const [skipLocation, setSkipLocation] = useState(false);
 const UserHome = () => {
   const navigate = useNavigate();
   const [location, setLocation] = useState(null);
@@ -11,7 +10,7 @@ const UserHome = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
-
+  const [skipLocation, setSkipLocation] = useState(false);
   useEffect(() => {
     fetchInitialData();
 
@@ -39,10 +38,8 @@ const UserHome = () => {
       setLoading(true);
       const sportsData = await integrationService.getSportsCategories();
       setSports(sportsData);
-      await fetchArenas();
     } catch (error) {
-      console.error("Error fetching initial data:", error);
-      setError(error.response?.data?.message || "Failed to load arenas");
+      setError("Failed to load sports");
     } finally {
       setLoading(false);
     }
@@ -50,34 +47,26 @@ const UserHome = () => {
 
   const fetchArenas = async (filters = {}) => {
     try {
+      setLoading(true);
+
       const params = { ...filters };
 
-      if (location && !skipLocation) {
+      if (!filters.skip_location && location) {
         params.lat = location.lat;
         params.lng = location.lng;
-        params.radius_km = params.radius_km || 8;
+        params.radius_km = params.radius_km || 20; // increase radius
       }
 
-      let arenasData = await integrationService.searchArenas(params);
-      let parsed = Array.isArray(arenasData)
-        ? arenasData
-        : arenasData.arenas || [];
+      const arenasData = await integrationService.searchArenas(params);
 
-      if ((!parsed || parsed.length === 0) && params.lat && params.lng) {
-        const widerParams = {
-          ...params,
-          radius_km: (params.radius_km || 8) * 2,
-        };
-        arenasData = await integrationService.searchArenas(widerParams);
-        parsed = Array.isArray(arenasData)
-          ? arenasData
-          : arenasData.arenas || [];
-      }
+      const parsed =
+        arenasData?.arenas ||
+        arenasData?.data ||
+        (Array.isArray(arenasData) ? arenasData : []);
 
-      setArenas((parsed || []).filter((arena) => !arena.is_blocked));
-    } catch (error) {
-      console.error("Error fetching arenas:", error);
-      setError(error.response?.data?.message || "Failed to load arenas");
+      setArenas(parsed.filter((a) => !a.is_blocked));
+    } catch (err) {
+      setError("Failed to load arenas");
     } finally {
       setLoading(false);
     }
@@ -94,14 +83,13 @@ const UserHome = () => {
         params.radius_km = 8;
       }
       const results = await integrationService.searchArenas(params);
-      if (location && !skipLocation) {
-        params.lat = location.lat;
-        params.lng = location.lng;
-        params.radius_km = 8;
-      }
+      const parsed = Array.isArray(results) ? results : results.arenas || [];
+      setArenas(parsed.filter((arena) => !arena.is_blocked));
     } catch (error) {
       console.error("Error searching arenas:", error);
       alert("Search failed");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -154,7 +142,8 @@ const UserHome = () => {
                     type="button"
                     onClick={() => {
                       setSkipLocation(true);
-                      fetchArenas({});
+                      setLocation(null);
+                      fetchArenas({ skip_location: true });
                     }}
                     className="text-xs text-primary-600 hover:text-primary-500 underline"
                   >
