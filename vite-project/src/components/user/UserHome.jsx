@@ -47,7 +47,9 @@ const UserHome = () => {
     try {
       setLoading(true);
       const arenasData = await integrationService.getAllArenas(filters);
-      setArenas(Array.isArray(arenasData) ? arenasData : arenasData.arenas || []);
+      setArenas(
+        Array.isArray(arenasData) ? arenasData : arenasData.arenas || []
+      );
     } catch (error) {
       console.error("Error fetching arenas:", error);
       setError(error.response?.data?.message || "Failed to load arenas");
@@ -193,10 +195,11 @@ const UserHome = () => {
               <button
                 key={sport.sport_id}
                 onClick={() => handleSportSelect(sport)}
-                className={`flex flex-col items-center p-4 rounded-xl transition-all duration-200 ${selectedSport?.sport_id === sport.sport_id
-                  ? "bg-primary-50 border-2 border-primary-500"
-                  : "bg-white border border-gray-200 hover:border-primary-300"
-                  }`}
+                className={`flex flex-col items-center p-4 rounded-xl transition-all duration-200 ${
+                  selectedSport?.sport_id === sport.sport_id
+                    ? "bg-primary-50 border-2 border-primary-500"
+                    : "bg-white border border-gray-200 hover:border-primary-300"
+                }`}
               >
                 <span className="text-2xl mb-2">
                   {sport.icon_url ? "🏸" : "🎾"}
@@ -320,13 +323,15 @@ const UserHome = () => {
                     </div>
 
                     <div className="flex flex-wrap gap-2 mb-4">
-                      {arena.sports &&
-                        arena.sports.split(",").map((sport, index) => (
+                      {Array.isArray(arena.sports) &&
+                        arena.sports.map((sport, index) => (
                           <span
                             key={index}
-                            className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded"
+                            className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm"
                           >
-                            {sport.trim()}
+                            {typeof sport === "string"
+                              ? sport
+                              : sport.sport_name || sport.name || sport}
                           </span>
                         ))}
                     </div>
