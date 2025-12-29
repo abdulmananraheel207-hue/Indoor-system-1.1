@@ -103,8 +103,10 @@ const bookingValidation = {
       .custom((_, { req }) => {
         const hasLegacy = req.body.slot_id && req.body.sport_id;
         const hasNew = req.body.court_id && req.body.date && req.body.start_time && req.body.end_time;
+        const hasMulti = Array.isArray(req.body.slot_ids) && req.body.slot_ids.length > 0;
         if (hasLegacy) return true;
         if (hasNew) return true;
+        if (hasMulti) return true;
         throw new Error(
           "Provide either slot_id & sport_id (legacy) or court_id + date + start_time + end_time (new)"
         );
@@ -113,6 +115,7 @@ const bookingValidation = {
         "Provide either slot_id & sport_id (legacy) or court_id + date + start_time + end_time (new)"
       ),
     body("court_id").optional().isInt({ gt: 0 }),
+    body("slot_ids").optional().isArray({ min: 1 }).withMessage("slot_ids must be a non-empty array"),
   ]),
 };
 
