@@ -33,13 +33,11 @@ async function acceptBooking({ bookingId, ownerId, actorType = "owner" }) {
     await connection.execute(
       `UPDATE bookings 
        SET status = 'accepted',
-           accepted_at = NOW(),
-           accepted_by = ?,
            lock_expires_at = NULL,
            owner_id = ?,
            court_id = COALESCE(court_id, ?)
        WHERE booking_id = ?`,
-      [actorType, ownerId, booking.court_id, bookingId]
+      [ownerId, booking.court_id, bookingId]
     );
 
     await lockSlot(booking.slot_id, booking.user_id, 120, connection);

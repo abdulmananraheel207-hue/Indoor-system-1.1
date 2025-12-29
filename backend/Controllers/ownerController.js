@@ -2,6 +2,7 @@ const pool = require("../db");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { generateTimeSlots } = require("../utils/timeSlotHelper");
+const decisionService = require("../utils/bookingDecisionService");
 
 const ownerController = {
   // Complete owner registration with arena, courts, sports, and time slots
@@ -194,8 +195,8 @@ const ownerController = {
               court.court_name || `Court ${court.court_number || 1}`,
               parseFloat(court.size_sqft) || 2000,
               parseFloat(court.price_per_hour) ||
-                parseFloat(base_price_per_hour) ||
-                500,
+              parseFloat(base_price_per_hour) ||
+              500,
               court.description || "",
             ]
           );
@@ -480,7 +481,7 @@ const ownerController = {
           b.status,
           b.total_amount,
           b.commission_amount,
-          b.created_at as booking_date,
+          b.booking_date,
           u.name as user_name,
           u.email as user_email,
           u.phone_number as user_phone,
@@ -514,7 +515,7 @@ const ownerController = {
         params.push(date_to);
       }
 
-      query += " ORDER BY b.created_at DESC";
+      query += " ORDER BY b.booking_date DESC";
 
       const [bookings] = await pool.execute(query, params);
       res.json(bookings);
@@ -528,34 +529,15 @@ const ownerController = {
   acceptBooking: async (req, res) => {
     try {
       const { booking_id } = req.params;
+      const ownerId = req.user.id;
 
-      // Verify owner owns this booking's arena
-      const [bookingCheck] = await pool.execute(
-        `SELECT b.* FROM bookings b
-         JOIN arenas a ON b.arena_id = a.arena_id
-         WHERE b.booking_id = ? AND a.owner_id = ?`,
-        [booking_id, req.user.id]
-      );
+      const result = await decisionService.acceptBooking({
+        bookingId: booking_id,
+        ownerId,
+        actorType: "owner",
+      });
 
-      if (bookingCheck.length === 0) {
-        return res
-          .status(404)
-          .json({ message: "Booking not found or access denied" });
-      }
-
-      if (bookingCheck[0].status !== "pending") {
-        return res
-          .status(400)
-          .json({ message: "Booking is not in pending status" });
-      }
-
-      // Update booking status to 'approved'
-      await pool.execute(
-        'UPDATE bookings SET status = "accepted" WHERE booking_id = ?',
-        [booking_id]
-      );
-
-      res.json({ message: "Booking accepted successfully" });
+      return res.status(result.status).json({ message: result.message });
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Server error", error: error.message });
@@ -566,63 +548,17 @@ const ownerController = {
   rejectBooking: async (req, res) => {
     try {
       const { booking_id } = req.params;
-      const { reason } = req.body;
+      const { reason } = req.body || {};
+      const ownerId = req.user.id;
 
-      // Verify owner owns this booking's arena
-      const [bookingCheck] = await pool.execute(
-        `SELECT b.*, ts.slot_id FROM bookings b
-         JOIN arenas a ON b.arena_id = a.arena_id
-         JOIN time_slots ts ON b.slot_id = ts.slot_id
-         WHERE b.booking_id = ? AND a.owner_id = ?`,
-        [booking_id, req.user.id]
-      );
+      const result = await decisionService.rejectBooking({
+        bookingId: booking_id,
+        ownerId,
+        reason,
+        actorType: "owner",
+      });
 
-      if (bookingCheck.length === 0) {
-        return res
-          .status(404)
-          .json({ message: "Booking not found or access denied" });
-      }
-
-      if (bookingCheck[0].status !== "pending") {
-        return res
-          .status(400)
-          .json({ message: "Booking is not in pending status" });
-      }
-
-      // Start transaction
-      const connection = await pool.getConnection();
-      await connection.beginTransaction();
-
-      try {
-        // Update booking status to 'rejected'
-        await connection.execute(
-          `UPDATE bookings 
-           SET status = "rejected", 
-               cancelled_by = "owner", 
-               cancellation_time = NOW(),
-               cancellation_reason = ?
-           WHERE booking_id = ?`,
-          [reason || "Rejected by owner", booking_id]
-        );
-
-        // Make the time slot available again
-        await connection.execute(
-          `UPDATE time_slots 
-           SET is_available = TRUE,
-               locked_until = NULL,
-               locked_by_user_id = NULL
-           WHERE slot_id = ?`,
-          [bookingCheck[0].slot_id]
-        );
-
-        await connection.commit();
-        res.json({ message: "Booking rejected successfully", reason });
-      } catch (error) {
-        await connection.rollback();
-        throw error;
-      } finally {
-        connection.release();
-      }
+      return res.status(result.status).json({ message: result.message, reason });
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Server error", error: error.message });
@@ -1459,9 +1395,8 @@ const ownerController = {
       const [bookings] = await pool.execute(query, params);
 
       res.json({
-        filename: `bookings_export_${
-          new Date().toISOString().split("T")[0]
-        }.json`,
+        filename: `bookings_export_${new Date().toISOString().split("T")[0]
+          }.json`,
         data: bookings,
         total_records: bookings.length,
         total_revenue: bookings.reduce(
