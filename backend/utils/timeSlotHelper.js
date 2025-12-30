@@ -17,3 +17,6 @@ function generateTimeSlots(opening_time, closing_time, slot_duration) {
 
     return slots;
 }
+module.exports = {
+    generateTimeSlots,
+};

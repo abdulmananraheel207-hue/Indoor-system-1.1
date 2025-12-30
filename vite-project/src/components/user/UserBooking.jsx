@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import integrationService from "../../services/integrationService";
 import { useNavigate } from "react-router-dom";
 
@@ -34,8 +34,7 @@ const UserBooking = () => {
         const prev = previousStatuses.current[booking.booking_id];
         if (prev && prev !== booking.status) {
           alert(
-            `Booking #${
-              booking.booking_id
+            `Booking #${booking.booking_id
             } is now ${booking.status.toUpperCase()}`
           );
         }
@@ -105,21 +104,19 @@ const UserBooking = () => {
           <nav className="-mb-px flex space-x-8">
             <button
               onClick={() => setActiveTab("upcoming")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "upcoming"
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === "upcoming"
                   ? "border-primary-500 text-primary-600"
                   : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-              }`}
+                }`}
             >
               Upcoming Bookings
             </button>
             <button
               onClick={() => setActiveTab("past")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "past"
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === "past"
                   ? "border-primary-500 text-primary-600"
                   : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-              }`}
+                }`}
             >
               Booking History
             </button>

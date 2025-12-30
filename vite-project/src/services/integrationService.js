@@ -211,6 +211,51 @@ export const integrationService = {
   },
 
   /**
+   * Complete a booking (mark as completed)
+   */
+  completeBooking: async (bookingId) => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        `http://localhost:5000/api/owners/bookings/${bookingId}/complete`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      return await response.json();
+    } catch (error) {
+      console.error("Error completing booking:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Get owner's booking statistics
+   */
+  getOwnerBookingStats: async (period = "month") => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        `http://localhost:5000/api/owners/bookings/stats?period=${period}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      return await response.json();
+    } catch (error) {
+      console.error("Error fetching booking stats:", error);
+      throw error;
+    }
+  },
+
+  /**
    * Get owner's arenas
    */
   getOwnerArenas: async () => {
@@ -228,10 +273,65 @@ export const integrationService = {
    */
   getOwnerDashboard: async () => {
     try {
-      const response = await ownerAPI.getDashboard();
-      return response.data;
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        "http://localhost:5000/api/owners/dashboard",
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      return await response.json();
     } catch (error) {
       console.error("Error fetching owner dashboard:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Get time slots for specific arena and date (Owner)
+   */
+  getOwnerTimeSlots: async (arenaId, date) => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        `http://localhost:5000/api/owners/arenas/${arenaId}/slots?date=${date}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      return await response.json();
+    } catch (error) {
+      console.error("Error fetching time slots:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Manage time slots (Owner)
+   */
+  manageTimeSlots: async (arenaId, payload) => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        `http://localhost:5000/api/owners/arenas/${arenaId}/slots`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        }
+      );
+      return await response.json();
+    } catch (error) {
+      console.error("Error managing time slots:", error);
       throw error;
     }
   },
@@ -396,15 +496,88 @@ export const integrationService = {
   // ====== TIME SLOTS ======
 
   lockSlot: async (slotId) => {
-    const response = await arenaAPI.lockTimeSlot(slotId);
-    return response.data;
+    try {
+      const response = await arenaAPI.lockTimeSlot(slotId);
+      return response.data;
+    } catch (error) {
+      console.error("Error locking slot:", error);
+      throw error;
+    }
   },
 
-  // ====== BOOKINGS ======
-
   releaseSlot: async (slotId) => {
-    const response = await arenaAPI.releaseTimeSlot(slotId);
-    return response.data;
+    try {
+      const response = await arenaAPI.releaseTimeSlot(slotId);
+      return response.data;
+    } catch (error) {
+      console.error("Error releasing slot:", error);
+      throw error;
+    }
+  },
+
+  // ====== PAYMENT ======
+
+  /**
+   * Upload payment screenshot
+   */
+  uploadPaymentScreenshot: async (bookingId, paymentData) => {
+    try {
+      const response = await bookingAPI.uploadPaymentScreenshot(
+        bookingId,
+        paymentData
+      );
+      return response.data;
+    } catch (error) {
+      console.error("Error uploading payment screenshot:", error);
+      throw error;
+    }
+  },
+
+  // ====== NOTIFICATIONS ======
+
+  /**
+   * Get user notifications
+   */
+  getUserNotifications: async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        "http://localhost:5000/api/notifications",
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      return await response.json();
+    } catch (error) {
+      console.error("Error fetching notifications:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Mark notification as read
+   */
+  markNotificationAsRead: async (notificationId) => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        `http://localhost:5000/api/notifications/${notificationId}/read`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      return await response.json();
+    } catch (error) {
+      console.error("Error marking notification as read:", error);
+      throw error;
+    }
   },
 
   // ====== ADMIN ======
@@ -421,6 +594,7 @@ export const integrationService = {
     );
     return response.data;
   },
+
   toggleArenaBlock: async (arenaId, isBlocked, reason = "") => {
     const response = await import("./api").then(({ adminAPI }) =>
       adminAPI.toggleArenaBlock(arenaId, isBlocked, reason)
@@ -433,6 +607,27 @@ export const integrationService = {
       adminAPI.markPaymentCompleted(arenaId, payload)
     );
     return response.data;
+  },
+
+  // ====== CLEANUP ======
+  cleanupExpiredLocks: async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        "http://localhost:5000/api/owners/cleanup/expired-locks",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      return await response.json();
+    } catch (error) {
+      console.error("Error cleaning up expired locks:", error);
+      throw error;
+    }
   },
 };
 

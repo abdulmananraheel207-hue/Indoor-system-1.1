@@ -4,6 +4,9 @@ const helmet = require("helmet");
 const morgan = require("morgan");
 require("dotenv").config();
 
+// Import cleanup cron AFTER dotenv config
+const { scheduleCleanupJobs } = require("./utils/cleanupCron");
+
 // Import your config and db
 const config = require("./config");
 const db = require("./db");
@@ -44,7 +47,16 @@ db.getConnection()
     applySchemaPatches()
       .then(() => console.log("✅ Schema patches applied"))
       .catch((err) => console.warn("⚠️ Schema patch failed", err.message));
+
+    // Start lock expiry job
     startLockExpiryJob();
+
+    // Start cleanup cron jobs (only in production/staging)
+    if (process.env.NODE_ENV !== 'development') {
+      scheduleCleanupJobs();
+    } else {
+      console.log('⚠️  Cleanup jobs disabled in development mode');
+    }
   })
   .catch((err) => {
     console.error("❌ Database connection failed:", err.message);
@@ -59,6 +71,7 @@ app.get("/api/health", (req, res) => {
     version: "1.0.0",
     environment: config.NODE_ENV,
     database: config.DB_DATABASE,
+    cleanup_jobs: process.env.NODE_ENV !== 'development' ? 'active' : 'disabled'
   });
 });
 
@@ -138,7 +151,7 @@ app.use((err, req, res, next) => {
 
 // Start server
 const PORT = config.PORT || 5000;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`
     🚀 Server is running!
     🌐 Environment: ${config.NODE_ENV}
@@ -146,9 +159,27 @@ app.listen(PORT, () => {
     📊 API Health: http://localhost:${PORT}/api/health
     🗄️  Database: ${config.DB_DATABASE} @ ${config.DB_HOST}
     🎯 CORS Origin: ${config.CORS_ORIGIN}
+    🧹 Cleanup Jobs: ${process.env.NODE_ENV !== 'development' ? '✅ Active' : '⚠️ Disabled'}
     
     ⏰ Started at: ${new Date().toLocaleString()}
   `);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM signal received: closing HTTP server');
+  server.close(() => {
+    console.log('HTTP server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT signal received: closing HTTP server');
+  server.close(() => {
+    console.log('HTTP server closed');
+    process.exit(0);
+  });
 });
 
 module.exports = app;

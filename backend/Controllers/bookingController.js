@@ -1,11 +1,11 @@
+// File: bookingController.js - COMPLETE FIXED VERSION
 const pool = require("../db");
-const { lockSlot } = require("../utils/slotLockService");
 const { sendNotification } = require("../utils/notificationService");
 
 const bookingController = {
-  // Create a new booking
-  // Create a new booking - MODIFIED VERSION
+  // Create a new booking - FIXED VERSION
   createBooking: async (req, res) => {
+    const connection = await pool.getConnection();
     try {
       const body = req.body || {};
       const arena_id = body.arena_id || body.arenaId || body.arena || null;
@@ -16,11 +16,8 @@ const bookingController = {
       const date = body.date || body.bookingDate || null;
       const start_time = body.start_time || body.startTime || null;
       const end_time = body.end_time || body.endTime || null;
-      const total_amount =
-        body.total_amount || body.totalAmount || body.totalPrice || null;
+      const total_amount = body.total_amount || body.totalAmount || body.totalPrice || null;
       const payment_method = body.payment_method || body.paymentMethod || null;
-      const requires_advance =
-        body.requires_advance || body.requiresAdvance || false;
 
       const arenaIdNum = arena_id ? Number(arena_id) : null;
       const slotIdNum = slot_id ? Number(slot_id) : null;
@@ -31,274 +28,219 @@ const bookingController = {
         ? [...new Set(slotIdsRaw.map(Number).filter((id) => Number(id) > 0))]
         : [];
 
-      const hasMulti = slotIds.length > 0;
-      const hasNew = courtIdNum && date && start_time && end_time;
-      const hasLegacy = slotIdNum !== null;
+      // Validate required fields
+      if (!arenaIdNum) {
+        return res.status(400).json({ message: "Arena ID is required" });
+      }
 
-      if (!hasMulti && !hasNew && !hasLegacy) {
+      if (slotIds.length === 0 && !slotIdNum && (!date || !start_time || !end_time)) {
         return res.status(400).json({
-          message:
-            "Missing booking parameters. Provide slot_id, slot_ids[], or court_id+date+start_time+end_time.",
+          message: "Either slot_id, slot_ids[], or date+start_time+end_time is required",
         });
       }
 
-      const validPaymentMethods = ["pay_now", "pay_after", "advance_payment"];
-      const finalPaymentMethod = validPaymentMethods.includes(payment_method)
-        ? payment_method
-        : "pay_after";
+      await connection.beginTransaction();
 
-      const [arenaStatus] = await pool.execute(
+      // Check arena status
+      const [arenaStatus] = await connection.execute(
         "SELECT owner_id, is_blocked FROM arenas WHERE arena_id = ?",
-        [arenaIdNum || arena_id]
+        [arenaIdNum]
       );
 
       if (!arenaStatus || arenaStatus.length === 0) {
+        await connection.rollback();
         return res.status(404).json({ message: "Arena not found" });
       }
 
       if (arenaStatus[0].is_blocked) {
+        await connection.rollback();
         return res.status(403).json({ message: "Arena is blocked" });
       }
 
       const commission_percentage = 5.0;
+      let bookingIds = [];
+      let totalCommission = 0;
+      let createdBookings = [];
 
-      if (hasMulti) {
-        if (!arenaIdNum) {
-          return res
-            .status(400)
-            .json({ message: "Arena is required for booking." });
+      if (slotIds.length > 0) {
+        // Multiple slots booking
+        const placeholders = slotIds.map(() => "?").join(",");
+
+        // Check all slots are available and belong to the same arena
+        const [slots] = await connection.execute(
+          `SELECT ts.*, 
+                  b.booking_id as existing_booking,
+                  b.status as existing_status
+           FROM time_slots ts
+           LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
+             AND b.status IN ('pending', 'accepted', 'completed')
+           WHERE ts.slot_id IN (${placeholders})
+             AND ts.arena_id = ?`,
+          [...slotIds, arenaIdNum]
+        );
+
+        if (slots.length !== slotIds.length) {
+          await connection.rollback();
+          return res.status(400).json({
+            message: "One or more selected slots were not found for this arena",
+          });
         }
 
-        const placeholders = slotIds.map(() => "?").join(",");
-        const connection = await pool.getConnection();
-        await connection.beginTransaction();
+        // Check availability
+        const unavailableSlots = slots.filter(
+          s => s.is_blocked_by_owner || s.is_holiday || s.existing_booking
+        );
 
-        try {
-          const [slots] = await connection.execute(
-            `SELECT ts.*, a.base_price_per_hour, a.owner_id,
-                    CASE 
-                      WHEN ts.locked_until > NOW() AND ts.locked_by_user_id <> ? THEN 1 
-                      ELSE 0 
-                    END as locked_by_other
-             FROM time_slots ts
-             JOIN arenas a ON ts.arena_id = a.arena_id
-             WHERE ts.slot_id IN (${placeholders})
-               AND ts.arena_id = ?
-               AND ts.is_blocked_by_owner = FALSE
-               AND ts.is_holiday = FALSE`,
-            [req.user.id, ...slotIds, arenaIdNum]
+        if (unavailableSlots.length > 0) {
+          await connection.rollback();
+          return res.status(400).json({
+            message: "One or more selected slots are not available",
+            slots: unavailableSlots.map(s => ({
+              slot_id: s.slot_id,
+              date: s.date,
+              start_time: s.start_time,
+              end_time: s.end_time,
+              reason: s.existing_booking ? 'Already booked' : (s.is_blocked_by_owner ? 'Blocked by owner' : 'Holiday')
+            })),
+          });
+        }
+
+        // Check for expired locks
+        const lockedSlots = slots.filter(
+          s => s.locked_until && s.locked_until > new Date() && s.locked_by_user_id !== req.user.id
+        );
+
+        if (lockedSlots.length > 0) {
+          await connection.rollback();
+          return res.status(400).json({
+            message: "One or more slots are currently locked by another user",
+            slots: lockedSlots.map(s => ({
+              slot_id: s.slot_id,
+              date: s.date,
+              start_time: s.start_time,
+              end_time: s.end_time
+            })),
+          });
+        }
+
+        // Create bookings for each slot
+        for (const slot of slots) {
+          const priceForSlot = slot.price || totalAmountNum || 500;
+          const commission_amount = priceForSlot * (commission_percentage / 100);
+
+          const [bookingResult] = await connection.execute(
+            `INSERT INTO bookings 
+             (user_id, arena_id, slot_id, sport_id, total_amount, 
+              commission_percentage, commission_amount, payment_method, status, booking_date)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', NOW())`,
+            [
+              req.user.id,
+              arenaIdNum,
+              slot.slot_id,
+              sportIdNum || slot.sport_id,
+              priceForSlot,
+              commission_percentage,
+              commission_amount,
+              payment_method || 'pay_after',
+            ]
           );
 
-          if (slots.length !== slotIds.length) {
-            return res.status(400).json({
-              message:
-                "One or more selected slots were not found for this arena.",
-            });
-          }
+          const bookingId = bookingResult.insertId;
+          bookingIds.push(bookingId);
+          totalCommission += commission_amount;
+          createdBookings.push({
+            booking_id: bookingId,
+            slot_id: slot.slot_id,
+            date: slot.date,
+            start_time: slot.start_time,
+            end_time: slot.end_time,
+            price: priceForSlot
+          });
 
-          const unavailable = slots.filter(
-            (s) => !s.is_available || s.locked_by_other
-          );
-          if (unavailable.length > 0) {
-            return res.status(400).json({
-              message: "One or more selected slots are not available.",
-              slots: unavailable.map((s) => s.slot_id),
-            });
-          }
-
-          const fallbackSportId = sportIdNum || null;
-          const missingSport = slots.some(
-            (s) => !s.sport_id && !fallbackSportId
-          );
-          if (missingSport) {
-            return res.status(400).json({
-              message: "Please choose a sport for the selected slots.",
-            });
-          }
-
-          const createdBookingIds = [];
-          let totalCommissionToAdd = 0;
-
-          for (const slot of slots) {
-            const priceForSlot = slot.price || slot.base_price_per_hour;
-            const commission_amount =
-              priceForSlot * (commission_percentage / 100);
-
-            const [bookingResult] = await connection.execute(
-              `INSERT INTO bookings 
-               (user_id, arena_id, slot_id, sport_id, total_amount, 
-                commission_percentage, commission_amount, payment_method, requires_advance, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
-              [
-                req.user.id,
-                arenaIdNum,
-                slot.slot_id,
-                slot.sport_id || fallbackSportId,
-                priceForSlot,
-                commission_percentage,
-                commission_amount,
-                finalPaymentMethod,
-                requires_advance || false,
-              ]
-            );
-
-            createdBookingIds.push(bookingResult.insertId);
-            totalCommissionToAdd += commission_amount;
-          }
-
+          // Mark slot as unavailable and clear any locks
           await connection.execute(
             `UPDATE time_slots 
              SET is_available = FALSE,
                  locked_until = NULL,
                  locked_by_user_id = NULL
-             WHERE slot_id IN (${placeholders})`,
-            slotIds
+             WHERE slot_id = ?`,
+            [slot.slot_id]
           );
-
-          await connection.execute(
-            `UPDATE arenas 
-             SET total_commission_due = total_commission_due + ?
-             WHERE arena_id = ?`,
-            [totalCommissionToAdd, arenaIdNum]
-          );
-
-          await connection.commit();
-
-          const [bookings] = await pool.execute(
-            `SELECT b.*, a.name as arena_name, st.name as sport_name,
-                    ts.date, ts.start_time, ts.end_time, ao.arena_name as owner_name,
-                    ao.owner_id, ao.email as owner_email
-             FROM bookings b
-             JOIN arenas a ON b.arena_id = a.arena_id
-             JOIN arena_owners ao ON a.owner_id = ao.owner_id
-             JOIN sports_types st ON b.sport_id = st.sport_id
-             JOIN time_slots ts ON b.slot_id = ts.slot_id
-             WHERE b.booking_id IN (${createdBookingIds
-               .map(() => "?")
-               .join(",")})`,
-            createdBookingIds
-          );
-
-          for (const booking of bookings) {
-            await sendNotification({
-              ownerId: booking.owner_id || booking.ownerId,
-              userId: req.user.id,
-              bookingId: booking.booking_id,
-              type: "booking.pending",
-              title: "New booking request",
-              message: `New booking request for ${booking.date} ${booking.start_time}-${booking.end_time}`,
-            });
-          }
-
-          return res.status(201).json({
-            message:
-              "Booking requests created successfully. Waiting for owner approval.",
-            bookings,
-          });
-        } catch (error) {
-          await connection.rollback();
-          throw error;
-        } finally {
-          connection.release();
         }
-      }
-
-      let slot;
-      let sportIdToUse = sportIdNum;
-
-      if (hasNew) {
-        const [existingSlots] = await pool.execute(
-          `SELECT ts.*, a.base_price_per_hour, a.owner_id
+      } else if (slotIdNum) {
+        // Single slot booking
+        const [slots] = await connection.execute(
+          `SELECT ts.*, 
+                  b.booking_id as existing_booking,
+                  b.status as existing_status
            FROM time_slots ts
-           JOIN arenas a ON ts.arena_id = a.arena_id
-           WHERE ts.arena_id = ?
-             AND ts.date = ?
-             AND ts.start_time = ?
-             AND ts.end_time = ?
-             AND ts.is_available = TRUE
-             AND ts.is_blocked_by_owner = FALSE
-             AND ts.is_holiday = FALSE
-             AND (ts.locked_until IS NULL OR ts.locked_until < NOW() OR ts.locked_by_user_id = ?)`,
-          [arenaIdNum, date, start_time, end_time, req.user.id]
-        );
-
-        if (existingSlots.length === 0) {
-          return res.status(400).json({
-            message:
-              "Time slot not found. Users may only book owner-created slots.",
-          });
-        }
-
-        slot = existingSlots[0];
-        if (!sportIdToUse) {
-          sportIdToUse = slot.sport_id;
-        }
-      } else {
-        let effectiveSportId = sportIdToUse;
-        if (slotIdNum && !effectiveSportId) {
-          const [slotInfo] = await pool.execute(
-            `SELECT sport_id FROM time_slots WHERE slot_id = ? AND arena_id = ?`,
-            [slotIdNum, arenaIdNum]
-          );
-          if (slotInfo.length > 0) {
-            effectiveSportId = slotInfo[0].sport_id;
-          }
-        }
-
-        const [slots] = await pool.execute(
-          `SELECT ts.*, a.base_price_per_hour, a.owner_id
-           FROM time_slots ts
-           JOIN arenas a ON ts.arena_id = a.arena_id
+           LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
+             AND b.status IN ('pending', 'accepted', 'completed')
            WHERE ts.slot_id = ? 
-             AND ts.arena_id = ?
-             AND ts.is_available = TRUE
-             AND ts.is_blocked_by_owner = FALSE
-             AND ts.is_holiday = FALSE
-             AND (ts.locked_until IS NULL OR ts.locked_until < NOW() OR ts.locked_by_user_id = ?)`,
-          [slotIdNum, arenaIdNum, req.user.id]
+             AND ts.arena_id = ?`,
+          [slotIdNum, arenaIdNum]
         );
 
         if (slots.length === 0) {
+          await connection.rollback();
           return res.status(400).json({ message: "Time slot not available" });
         }
 
-        slot = slots[0];
-        sportIdToUse = effectiveSportId || slot.sport_id;
-      }
+        const slot = slots[0];
 
-      if (!sportIdToUse) {
-        return res
-          .status(400)
-          .json({ message: "Sport is required for booking." });
-      }
+        if (slot.is_blocked_by_owner || slot.is_holiday || slot.existing_booking) {
+          await connection.rollback();
+          return res.status(400).json({
+            message: "Time slot is not available",
+            slot_date: slot.date,
+            start_time: slot.start_time,
+            end_time: slot.end_time,
+            reason: slot.existing_booking ? 'Already booked' : (slot.is_blocked_by_owner ? 'Blocked by owner' : 'Holiday')
+          });
+        }
 
-      const finalTotalAmount =
-        totalAmountNum || slot.price || slot.base_price_per_hour;
-      const commission_amount =
-        finalTotalAmount * (commission_percentage / 100);
+        // Check if locked by another user
+        if (slot.locked_until && slot.locked_until > new Date() && slot.locked_by_user_id !== req.user.id) {
+          await connection.rollback();
+          return res.status(400).json({
+            message: "Time slot is currently locked by another user",
+            locked_until: slot.locked_until
+          });
+        }
 
-      const connection = await pool.getConnection();
-      await connection.beginTransaction();
+        const priceForSlot = slot.price || totalAmountNum || 500;
+        const commission_amount = priceForSlot * (commission_percentage / 100);
 
-      try {
         const [bookingResult] = await connection.execute(
           `INSERT INTO bookings 
            (user_id, arena_id, slot_id, sport_id, total_amount, 
-            commission_percentage, commission_amount, payment_method, requires_advance, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+            commission_percentage, commission_amount, payment_method, status, booking_date)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', NOW())`,
           [
             req.user.id,
             arenaIdNum,
             slot.slot_id,
-            sportIdToUse,
-            finalTotalAmount,
+            sportIdNum || slot.sport_id,
+            priceForSlot,
             commission_percentage,
             commission_amount,
-            finalPaymentMethod,
-            requires_advance || false,
+            payment_method || 'pay_after',
           ]
         );
 
+        const bookingId = bookingResult.insertId;
+        bookingIds.push(bookingId);
+        totalCommission = commission_amount;
+        createdBookings.push({
+          booking_id: bookingId,
+          slot_id: slot.slot_id,
+          date: slot.date,
+          start_time: slot.start_time,
+          end_time: slot.end_time,
+          price: priceForSlot
+        });
+
+        // Mark slot as unavailable and clear locks
         await connection.execute(
           `UPDATE time_slots 
            SET is_available = FALSE,
@@ -307,16 +249,23 @@ const bookingController = {
            WHERE slot_id = ?`,
           [slot.slot_id]
         );
+      }
 
+      // Update arena commission
+      if (totalCommission > 0) {
         await connection.execute(
           `UPDATE arenas 
            SET total_commission_due = total_commission_due + ?
            WHERE arena_id = ?`,
-          [commission_amount, arenaIdNum]
+          [totalCommission, arenaIdNum]
         );
+      }
 
-        await connection.commit();
+      await connection.commit();
 
+      // Fetch created bookings with details
+      if (bookingIds.length > 0) {
+        const placeholders = bookingIds.map(() => "?").join(",");
         const [bookings] = await pool.execute(
           `SELECT b.*, a.name as arena_name, st.name as sport_name,
                   ts.date, ts.start_time, ts.end_time, ao.arena_name as owner_name,
@@ -326,41 +275,47 @@ const bookingController = {
            JOIN arena_owners ao ON a.owner_id = ao.owner_id
            JOIN sports_types st ON b.sport_id = st.sport_id
            JOIN time_slots ts ON b.slot_id = ts.slot_id
-           WHERE b.booking_id = ?`,
-          [bookingResult.insertId]
+           WHERE b.booking_id IN (${placeholders})`,
+          bookingIds
         );
 
-        const booking = bookings[0];
-        await sendNotification({
-          ownerId: booking.owner_id || booking.ownerId,
-          userId: req.user.id,
-          bookingId: booking.booking_id,
-          type: "booking.pending",
-          title: "New booking request",
-          message: `New booking request for ${booking.date} ${booking.start_time}-${booking.end_time}`,
-        });
+        // Send notifications to owner
+        for (const booking of bookings) {
+          try {
+            await sendNotification({
+              ownerId: booking.owner_id,
+              userId: req.user.id,
+              bookingId: booking.booking_id,
+              type: "booking.pending",
+              title: "New booking request",
+              message: `New booking request for ${booking.date} ${booking.start_time}-${booking.end_time}`,
+            });
+          } catch (notifError) {
+            console.warn("Notification error:", notifError.message);
+          }
+        }
 
-        res.status(201).json({
-          message:
-            "Booking request created successfully. Waiting for owner approval.",
-          bookings: [booking],
+        return res.status(201).json({
+          message: "Booking request created successfully. Waiting for owner approval.",
+          bookings,
         });
-      } catch (error) {
-        await connection.rollback();
-        throw error;
-      } finally {
-        connection.release();
       }
+
+      res.status(400).json({ message: "No bookings were created" });
     } catch (error) {
+      await connection.rollback();
       console.error(error);
       res.status(500).json({ message: "Server error", error: error.message });
+    } finally {
+      connection.release();
     }
   },
-getUserBookings: async (req, res) => {
+
+  // Get user bookings - FIXED
+  getUserBookings: async (req, res) => {
     try {
       const { status, limit = 10, page = 1 } = req.query;
 
-      // FIX 1: Ensure pagination values are actual Integers
       const limitInt = parseInt(limit);
       const pageInt = parseInt(page);
       const offset = (pageInt - 1) * limitInt;
@@ -379,10 +334,8 @@ getUserBookings: async (req, res) => {
 
       const params = [req.user.id];
 
-      // FIX 2: Handle status correctly
       if (status) {
         if (status.includes(",")) {
-          // If multiple statuses (pending,accepted), use IN operator
           const statusArray = status
             .split(",")
             .map((s) => s.trim())
@@ -399,14 +352,11 @@ getUserBookings: async (req, res) => {
         }
       }
 
-      // FIX 3: Push pagination as Numbers
-      // Inline LIMIT/OFFSET to avoid placeholder issues with some MySQL drivers
-      query += ` ORDER BY b.booking_date DESC LIMIT ${limitInt} OFFSET ${offset}`;
+      query += ` ORDER BY ts.date DESC, ts.start_time DESC LIMIT ${limitInt} OFFSET ${offset}`;
 
-      // This call at line 247 will now succeed
       const [bookings] = await pool.execute(query, params);
 
-      // Get total count (apply same status logic)
+      // Get total count
       let countQuery =
         "SELECT COUNT(*) as total FROM bookings WHERE user_id = ?";
       const countParams = [req.user.id];
@@ -493,22 +443,26 @@ getUserBookings: async (req, res) => {
     }
   },
 
-  // Cancel booking
+  // Cancel booking - SIMPLIFIED (no reason required)
   cancelBooking: async (req, res) => {
+    const connection = await pool.getConnection();
     try {
       const { booking_id } = req.params;
-      const { reason } = req.body;
+
+      await connection.beginTransaction();
 
       // Get booking details
-      const [bookings] = await pool.execute(
-        `SELECT b.*, ts.slot_id, ts.date, ts.start_time
+      const [bookings] = await connection.execute(
+        `SELECT b.*, ts.slot_id, ts.date, ts.start_time, a.owner_id
          FROM bookings b
          JOIN time_slots ts ON b.slot_id = ts.slot_id
+         JOIN arenas a ON b.arena_id = a.arena_id
          WHERE b.booking_id = ?`,
         [booking_id]
       );
 
       if (bookings.length === 0) {
+        await connection.rollback();
         return res.status(404).json({ message: "Booking not found" });
       }
 
@@ -518,99 +472,78 @@ getUserBookings: async (req, res) => {
       let canCancel = false;
       if (req.user.role === "user" && booking.user_id === req.user.id) {
         canCancel = true;
-      } else if (req.user.role === "owner" || req.user.role === "manager") {
-        const [arenaCheck] = await pool.execute(
-          "SELECT owner_id FROM arenas WHERE arena_id = ?",
-          [booking.arena_id]
-        );
-
-        if (
-          (arenaCheck.length > 0 &&
-            req.user.role === "owner" &&
-            arenaCheck[0].owner_id === req.user.id) ||
-          (req.user.role === "manager" &&
-            arenaCheck[0].owner_id === req.user.owner_id)
-        ) {
-          canCancel = true;
-        }
+      } else if (req.user.role === "owner" && booking.owner_id === req.user.id) {
+        canCancel = true;
       }
 
       if (!canCancel) {
-        return res
-          .status(403)
-          .json({ message: "Not authorized to cancel this booking" });
+        await connection.rollback();
+        return res.status(403).json({ message: "Not authorized to cancel this booking" });
       }
 
-      // Check if booking can be cancelled (e.g., not too close to start time)
+      // Check if booking can be cancelled
       const slotDateTime = new Date(`${booking.date}T${booking.start_time}`);
       const hoursUntilBooking = (slotDateTime - new Date()) / (1000 * 60 * 60);
 
       if (hoursUntilBooking < 24 && req.user.role === "user") {
+        await connection.rollback();
         return res.status(400).json({
           message: "Cannot cancel within 24 hours of booking time",
         });
       }
 
-      // Start transaction
-      const connection = await pool.getConnection();
-      await connection.beginTransaction();
+      // Calculate cancellation fee
+      let cancellation_fee = 0;
+      let cancelled_by = req.user.role === "user" ? "user" : "owner";
 
-      try {
-        // Calculate cancellation fee if applicable
-        let cancellation_fee = 0;
-        let cancelled_by = req.user.role === "user" ? "user" : "owner";
-
-        if (hoursUntilBooking < 24 && req.user.role === "user") {
-          cancellation_fee = booking.total_amount * 0.2; // 20% cancellation fee
-        }
-
-        // Update booking status
-        await connection.execute(
-          `UPDATE bookings 
-           SET status = 'cancelled',
-               cancellation_fee = ?,
-               cancelled_by = ?,
-               cancellation_time = NOW()
-           WHERE booking_id = ?`,
-          [cancellation_fee, cancelled_by, booking_id]
-        );
-
-        // Make slot available again
-        await connection.execute(
-          `UPDATE time_slots 
-           SET is_available = TRUE,
-               locked_until = NULL,
-               locked_by_user_id = NULL
-           WHERE slot_id = ?`,
-          [booking.slot_id]
-        );
-
-        // Update arena lost revenue if cancelled by user with fee
-        if (cancelled_by === "user" && cancellation_fee > 0) {
-          await connection.execute(
-            `UPDATE arena_owners 
-             SET lost_revenue = lost_revenue + ?
-             WHERE owner_id = (SELECT owner_id FROM arenas WHERE arena_id = ?)`,
-            [cancellation_fee, booking.arena_id]
-          );
-        }
-
-        await connection.commit();
-
-        res.json({
-          message: "Booking cancelled successfully",
-          cancellation_fee,
-          refund_amount: booking.total_amount - cancellation_fee,
-        });
-      } catch (error) {
-        await connection.rollback();
-        throw error;
-      } finally {
-        connection.release();
+      if (hoursUntilBooking < 24 && req.user.role === "user") {
+        cancellation_fee = booking.total_amount * 0.2; // 20% cancellation fee
       }
+
+      // Update booking status
+      await connection.execute(
+        `UPDATE bookings 
+         SET status = 'cancelled',
+             cancellation_fee = ?,
+             cancelled_by = ?,
+             cancellation_time = NOW()
+         WHERE booking_id = ?`,
+        [cancellation_fee, cancelled_by, booking_id]
+      );
+
+      // Make slot available again
+      await connection.execute(
+        `UPDATE time_slots 
+         SET is_available = TRUE,
+             locked_until = NULL,
+             locked_by_user_id = NULL
+         WHERE slot_id = ?`,
+        [booking.slot_id]
+      );
+
+      // Update lost revenue if cancelled by user with fee
+      if (cancelled_by === "user" && cancellation_fee > 0) {
+        await connection.execute(
+          `UPDATE arena_owners 
+           SET lost_revenue = lost_revenue + ?
+           WHERE owner_id = ?`,
+          [cancellation_fee, booking.owner_id]
+        );
+      }
+
+      await connection.commit();
+
+      res.json({
+        message: "Booking cancelled successfully",
+        cancellation_fee,
+        refund_amount: booking.total_amount - cancellation_fee,
+      });
     } catch (error) {
+      await connection.rollback();
       console.error(error);
       res.status(500).json({ message: "Server error", error: error.message });
+    } finally {
+      connection.release();
     }
   },
 
@@ -634,10 +567,10 @@ getUserBookings: async (req, res) => {
 
       const booking = bookings[0];
 
-      if (booking.status !== "pending") {
+      if (booking.status !== "pending" && booking.status !== "accepted") {
         return res
           .status(400)
-          .json({ message: "Booking is not in pending status" });
+          .json({ message: "Booking is not in pending or accepted status" });
       }
 
       // Update payment details
@@ -657,7 +590,7 @@ getUserBookings: async (req, res) => {
     }
   },
 
-  // In bookingController.js, fix the completeBooking function:
+  // Complete booking - FIXED
   completeBooking: async (req, res) => {
     try {
       const { booking_id } = req.params;
@@ -665,8 +598,8 @@ getUserBookings: async (req, res) => {
       // Only owners/managers can mark booking as completed
       const [bookingCheck] = await pool.execute(
         `SELECT b.* FROM bookings b
-             JOIN arenas a ON b.arena_id = a.arena_id
-             WHERE b.booking_id = ? AND a.owner_id = ?`,
+         JOIN arenas a ON b.arena_id = a.arena_id
+         WHERE b.booking_id = ? AND a.owner_id = ?`,
         [
           booking_id,
           req.user.role === "owner" ? req.user.id : req.user.owner_id,
@@ -679,7 +612,6 @@ getUserBookings: async (req, res) => {
           .json({ message: "Booking not found or access denied" });
       }
 
-      // FIX: Change 'approved' to 'accepted' to match database enum
       if (bookingCheck[0].status !== "accepted") {
         return res
           .status(400)
@@ -689,6 +621,14 @@ getUserBookings: async (req, res) => {
       await pool.execute(
         'UPDATE bookings SET status = "completed" WHERE booking_id = ?',
         [booking_id]
+      );
+
+      // Update arena owner revenue
+      await pool.execute(
+        `UPDATE arena_owners 
+         SET total_revenue = total_revenue + ?
+         WHERE owner_id = (SELECT owner_id FROM arenas WHERE arena_id = ?)`,
+        [bookingCheck[0].total_amount, bookingCheck[0].arena_id]
       );
 
       res.json({ message: "Booking marked as completed" });
@@ -725,36 +665,54 @@ getUserBookings: async (req, res) => {
     try {
       const { arena_id, date, sport_id } = req.query;
 
+      if (!date) {
+        return res.status(400).json({ message: "Date is required" });
+      }
+
       let query = `
         SELECT ts.*, st.name as sport_name,
                CASE 
-                 WHEN ts.locked_until > NOW() THEN FALSE 
+                 WHEN b.booking_id IS NOT NULL THEN FALSE
+                 WHEN ts.is_blocked_by_owner = TRUE THEN FALSE
+                 WHEN ts.is_holiday = TRUE THEN FALSE
+                 WHEN ts.locked_until > NOW() AND ts.locked_by_user_id IS NOT NULL THEN FALSE
                  ELSE ts.is_available 
                END as actually_available
         FROM time_slots ts
         LEFT JOIN sports_types st ON ts.sport_id = st.sport_id
+        LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
+          AND b.status IN ('pending', 'accepted', 'completed')
         WHERE ts.arena_id = ? 
-          AND ts.is_blocked_by_owner = FALSE
-          AND ts.is_holiday = FALSE
+          AND ts.date = ?
+          AND (b.booking_id IS NULL OR b.status NOT IN ('pending', 'accepted', 'completed'))
       `;
 
-      const params = [arena_id];
-
-      if (date) {
-        query += " AND ts.date = ?";
-        params.push(date);
-      } else {
-        query += " AND ts.date >= CURDATE()";
-      }
+      const params = [arena_id, date];
 
       if (sport_id) {
         query += " AND ts.sport_id = ?";
         params.push(sport_id);
       }
 
-      query += " ORDER BY ts.date, ts.start_time";
+      query += " ORDER BY ts.start_time";
 
       const [slots] = await pool.execute(query, params);
+
+      // Clean up expired locks
+      const slotIds = slots.map(s => s.slot_id);
+      if (slotIds.length > 0) {
+        const placeholders = slotIds.map(() => '?').join(',');
+        await pool.execute(
+          `UPDATE time_slots 
+           SET locked_until = NULL,
+               locked_by_user_id = NULL
+           WHERE slot_id IN (${placeholders}) 
+             AND locked_until IS NOT NULL 
+             AND locked_until <= NOW()`,
+          slotIds
+        );
+      }
+
       res.json(slots);
     } catch (error) {
       console.error(error);
@@ -764,4 +722,3 @@ getUserBookings: async (req, res) => {
 };
 
 module.exports = bookingController;
-

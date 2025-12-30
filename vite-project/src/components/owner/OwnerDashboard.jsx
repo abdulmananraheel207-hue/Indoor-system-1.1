@@ -1,3 +1,4 @@
+// File: OwnerDashboard.jsx - COMPLETE FIXED VERSION
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import OwnerHome from "./OwnerHome";
@@ -5,18 +6,29 @@ import OwnerBookings from "./OwnerBookings";
 import OwnerCalendar from "./OwnerCalendar";
 import OwnerManagers from "./OwnerManagers";
 import OwnerProfile from "./OwnerProfile";
-import OwnerArenaSettings from "./OwnerArenaSettings"; // Add this import
+import OwnerArenaSettings from "./OwnerArenaSettings";
 
 const OwnerDashboard = () => {
   const navigate = useNavigate();
   const [currentTab, setCurrentTab] = useState("home");
   const [ownerData, setOwnerData] = useState(null);
+  const [upcomingBookings, setUpcomingBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     fetchOwnerData();
-  }, []);
+    fetchUpcomingBookings();
+    // Refresh data every 30 seconds
+    const interval = setInterval(() => {
+      if (currentTab === "home") {
+        fetchOwnerData();
+        fetchUpcomingBookings();
+      }
+    }, 30000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTab]);
 
   const fetchOwnerData = async () => {
     setLoading(true);
@@ -43,6 +55,26 @@ const OwnerDashboard = () => {
     }
   };
 
+  const fetchUpcomingBookings = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        "http://localhost:5000/api/owners/bookings?type=upcoming",
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        setUpcomingBookings(Array.isArray(data) ? data : []);
+      }
+    } catch (error) {
+      console.error("Error fetching upcoming bookings:", error);
+    }
+  };
+
   const handleLogout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("userRole");
@@ -62,7 +94,7 @@ const OwnerDashboard = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header - Updated for mobile */}
+      {/* Header */}
       <header className="bg-white shadow-sm">
         <div className="px-4 py-4">
           <div className="flex items-center justify-between">
@@ -72,32 +104,12 @@ const OwnerDashboard = () => {
               className="md:hidden p-2 rounded-md text-gray-700 hover:bg-gray-100"
             >
               {mobileMenuOpen ? (
-                <svg
-                  className="h-6 w-6"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               ) : (
-                <svg
-                  className="h-6 w-6"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M4 6h16M4 12h16M4 18h16"
-                  />
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
               )}
             </button>
@@ -106,6 +118,8 @@ const OwnerDashboard = () => {
               onClick={() => {
                 setCurrentTab("home");
                 setMobileMenuOpen(false);
+                fetchOwnerData();
+                fetchUpcomingBookings();
               }}
               className="text-lg font-bold text-gray-900 md:text-xl"
             >
@@ -140,12 +154,13 @@ const OwnerDashboard = () => {
                   onClick={() => {
                     setCurrentTab("home");
                     setMobileMenuOpen(false);
+                    fetchOwnerData();
+                    fetchUpcomingBookings();
                   }}
-                  className={`px-3 py-2.5 rounded-lg text-left ${
-                    currentTab === "home"
+                  className={`px-3 py-2.5 rounded-lg text-left ${currentTab === "home"
                       ? "bg-blue-100 text-blue-700"
                       : "text-gray-700 hover:bg-gray-100"
-                  }`}
+                    }`}
                 >
                   Dashboard
                 </button>
@@ -154,11 +169,10 @@ const OwnerDashboard = () => {
                     setCurrentTab("bookings");
                     setMobileMenuOpen(false);
                   }}
-                  className={`px-3 py-2.5 rounded-lg text-left ${
-                    currentTab === "bookings"
+                  className={`px-3 py-2.5 rounded-lg text-left ${currentTab === "bookings"
                       ? "bg-blue-100 text-blue-700"
                       : "text-gray-700 hover:bg-gray-100"
-                  }`}
+                    }`}
                 >
                   Bookings
                 </button>
@@ -167,11 +181,10 @@ const OwnerDashboard = () => {
                     setCurrentTab("calendar");
                     setMobileMenuOpen(false);
                   }}
-                  className={`px-3 py-2.5 rounded-lg text-left ${
-                    currentTab === "calendar"
+                  className={`px-3 py-2.5 rounded-lg text-left ${currentTab === "calendar"
                       ? "bg-blue-100 text-blue-700"
                       : "text-gray-700 hover:bg-gray-100"
-                  }`}
+                    }`}
                 >
                   Calendar
                 </button>
@@ -180,11 +193,10 @@ const OwnerDashboard = () => {
                     setCurrentTab("arenasettings");
                     setMobileMenuOpen(false);
                   }}
-                  className={`px-3 py-2.5 rounded-lg text-left ${
-                    currentTab === "arenasettings"
+                  className={`px-3 py-2.5 rounded-lg text-left ${currentTab === "arenasettings"
                       ? "bg-blue-100 text-blue-700"
                       : "text-gray-700 hover:bg-gray-100"
-                  }`}
+                    }`}
                 >
                   Arena Settings
                 </button>
@@ -193,11 +205,10 @@ const OwnerDashboard = () => {
                     setCurrentTab("managers");
                     setMobileMenuOpen(false);
                   }}
-                  className={`px-3 py-2.5 rounded-lg text-left ${
-                    currentTab === "managers"
+                  className={`px-3 py-2.5 rounded-lg text-left ${currentTab === "managers"
                       ? "bg-blue-100 text-blue-700"
                       : "text-gray-700 hover:bg-gray-100"
-                  }`}
+                    }`}
                 >
                   Managers
                 </button>
@@ -206,11 +217,10 @@ const OwnerDashboard = () => {
                     setCurrentTab("profile");
                     setMobileMenuOpen(false);
                   }}
-                  className={`px-3 py-2.5 rounded-lg text-left ${
-                    currentTab === "profile"
+                  className={`px-3 py-2.5 rounded-lg text-left ${currentTab === "profile"
                       ? "bg-blue-100 text-blue-700"
                       : "text-gray-700 hover:bg-gray-100"
-                  }`}
+                    }`}
                 >
                   Profile
                 </button>
@@ -226,62 +236,60 @@ const OwnerDashboard = () => {
           {/* Desktop Navigation */}
           <div className="hidden md:flex mt-4 space-x-2">
             <button
-              onClick={() => setCurrentTab("home")}
-              className={`px-3 py-2 rounded-lg text-sm ${
-                currentTab === "home"
+              onClick={() => {
+                setCurrentTab("home");
+                fetchOwnerData();
+                fetchUpcomingBookings();
+              }}
+              className={`px-3 py-2 rounded-lg text-sm ${currentTab === "home"
                   ? "bg-blue-100 text-blue-700"
                   : "text-gray-700 hover:bg-gray-100"
-              }`}
+                }`}
             >
               Dashboard
             </button>
             <button
               onClick={() => setCurrentTab("bookings")}
-              className={`px-3 py-2 rounded-lg text-sm ${
-                currentTab === "bookings"
+              className={`px-3 py-2 rounded-lg text-sm ${currentTab === "bookings"
                   ? "bg-blue-100 text-blue-700"
                   : "text-gray-700 hover:bg-gray-100"
-              }`}
+                }`}
             >
               Bookings
             </button>
             <button
               onClick={() => setCurrentTab("calendar")}
-              className={`px-3 py-2 rounded-lg text-sm ${
-                currentTab === "calendar"
+              className={`px-3 py-2 rounded-lg text-sm ${currentTab === "calendar"
                   ? "bg-blue-100 text-blue-700"
                   : "text-gray-700 hover:bg-gray-100"
-              }`}
+                }`}
             >
               Calendar
             </button>
             <button
               onClick={() => setCurrentTab("arenasettings")}
-              className={`px-3 py-2 rounded-lg text-sm ${
-                currentTab === "arenasettings"
+              className={`px-3 py-2 rounded-lg text-sm ${currentTab === "arenasettings"
                   ? "bg-blue-100 text-blue-700"
                   : "text-gray-700 hover:bg-gray-100"
-              }`}
+                }`}
             >
               Arena Settings
             </button>
             <button
               onClick={() => setCurrentTab("managers")}
-              className={`px-3 py-2 rounded-lg text-sm ${
-                currentTab === "managers"
+              className={`px-3 py-2 rounded-lg text-sm ${currentTab === "managers"
                   ? "bg-blue-100 text-blue-700"
                   : "text-gray-700 hover:bg-gray-100"
-              }`}
+                }`}
             >
               Managers
             </button>
             <button
               onClick={() => setCurrentTab("profile")}
-              className={`px-3 py-2 rounded-lg text-sm ${
-                currentTab === "profile"
+              className={`px-3 py-2 rounded-lg text-sm ${currentTab === "profile"
                   ? "bg-blue-100 text-blue-700"
                   : "text-gray-700 hover:bg-gray-100"
-              }`}
+                }`}
             >
               Profile
             </button>
@@ -291,7 +299,16 @@ const OwnerDashboard = () => {
 
       {/* Main Content */}
       <main className="px-3 py-6 md:px-4 md:py-8 max-w-7xl mx-auto">
-        {currentTab === "home" && <OwnerHome ownerData={ownerData} />}
+        {currentTab === "home" && (
+          <OwnerHome
+            ownerData={ownerData}
+            upcomingBookings={upcomingBookings}
+            refreshData={() => {
+              fetchOwnerData();
+              fetchUpcomingBookings();
+            }}
+          />
+        )}
         {currentTab === "bookings" && <OwnerBookings />}
         {currentTab === "calendar" && (
           <OwnerCalendar arenas={ownerData.arenas} />

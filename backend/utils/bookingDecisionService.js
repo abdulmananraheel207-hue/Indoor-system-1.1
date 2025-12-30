@@ -87,7 +87,6 @@ async function rejectBooking({
        SET status = 'rejected',
            cancellation_time = NOW(),
            cancelled_by = ?,
-           cancellation_reason = ?,
            lock_expires_at = NULL
        WHERE booking_id = ?`,
       [actorType, reason || "Not provided", bookingId]

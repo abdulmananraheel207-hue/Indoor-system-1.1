@@ -29,6 +29,9 @@ router.get("/dashboard", ownerController.getDashboard);
 router.get("/arenas", ownerController.getArenas);
 router.post("/arenas", ownerController.createArena);
 router.put("/arenas/:arena_id", ownerController.updateArena);
+
+// Time slot management - UPDATED ROUTES
+router.get("/arenas/:arena_id/slots", ownerController.getTimeSlotsForDate); // NEW
 router.put("/arenas/:arena_id/slots", ownerController.manageTimeSlots);
 
 // Court management routes
@@ -37,11 +40,12 @@ router.post("/arenas/:arena_id/courts", ownerController.addCourt);
 router.put("/courts/:court_id", ownerController.updateCourt);
 router.delete("/courts/:court_id/photos", ownerController.deleteCourtPhoto);
 
-// Booking management
+// Booking management - UPDATED ROUTES
 router.get("/bookings", ownerController.getOwnerBookings);
 router.get("/bookings/stats", ownerController.getBookingStats);
-router.post("/bookings/:booking_id/accept", ownerController.acceptBooking);
-router.post("/bookings/:booking_id/reject", ownerController.rejectBooking);
+router.put("/bookings/:booking_id/accept", ownerController.acceptBooking); // Changed to PUT
+router.put("/bookings/:booking_id/reject", ownerController.rejectBooking); // Changed to PUT
+router.put("/bookings/:booking_id/complete", ownerController.completeBooking); // NEW
 
 // Manager/Staff management
 router.get("/managers", ownerController.getManagers);
@@ -54,5 +58,6 @@ router.get("/reports/export", ownerController.exportBookingData);
 // Profile
 router.get("/profile", ownerController.getOwnerProfile);
 router.put("/profile", ownerController.updateOwnerProfile);
+
 
 module.exports = router;
