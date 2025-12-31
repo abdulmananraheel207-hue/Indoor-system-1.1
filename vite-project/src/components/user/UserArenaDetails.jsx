@@ -135,6 +135,34 @@ const UserArenaDetails = () => {
     const isSlotAvailable = slot.actually_available ?? slot.is_available;
     if (!isSlotAvailable || slot.is_blocked) return;
 
+    // *** FIXED BULLETPROOF VALIDATION ***
+    const now = new Date();
+
+    // FIX: Create date in LOCAL timezone, not UTC
+    const slotDateObj = new Date(slot.date);
+    const [hours, minutes] = slot.start_time.split(":").map(Number);
+    slotDateObj.setHours(hours, minutes, 0, 0); // This sets LOCAL time
+
+    // Simple check: if slot start time is before current time
+    if (slotDateObj < now) {
+      // Give helpful error message
+      const slotDateStr = slotDateObj.toLocaleDateString();
+      const nowDateStr = now.toLocaleDateString();
+
+      if (slotDateStr === nowDateStr) {
+        // Same day
+        alert(
+          `Cannot select past time slots. ${slot.start_time} has already passed. Please choose a future time.`
+        );
+      } else {
+        // Different day
+        alert(
+          `Cannot select past dates. ${slotDateStr} has already passed. Please choose today or a future date.`
+        );
+      }
+      return;
+    }
+
     // toggle selection
     const exists = selectedSlots.some((s) => s.slot_id === slot.slot_id);
     const toggleSelection = async () => {
@@ -293,10 +321,14 @@ const UserArenaDetails = () => {
 
   const handleAddFavorite = async () => {
     try {
+      console.log("Adding favorite with arenaId:", arenaId);
+      console.log("Full URL would be:", `/users/arenas/${arenaId}/favorite`);
+
       await integrationService.addToFavorites(arenaId);
       alert("Arena added to favorites!");
     } catch (error) {
       console.error("Error adding favorite:", error);
+      console.error("Error response:", error.response);
       alert("Failed to add to favorites");
     }
   };

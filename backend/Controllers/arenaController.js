@@ -22,7 +22,14 @@ const arenaController = {
       const arena_id = parseInt(req.params.arena_id);
       let { date, sport_id } = req.query;
 
-      console.log("Fetching slots for arena:", arena_id, "date:", date, "sport:", sport_id);
+      console.log(
+        "Fetching slots for arena:",
+        arena_id,
+        "date:",
+        date,
+        "sport:",
+        sport_id
+      );
 
       if (date && typeof date === "object") {
         date = date.date;
@@ -30,7 +37,7 @@ const arenaController = {
 
       // If no date provided, default to today
       if (!date) {
-        date = new Date().toISOString().split('T')[0];
+        date = new Date().toISOString().split("T")[0];
         console.log("No date provided, using today:", date);
       }
 
@@ -86,12 +93,13 @@ const arenaController = {
       console.log("Found", slots.length, "slots");
 
       // Filter to show only actually available slots
-      const availableSlots = slots.filter(slot =>
-        slot.actually_available === 1 || slot.actually_available === true
+      const availableSlots = slots.filter(
+        (slot) =>
+          slot.actually_available === 1 || slot.actually_available === true
       );
 
       // Format the response
-      const formattedSlots = availableSlots.map(slot => ({
+      const formattedSlots = availableSlots.map((slot) => ({
         slot_id: slot.slot_id,
         arena_id: slot.arena_id,
         sport_id: slot.sport_id,
@@ -103,7 +111,7 @@ const arenaController = {
         is_available: true, // Since we filtered for available slots
         actually_available: true,
         is_blocked_by_owner: slot.is_blocked_by_owner || false,
-        is_holiday: slot.is_holiday || false
+        is_holiday: slot.is_holiday || false,
       }));
 
       console.log("Returning", formattedSlots.length, "available slots");
@@ -114,12 +122,11 @@ const arenaController = {
       res.status(500).json({
         message: "Server error",
         error: error.message,
-        stack: process.env.NODE_ENV === "development" ? error.stack : undefined
+        stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
       });
     }
   },
 
-  // Lock a time slot temporarily (10 minutes) - FIXED VERSION
   lockTimeSlot: async (req, res) => {
     const connection = await pool.getConnection();
     try {
@@ -128,19 +135,18 @@ const arenaController = {
 
       await connection.beginTransaction();
 
-      // Check if slot exists and is available for TODAY only
       const [slots] = await connection.execute(
         `SELECT ts.*, 
-                b.booking_id,
-                b.status as booking_status
-         FROM time_slots ts
-         LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
-           AND b.status IN ('pending', 'accepted', 'completed')
-         WHERE ts.slot_id = ?
-           AND ts.is_blocked_by_owner = FALSE
-           AND ts.is_holiday = FALSE
-           AND (b.booking_id IS NULL OR b.status NOT IN ('pending', 'accepted', 'completed'))
-           AND (ts.locked_until IS NULL OR ts.locked_until <= NOW())`,
+              b.booking_id,
+              b.status as booking_status
+       FROM time_slots ts
+       LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
+         AND b.status IN ('pending', 'accepted', 'completed')
+       WHERE ts.slot_id = ?
+         AND ts.is_blocked_by_owner = FALSE
+         AND ts.is_holiday = FALSE
+         AND (b.booking_id IS NULL OR b.status NOT IN ('pending', 'accepted', 'completed'))
+         AND (ts.locked_until IS NULL OR ts.locked_until <= NOW())`,
         [slot_id]
       );
 
@@ -152,32 +158,53 @@ const arenaController = {
       }
 
       const slot = slots[0];
-      const currentDate = new Date().toISOString().split('T')[0];
-      const slotDate = new Date(slot.date).toISOString().split('T')[0];
+      const now = new Date();
 
-      // Ensure we're only locking slots for today or future dates
-      if (slotDate < currentDate) {
+      // *** SIMPLE BULLETPROOF SOLUTION ***
+      // Combine date and time into a single datetime string
+      // Fix: Add seconds and ensure proper ISO format
+      const slotDateTimeStr = `${slot.date}T${slot.start_time}:00Z`;
+      const slotStart = new Date(slotDateTimeStr);
+      // Log for debugging
+      console.log("=== LOCK VALIDATION ===");
+      console.log("Slot date/time string:", slotDateTimeStr);
+      console.log("Parsed slot start:", slotStart);
+      console.log("Current time (now):", now);
+      console.log("Slot timestamp:", slotStart.getTime());
+      console.log("Now timestamp:", now.getTime());
+      console.log("Is slot in past?", slotStart.getTime() < now.getTime());
+
+      // SIMPLE CHECK: If slot start time is before current time, block it
+      if (slotStart.getTime() < now.getTime()) {
+        console.log("BLOCKING: Slot is in the past!");
         await connection.rollback();
         return res.status(400).json({
           message: "Cannot lock past time slots",
         });
       }
 
+      console.log("ALLOWING: Slot is in the future");
+      console.log("=== END VALIDATION ===");
+
       // Check if someone else locked it recently
-      if (slot.locked_until && slot.locked_until > new Date() && slot.locked_by_user_id !== req.user.id) {
+      if (
+        slot.locked_until &&
+        slot.locked_until > new Date() &&
+        slot.locked_by_user_id !== req.user.id
+      ) {
         await connection.rollback();
         return res.status(400).json({
           message: "Slot is currently being booked by another user",
-          locked_until: slot.locked_until
+          locked_until: slot.locked_until,
         });
       }
 
       // Lock the slot for current user
       await connection.execute(
         `UPDATE time_slots 
-         SET locked_until = DATE_ADD(NOW(), INTERVAL 10 MINUTE),
-             locked_by_user_id = ?
-         WHERE slot_id = ?`,
+       SET locked_until = DATE_ADD(NOW(), INTERVAL 10 MINUTE),
+           locked_by_user_id = ?
+       WHERE slot_id = ?`,
         [req.user.id, slot_id]
       );
 
@@ -189,7 +216,7 @@ const arenaController = {
         slot_date: slot.date,
         start_time: slot.start_time,
         end_time: slot.end_time,
-        price: slot.price
+        price: slot.price,
       });
     } catch (error) {
       await connection.rollback();
@@ -222,7 +249,7 @@ const arenaController = {
 
       res.json({
         message: "Slot released successfully",
-        slot_id: slot_id
+        slot_id: slot_id,
       });
     } catch (error) {
       console.error(error);

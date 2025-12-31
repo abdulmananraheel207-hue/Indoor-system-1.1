@@ -399,10 +399,23 @@ export const integrationService = {
 
   /**
    * Add arena to favorites
+   *
+   *
    */
+
+  // Get user's favorite arenas
+  getFavoriteArenas: async () => {
+    try {
+      const response = await userAPI.getFavorites(); // Using userAPI
+      return response.data;
+    } catch (error) {
+      console.error("Error fetching favorite arenas:", error);
+      throw error;
+    }
+  },
   addToFavorites: async (arenaId) => {
     try {
-      const response = await userAPI.addFavorite(arenaId);
+      const response = await userAPI.addToFavorites(arenaId); // Correct method name
       return response.data;
     } catch (error) {
       console.error("Error adding to favorites:", error);
@@ -415,23 +428,10 @@ export const integrationService = {
    */
   removeFromFavorites: async (arenaId) => {
     try {
-      const response = await userAPI.removeFavorite(arenaId);
+      const response = await userAPI.removeFromFavorites(arenaId); // Correct method name
       return response.data;
     } catch (error) {
       console.error("Error removing from favorites:", error);
-      throw error;
-    }
-  },
-
-  /**
-   * Get user's favorite arenas
-   */
-  getUserFavorites: async () => {
-    try {
-      const response = await userAPI.getFavorites();
-      return response.data;
-    } catch (error) {
-      console.error("Error fetching favorites:", error);
       throw error;
     }
   },
@@ -541,15 +541,12 @@ export const integrationService = {
   getUserNotifications: async () => {
     try {
       const token = localStorage.getItem("token");
-      const response = await fetch(
-        "http://localhost:5000/api/notifications",
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
+      const response = await fetch("http://localhost:5000/api/notifications", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
       return await response.json();
     } catch (error) {
       console.error("Error fetching notifications:", error);

@@ -16,7 +16,8 @@ const bookingController = {
       const date = body.date || body.bookingDate || null;
       const start_time = body.start_time || body.startTime || null;
       const end_time = body.end_time || body.endTime || null;
-      const total_amount = body.total_amount || body.totalAmount || body.totalPrice || null;
+      const total_amount =
+        body.total_amount || body.totalAmount || body.totalPrice || null;
       const payment_method = body.payment_method || body.paymentMethod || null;
 
       const arenaIdNum = arena_id ? Number(arena_id) : null;
@@ -33,9 +34,14 @@ const bookingController = {
         return res.status(400).json({ message: "Arena ID is required" });
       }
 
-      if (slotIds.length === 0 && !slotIdNum && (!date || !start_time || !end_time)) {
+      if (
+        slotIds.length === 0 &&
+        !slotIdNum &&
+        (!date || !start_time || !end_time)
+      ) {
         return res.status(400).json({
-          message: "Either slot_id, slot_ids[], or date+start_time+end_time is required",
+          message:
+            "Either slot_id, slot_ids[], or date+start_time+end_time is required",
         });
       }
 
@@ -56,6 +62,14 @@ const bookingController = {
         await connection.rollback();
         return res.status(403).json({ message: "Arena is blocked" });
       }
+      // === ADD THIS VALIDATION BLOCK HERE ===
+      // Function to check if a slot is in the past
+      const isSlotInPast = (slotDate, slotTime) => {
+        const slotDateTimeStr = `${slotDate}T${slotTime}:00`;
+        const slotStart = new Date(slotDateTimeStr);
+        const now = new Date();
+        return slotStart.getTime() < now.getTime();
+      };
 
       const commission_percentage = 5.0;
       let bookingIds = [];
@@ -88,37 +102,60 @@ const bookingController = {
 
         // Check availability
         const unavailableSlots = slots.filter(
-          s => s.is_blocked_by_owner || s.is_holiday || s.existing_booking
+          (s) => s.is_blocked_by_owner || s.is_holiday || s.existing_booking
         );
 
         if (unavailableSlots.length > 0) {
           await connection.rollback();
           return res.status(400).json({
             message: "One or more selected slots are not available",
-            slots: unavailableSlots.map(s => ({
+            slots: unavailableSlots.map((s) => ({
               slot_id: s.slot_id,
               date: s.date,
               start_time: s.start_time,
               end_time: s.end_time,
-              reason: s.existing_booking ? 'Already booked' : (s.is_blocked_by_owner ? 'Blocked by owner' : 'Holiday')
+              reason: s.existing_booking
+                ? "Already booked"
+                : s.is_blocked_by_owner
+                ? "Blocked by owner"
+                : "Holiday",
             })),
           });
         }
-
+        // === ADD THIS CHECK HERE ===
+        // Check for past time slots
+        const pastSlots = slots.filter((s) =>
+          isSlotInPast(s.date, s.start_time)
+        );
+        if (pastSlots.length > 0) {
+          await connection.rollback();
+          return res.status(400).json({
+            message: "Cannot book past time slots",
+            slots: pastSlots.map((s) => ({
+              slot_id: s.slot_id,
+              date: s.date,
+              start_time: s.start_time,
+              reason: "Time has already passed",
+            })),
+          });
+        }
         // Check for expired locks
         const lockedSlots = slots.filter(
-          s => s.locked_until && s.locked_until > new Date() && s.locked_by_user_id !== req.user.id
+          (s) =>
+            s.locked_until &&
+            s.locked_until > new Date() &&
+            s.locked_by_user_id !== req.user.id
         );
 
         if (lockedSlots.length > 0) {
           await connection.rollback();
           return res.status(400).json({
             message: "One or more slots are currently locked by another user",
-            slots: lockedSlots.map(s => ({
+            slots: lockedSlots.map((s) => ({
               slot_id: s.slot_id,
               date: s.date,
               start_time: s.start_time,
-              end_time: s.end_time
+              end_time: s.end_time,
             })),
           });
         }
@@ -126,7 +163,8 @@ const bookingController = {
         // Create bookings for each slot
         for (const slot of slots) {
           const priceForSlot = slot.price || totalAmountNum || 500;
-          const commission_amount = priceForSlot * (commission_percentage / 100);
+          const commission_amount =
+            priceForSlot * (commission_percentage / 100);
 
           const [bookingResult] = await connection.execute(
             `INSERT INTO bookings 
@@ -141,7 +179,7 @@ const bookingController = {
               priceForSlot,
               commission_percentage,
               commission_amount,
-              payment_method || 'pay_after',
+              payment_method || "pay_after",
             ]
           );
 
@@ -154,7 +192,7 @@ const bookingController = {
             date: slot.date,
             start_time: slot.start_time,
             end_time: slot.end_time,
-            price: priceForSlot
+            price: priceForSlot,
           });
 
           // Mark slot as unavailable and clear any locks
@@ -188,23 +226,48 @@ const bookingController = {
 
         const slot = slots[0];
 
-        if (slot.is_blocked_by_owner || slot.is_holiday || slot.existing_booking) {
+        if (
+          slot.is_blocked_by_owner ||
+          slot.is_holiday ||
+          slot.existing_booking
+        ) {
           await connection.rollback();
           return res.status(400).json({
             message: "Time slot is not available",
             slot_date: slot.date,
             start_time: slot.start_time,
             end_time: slot.end_time,
-            reason: slot.existing_booking ? 'Already booked' : (slot.is_blocked_by_owner ? 'Blocked by owner' : 'Holiday')
+            reason: slot.existing_booking
+              ? "Already booked"
+              : slot.is_blocked_by_owner
+              ? "Blocked by owner"
+              : "Holiday",
           });
         }
 
+        // === ADD THIS CHECK FOR PAST SLOT ===
+        // Check for past time slot
+        if (isSlotInPast(slot.date, slot.start_time)) {
+          await connection.rollback();
+          return res.status(400).json({
+            message: "Cannot book past time slots",
+            slot_date: slot.date,
+            start_time: slot.start_time,
+            reason: "Time has already passed",
+          });
+        }
+        // === END CHECK ===
+
         // Check if locked by another user
-        if (slot.locked_until && slot.locked_until > new Date() && slot.locked_by_user_id !== req.user.id) {
+        if (
+          slot.locked_until &&
+          slot.locked_until > new Date() &&
+          slot.locked_by_user_id !== req.user.id
+        ) {
           await connection.rollback();
           return res.status(400).json({
             message: "Time slot is currently locked by another user",
-            locked_until: slot.locked_until
+            locked_until: slot.locked_until,
           });
         }
 
@@ -224,7 +287,7 @@ const bookingController = {
             priceForSlot,
             commission_percentage,
             commission_amount,
-            payment_method || 'pay_after',
+            payment_method || "pay_after",
           ]
         );
 
@@ -237,7 +300,7 @@ const bookingController = {
           date: slot.date,
           start_time: slot.start_time,
           end_time: slot.end_time,
-          price: priceForSlot
+          price: priceForSlot,
         });
 
         // Mark slot as unavailable and clear locks
@@ -296,7 +359,8 @@ const bookingController = {
         }
 
         return res.status(201).json({
-          message: "Booking request created successfully. Waiting for owner approval.",
+          message:
+            "Booking request created successfully. Waiting for owner approval.",
           bookings,
         });
       }
@@ -472,13 +536,18 @@ const bookingController = {
       let canCancel = false;
       if (req.user.role === "user" && booking.user_id === req.user.id) {
         canCancel = true;
-      } else if (req.user.role === "owner" && booking.owner_id === req.user.id) {
+      } else if (
+        req.user.role === "owner" &&
+        booking.owner_id === req.user.id
+      ) {
         canCancel = true;
       }
 
       if (!canCancel) {
         await connection.rollback();
-        return res.status(403).json({ message: "Not authorized to cancel this booking" });
+        return res
+          .status(403)
+          .json({ message: "Not authorized to cancel this booking" });
       }
 
       // Check if booking can be cancelled
@@ -699,9 +768,9 @@ const bookingController = {
       const [slots] = await pool.execute(query, params);
 
       // Clean up expired locks
-      const slotIds = slots.map(s => s.slot_id);
+      const slotIds = slots.map((s) => s.slot_id);
       if (slotIds.length > 0) {
-        const placeholders = slotIds.map(() => '?').join(',');
+        const placeholders = slotIds.map(() => "?").join(",");
         await pool.execute(
           `UPDATE time_slots 
            SET locked_until = NULL,

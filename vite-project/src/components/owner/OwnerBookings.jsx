@@ -33,7 +33,7 @@ const OwnerBookings = () => {
       if (dateTo) filters.date_to = dateTo;
 
       const data = await integrationService.getOwnerBookingRequests(filters);
-      const bookingsData = Array.isArray(data) ? data : (data.bookings || []);
+      const bookingsData = Array.isArray(data) ? data : data.bookings || [];
       setBookings(bookingsData);
       setFilteredBookings(bookingsData);
     } catch (error) {
@@ -54,20 +54,21 @@ const OwnerBookings = () => {
   };
 
   const handleAcceptBooking = async (bookingId) => {
-    if (!window.confirm("Are you sure you want to accept this booking?")) return;
+    if (!window.confirm("Are you sure you want to accept this booking?"))
+      return;
 
     try {
       setLoading(true);
       await integrationService.acceptBookingRequest(bookingId);
 
       // Update local state
-      setBookings(prev =>
-        prev.map(b =>
+      setBookings((prev) =>
+        prev.map((b) =>
           b.booking_id === bookingId ? { ...b, status: "accepted" } : b
         )
       );
-      setFilteredBookings(prev =>
-        prev.map(b =>
+      setFilteredBookings((prev) =>
+        prev.map((b) =>
           b.booking_id === bookingId ? { ...b, status: "accepted" } : b
         )
       );
@@ -83,20 +84,21 @@ const OwnerBookings = () => {
   };
 
   const handleRejectBooking = async (bookingId) => {
-    if (!window.confirm("Are you sure you want to reject this booking?")) return;
+    if (!window.confirm("Are you sure you want to reject this booking?"))
+      return;
 
     try {
       setLoading(true);
       await integrationService.rejectBookingRequest(bookingId);
 
       // Update local state
-      setBookings(prev =>
-        prev.map(b =>
+      setBookings((prev) =>
+        prev.map((b) =>
           b.booking_id === bookingId ? { ...b, status: "rejected" } : b
         )
       );
-      setFilteredBookings(prev =>
-        prev.map(b =>
+      setFilteredBookings((prev) =>
+        prev.map((b) =>
           b.booking_id === bookingId ? { ...b, status: "rejected" } : b
         )
       );
@@ -129,13 +131,13 @@ const OwnerBookings = () => {
 
       if (response.ok) {
         // Update local state
-        setBookings(prev =>
-          prev.map(b =>
+        setBookings((prev) =>
+          prev.map((b) =>
             b.booking_id === bookingId ? { ...b, status: "completed" } : b
           )
         );
-        setFilteredBookings(prev =>
-          prev.map(b =>
+        setFilteredBookings((prev) =>
+          prev.map((b) =>
             b.booking_id === bookingId ? { ...b, status: "completed" } : b
           )
         );
@@ -180,21 +182,27 @@ const OwnerBookings = () => {
   const formatDate = (dateStr) => {
     const date = new Date(dateStr);
     return date.toLocaleDateString("en-US", {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
     });
   };
 
   const getStatusText = (status) => {
     switch (status) {
-      case "pending": return "Pending";
-      case "accepted": return "In Process";
-      case "completed": return "Completed";
-      case "rejected": return "Rejected";
-      case "cancelled": return "Cancelled";
-      default: return status;
+      case "pending":
+        return "Pending";
+      case "accepted":
+        return "In Process";
+      case "completed":
+        return "Completed";
+      case "rejected":
+        return "Rejected";
+      case "cancelled":
+        return "Cancelled";
+      default:
+        return status;
     }
   };
 
@@ -205,7 +213,10 @@ const OwnerBookings = () => {
           Booking Management
         </h1>
         <div className="text-sm text-gray-600">
-          Total Revenue: <span className="font-bold text-green-600">{formatCurrency(stats.total_revenue)}</span>
+          Total Revenue:{" "}
+          <span className="font-bold text-green-600">
+            {formatCurrency(stats.total_revenue)}
+          </span>
         </div>
       </div>
 
@@ -213,19 +224,15 @@ const OwnerBookings = () => {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div className="bg-white p-4 rounded-xl shadow">
           <div className="text-sm text-gray-500">Pending</div>
-          <div className="text-2xl font-bold">{stats.pending_bookings || 0}</div>
-        </div>
-        <div className="bg-white p-4 rounded-xl shadow">
-          <div className="text-sm text-gray-500">In Process</div>
-          <div className="text-2xl font-bold">{stats.accepted_bookings || 0}</div>
+          <div className="text-2xl font-bold">
+            {stats.pending_bookings || 0}
+          </div>
         </div>
         <div className="bg-white p-4 rounded-xl shadow">
           <div className="text-sm text-gray-500">Completed</div>
-          <div className="text-2xl font-bold">{stats.completed_bookings || 0}</div>
-        </div>
-        <div className="bg-white p-4 rounded-xl shadow">
-          <div className="text-sm text-gray-500">Lost Revenue</div>
-          <div className="text-2xl font-bold text-red-600">{formatCurrency(stats.lost_revenue)}</div>
+          <div className="text-2xl font-bold">
+            {stats.completed_bookings || 0}
+          </div>
         </div>
       </div>
 
@@ -243,7 +250,6 @@ const OwnerBookings = () => {
             >
               <option value="all">All Status</option>
               <option value="pending">Pending</option>
-              <option value="accepted">In Process</option>
               <option value="completed">Completed</option>
               <option value="rejected">Rejected</option>
               <option value="cancelled">Cancelled</option>
@@ -384,7 +390,8 @@ const OwnerBookings = () => {
                           {formatCurrency(booking.total_amount)}
                         </div>
                         <div className="text-xs text-gray-500">
-                          Commission: {formatCurrency(booking.commission_amount || 0)}
+                          Commission:{" "}
+                          {formatCurrency(booking.commission_amount || 0)}
                         </div>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
@@ -401,13 +408,17 @@ const OwnerBookings = () => {
                           {booking.status === "pending" && (
                             <>
                               <button
-                                onClick={() => handleAcceptBooking(booking.booking_id)}
+                                onClick={() =>
+                                  handleAcceptBooking(booking.booking_id)
+                                }
                                 className="text-green-600 hover:text-green-900 text-sm"
                               >
                                 Accept
                               </button>
                               <button
-                                onClick={() => handleRejectBooking(booking.booking_id)}
+                                onClick={() =>
+                                  handleRejectBooking(booking.booking_id)
+                                }
                                 className="text-red-600 hover:text-red-900 text-sm"
                               >
                                 Reject
@@ -416,7 +427,9 @@ const OwnerBookings = () => {
                           )}
                           {booking.status === "accepted" && (
                             <button
-                              onClick={() => handleCompleteBooking(booking.booking_id)}
+                              onClick={() =>
+                                handleCompleteBooking(booking.booking_id)
+                              }
                               className="text-blue-600 hover:text-blue-900 text-sm"
                             >
                               Complete
@@ -495,13 +508,17 @@ const OwnerBookings = () => {
                       {booking.status === "pending" && (
                         <>
                           <button
-                            onClick={() => handleAcceptBooking(booking.booking_id)}
+                            onClick={() =>
+                              handleAcceptBooking(booking.booking_id)
+                            }
                             className="flex-1 px-3 py-1.5 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200"
                           >
                             Accept
                           </button>
                           <button
-                            onClick={() => handleRejectBooking(booking.booking_id)}
+                            onClick={() =>
+                              handleRejectBooking(booking.booking_id)
+                            }
                             className="flex-1 px-3 py-1.5 bg-red-100 text-red-700 text-sm rounded hover:bg-red-200"
                           >
                             Reject
@@ -510,7 +527,9 @@ const OwnerBookings = () => {
                       )}
                       {booking.status === "accepted" && (
                         <button
-                          onClick={() => handleCompleteBooking(booking.booking_id)}
+                          onClick={() =>
+                            handleCompleteBooking(booking.booking_id)
+                          }
                           className="flex-1 px-3 py-1.5 bg-blue-100 text-blue-700 text-sm rounded hover:bg-blue-200"
                         >
                           Complete

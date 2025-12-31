@@ -1,11 +1,19 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
-const OwnerHome = ({ ownerData, upcomingBookings: propUpcomingBookings, refreshData }) => {
+const OwnerHome = ({
+  ownerData,
+  upcomingBookings: propUpcomingBookings,
+  refreshData,
+}) => {
   const navigate = useNavigate();
   const [stats, setStats] = useState(ownerData?.dashboard || {});
-  const [recentActivity, setRecentActivity] = useState(ownerData?.pending_requests || []);
-  const [upcomingBookings, setUpcomingBookings] = useState(propUpcomingBookings || ownerData?.upcoming_bookings || []);
+  const [recentActivity, setRecentActivity] = useState(
+    ownerData?.pending_requests || []
+  );
+  const [upcomingBookings, setUpcomingBookings] = useState(
+    propUpcomingBookings || ownerData?.upcoming_bookings || []
+  );
   const [activeTab, setActiveTab] = useState("pending"); // pending or upcoming
   const [loading, setLoading] = useState(false);
 
@@ -28,15 +36,16 @@ const OwnerHome = ({ ownerData, upcomingBookings: propUpcomingBookings, refreshD
   const formatDate = (dateStr) => {
     const date = new Date(dateStr);
     return date.toLocaleDateString("en-US", {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
     });
   };
 
   const handleAcceptBooking = async (bookingId) => {
-    if (!window.confirm("Are you sure you want to accept this booking?")) return;
+    if (!window.confirm("Are you sure you want to accept this booking?"))
+      return;
 
     try {
       setLoading(true);
@@ -54,12 +63,19 @@ const OwnerHome = ({ ownerData, upcomingBookings: propUpcomingBookings, refreshD
 
       if (response.ok) {
         // Remove from pending requests
-        setRecentActivity(prev => prev.filter(b => b.booking_id !== bookingId));
+        setRecentActivity((prev) =>
+          prev.filter((b) => b.booking_id !== bookingId)
+        );
 
         // Add to upcoming bookings
-        const acceptedBooking = recentActivity.find(b => b.booking_id === bookingId);
+        const acceptedBooking = recentActivity.find(
+          (b) => b.booking_id === bookingId
+        );
         if (acceptedBooking) {
-          setUpcomingBookings(prev => [...prev, { ...acceptedBooking, status: 'accepted' }]);
+          setUpcomingBookings((prev) => [
+            ...prev,
+            { ...acceptedBooking, status: "accepted" },
+          ]);
         }
 
         // Refresh dashboard stats
@@ -78,7 +94,8 @@ const OwnerHome = ({ ownerData, upcomingBookings: propUpcomingBookings, refreshD
   };
 
   const handleRejectBooking = async (bookingId) => {
-    if (!window.confirm("Are you sure you want to reject this booking?")) return;
+    if (!window.confirm("Are you sure you want to reject this booking?"))
+      return;
 
     try {
       setLoading(true);
@@ -96,7 +113,9 @@ const OwnerHome = ({ ownerData, upcomingBookings: propUpcomingBookings, refreshD
 
       if (response.ok) {
         // Remove from pending requests
-        setRecentActivity(prev => prev.filter(b => b.booking_id !== bookingId));
+        setRecentActivity((prev) =>
+          prev.filter((b) => b.booking_id !== bookingId)
+        );
 
         // Refresh dashboard stats
         if (refreshData) refreshData();
@@ -132,7 +151,9 @@ const OwnerHome = ({ ownerData, upcomingBookings: propUpcomingBookings, refreshD
 
       if (response.ok) {
         // Remove from upcoming bookings
-        setUpcomingBookings(prev => prev.filter(b => b.booking_id !== bookingId));
+        setUpcomingBookings((prev) =>
+          prev.filter((b) => b.booking_id !== bookingId)
+        );
 
         // Refresh dashboard stats
         if (refreshData) refreshData();
@@ -167,12 +188,18 @@ const OwnerHome = ({ ownerData, upcomingBookings: propUpcomingBookings, refreshD
 
   const getStatusText = (status) => {
     switch (status) {
-      case "pending": return "Pending";
-      case "accepted": return "Accepted";
-      case "completed": return "Completed";
-      case "rejected": return "Rejected";
-      case "cancelled": return "Cancelled";
-      default: return status;
+      case "pending":
+        return "Pending";
+      case "accepted":
+        return "Accepted";
+      case "completed":
+        return "Completed";
+      case "rejected":
+        return "Rejected";
+      case "cancelled":
+        return "Cancelled";
+      default:
+        return status;
     }
   };
 
@@ -243,19 +270,21 @@ const OwnerHome = ({ ownerData, upcomingBookings: propUpcomingBookings, refreshD
           <div className="flex">
             <button
               onClick={() => setActiveTab("pending")}
-              className={`flex-1 px-4 py-3 text-sm font-medium ${activeTab === "pending"
-                ? "border-b-2 border-blue-500 text-blue-600"
-                : "text-gray-500 hover:text-gray-700"
-                }`}
+              className={`flex-1 px-4 py-3 text-sm font-medium ${
+                activeTab === "pending"
+                  ? "border-b-2 border-blue-500 text-blue-600"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
             >
               Pending Requests ({recentActivity.length})
             </button>
             <button
               onClick={() => setActiveTab("upcoming")}
-              className={`flex-1 px-4 py-3 text-sm font-medium ${activeTab === "upcoming"
-                ? "border-b-2 border-blue-500 text-blue-600"
-                : "text-gray-500 hover:text-gray-700"
-                }`}
+              className={`flex-1 px-4 py-3 text-sm font-medium ${
+                activeTab === "upcoming"
+                  ? "border-b-2 border-blue-500 text-blue-600"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
             >
               Upcoming Bookings ({upcomingBookings.length})
             </button>
@@ -313,7 +342,8 @@ const OwnerHome = ({ ownerData, upcomingBookings: propUpcomingBookings, refreshD
                               {booking.sport_name}
                             </div>
                             <div className="text-xs text-gray-500">
-                              {formatDate(booking.date)} • {booking.start_time} - {booking.end_time}
+                              {formatDate(booking.date)} • {booking.start_time}{" "}
+                              - {booking.end_time}
                             </div>
                           </td>
                           <td className="px-4 py-3">
@@ -324,14 +354,18 @@ const OwnerHome = ({ ownerData, upcomingBookings: propUpcomingBookings, refreshD
                           <td className="px-4 py-3">
                             <div className="flex space-x-2">
                               <button
-                                onClick={() => handleAcceptBooking(booking.booking_id)}
+                                onClick={() =>
+                                  handleAcceptBooking(booking.booking_id)
+                                }
                                 disabled={loading}
                                 className="px-3 py-1 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200"
                               >
                                 Accept
                               </button>
                               <button
-                                onClick={() => handleRejectBooking(booking.booking_id)}
+                                onClick={() =>
+                                  handleRejectBooking(booking.booking_id)
+                                }
                                 disabled={loading}
                                 className="px-3 py-1 bg-red-100 text-red-700 text-sm rounded hover:bg-red-200"
                               >
@@ -348,7 +382,10 @@ const OwnerHome = ({ ownerData, upcomingBookings: propUpcomingBookings, refreshD
                 {/* Mobile Card View */}
                 <div className="md:hidden space-y-3">
                   {recentActivity.map((booking) => (
-                    <div key={booking.booking_id} className="border rounded-lg p-3">
+                    <div
+                      key={booking.booking_id}
+                      className="border rounded-lg p-3"
+                    >
                       <div className="flex justify-between items-start mb-2">
                         <div>
                           <div className="font-medium text-gray-900">
@@ -365,7 +402,8 @@ const OwnerHome = ({ ownerData, upcomingBookings: propUpcomingBookings, refreshD
                       <div className="text-sm mb-3">
                         <div className="font-medium">{booking.sport_name}</div>
                         <div className="text-gray-600">
-                          {formatDate(booking.date)} • {booking.start_time} - {booking.end_time}
+                          {formatDate(booking.date)} • {booking.start_time} -{" "}
+                          {booking.end_time}
                         </div>
                       </div>
                       <div className="flex justify-between items-center">
@@ -374,14 +412,18 @@ const OwnerHome = ({ ownerData, upcomingBookings: propUpcomingBookings, refreshD
                         </div>
                         <div className="flex space-x-2">
                           <button
-                            onClick={() => handleAcceptBooking(booking.booking_id)}
+                            onClick={() =>
+                              handleAcceptBooking(booking.booking_id)
+                            }
                             disabled={loading}
                             className="px-3 py-1 bg-green-100 text-green-700 text-xs rounded hover:bg-green-200"
                           >
                             Accept
                           </button>
                           <button
-                            onClick={() => handleRejectBooking(booking.booking_id)}
+                            onClick={() =>
+                              handleRejectBooking(booking.booking_id)
+                            }
                             disabled={loading}
                             className="px-3 py-1 bg-red-100 text-red-700 text-xs rounded hover:bg-red-200"
                           >
@@ -445,18 +487,25 @@ const OwnerHome = ({ ownerData, upcomingBookings: propUpcomingBookings, refreshD
                               {booking.sport_name}
                             </div>
                             <div className="text-xs text-gray-500">
-                              {formatDate(booking.date)} • {booking.start_time} - {booking.end_time}
+                              {formatDate(booking.date)} • {booking.start_time}{" "}
+                              - {booking.end_time}
                             </div>
                           </td>
                           <td className="px-4 py-3">
-                            <div className={`px-2 py-1 text-xs rounded-full ${booking.days_until === 0 ? 'bg-red-100 text-red-800' :
-                              booking.days_until <= 2 ? 'bg-yellow-100 text-yellow-800' :
-                                'bg-green-100 text-green-800'
-                              }`}>
-                              {booking.days_until === 0 ? 'Today' :
-                                booking.days_until === 1 ? 'Tomorrow' :
-                                  `${booking.days_until} days`
-                              }
+                            <div
+                              className={`px-2 py-1 text-xs rounded-full ${
+                                booking.days_until === 0
+                                  ? "bg-red-100 text-red-800"
+                                  : booking.days_until <= 2
+                                  ? "bg-yellow-100 text-yellow-800"
+                                  : "bg-green-100 text-green-800"
+                              }`}
+                            >
+                              {booking.days_until === 0
+                                ? "Today"
+                                : booking.days_until === 1
+                                ? "Tomorrow"
+                                : `${booking.days_until} days`}
                             </div>
                           </td>
                           <td className="px-4 py-3">
@@ -466,7 +515,9 @@ const OwnerHome = ({ ownerData, upcomingBookings: propUpcomingBookings, refreshD
                           </td>
                           <td className="px-4 py-3">
                             <button
-                              onClick={() => handleCompleteBooking(booking.booking_id)}
+                              onClick={() =>
+                                handleCompleteBooking(booking.booking_id)
+                              }
                               disabled={loading}
                               className="px-3 py-1 bg-blue-100 text-blue-700 text-sm rounded hover:bg-blue-200"
                             >
@@ -482,7 +533,10 @@ const OwnerHome = ({ ownerData, upcomingBookings: propUpcomingBookings, refreshD
                 {/* Mobile Card View */}
                 <div className="md:hidden space-y-3">
                   {upcomingBookings.map((booking) => (
-                    <div key={booking.booking_id} className="border rounded-lg p-3">
+                    <div
+                      key={booking.booking_id}
+                      className="border rounded-lg p-3"
+                    >
                       <div className="flex justify-between items-start mb-2">
                         <div>
                           <div className="font-medium text-gray-900">
@@ -492,20 +546,27 @@ const OwnerHome = ({ ownerData, upcomingBookings: propUpcomingBookings, refreshD
                             {booking.user_phone}
                           </div>
                         </div>
-                        <div className={`px-2 py-0.5 text-xs rounded-full ${booking.days_until === 0 ? 'bg-red-100 text-red-800' :
-                          booking.days_until <= 2 ? 'bg-yellow-100 text-yellow-800' :
-                            'bg-green-100 text-green-800'
-                          }`}>
-                          {booking.days_until === 0 ? 'Today' :
-                            booking.days_until === 1 ? 'Tomorrow' :
-                              `${booking.days_until} days`
-                          }
+                        <div
+                          className={`px-2 py-0.5 text-xs rounded-full ${
+                            booking.days_until === 0
+                              ? "bg-red-100 text-red-800"
+                              : booking.days_until <= 2
+                              ? "bg-yellow-100 text-yellow-800"
+                              : "bg-green-100 text-green-800"
+                          }`}
+                        >
+                          {booking.days_until === 0
+                            ? "Today"
+                            : booking.days_until === 1
+                            ? "Tomorrow"
+                            : `${booking.days_until} days`}
                         </div>
                       </div>
                       <div className="text-sm mb-3">
                         <div className="font-medium">{booking.sport_name}</div>
                         <div className="text-gray-600">
-                          {formatDate(booking.date)} • {booking.start_time} - {booking.end_time}
+                          {formatDate(booking.date)} • {booking.start_time} -{" "}
+                          {booking.end_time}
                         </div>
                       </div>
                       <div className="flex justify-between items-center">
@@ -513,7 +574,9 @@ const OwnerHome = ({ ownerData, upcomingBookings: propUpcomingBookings, refreshD
                           {formatCurrency(booking.total_amount)}
                         </div>
                         <button
-                          onClick={() => handleCompleteBooking(booking.booking_id)}
+                          onClick={() =>
+                            handleCompleteBooking(booking.booking_id)
+                          }
                           disabled={loading}
                           className="px-3 py-1 bg-blue-100 text-blue-700 text-xs rounded hover:bg-blue-200"
                         >
@@ -527,37 +590,6 @@ const OwnerHome = ({ ownerData, upcomingBookings: propUpcomingBookings, refreshD
             )}
           </div>
         )}
-      </div>
-
-      {/* Quick Actions */}
-      <div className="bg-white rounded-xl shadow p-4">
-        <h3 className="font-medium text-gray-900 mb-3">Quick Actions</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <button
-            onClick={() => navigate('/owner/calendar')}
-            className="px-3 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 text-sm"
-          >
-            View Calendar
-          </button>
-          <button
-            onClick={() => navigate('/owner/bookings')}
-            className="px-3 py-2 bg-green-50 text-green-700 rounded-lg hover:bg-green-100 text-sm"
-          >
-            Manage All Bookings
-          </button>
-          <button
-            onClick={() => navigate('/owner/arenasettings')}
-            className="px-3 py-2 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 text-sm"
-          >
-            Arena Settings
-          </button>
-          <button
-            onClick={refreshData}
-            className="px-3 py-2 bg-gray-50 text-gray-700 rounded-lg hover:bg-gray-100 text-sm"
-          >
-            Refresh Data
-          </button>
-        </div>
       </div>
     </div>
   );
