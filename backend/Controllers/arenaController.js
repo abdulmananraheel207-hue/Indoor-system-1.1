@@ -1,6 +1,5 @@
 // File: arenaController.js - COMPLETE FIXED VERSION
 const pool = require("../db");
-
 const arenaController = {
   // Get all sports categories
   getSportsCategories: async (req, res) => {
@@ -22,7 +21,14 @@ const arenaController = {
       const arena_id = parseInt(req.params.arena_id);
       let { date, sport_id } = req.query;
 
-      console.log("Fetching slots for arena:", arena_id, "date:", date, "sport:", sport_id);
+      console.log(
+        "Fetching slots for arena:",
+        arena_id,
+        "date:",
+        date,
+        "sport:",
+        sport_id
+      );
 
       if (date && typeof date === "object") {
         date = date.date;
@@ -30,7 +36,7 @@ const arenaController = {
 
       // If no date provided, default to today
       if (!date) {
-        date = new Date().toISOString().split('T')[0];
+        date = new Date().toISOString().split("T")[0];
         console.log("No date provided, using today:", date);
       }
 
@@ -86,12 +92,13 @@ const arenaController = {
       console.log("Found", slots.length, "slots");
 
       // Filter to show only actually available slots
-      const availableSlots = slots.filter(slot =>
-        slot.actually_available === 1 || slot.actually_available === true
+      const availableSlots = slots.filter(
+        (slot) =>
+          slot.actually_available === 1 || slot.actually_available === true
       );
 
       // Format the response
-      const formattedSlots = availableSlots.map(slot => ({
+      const formattedSlots = availableSlots.map((slot) => ({
         slot_id: slot.slot_id,
         arena_id: slot.arena_id,
         sport_id: slot.sport_id,
@@ -103,7 +110,7 @@ const arenaController = {
         is_available: true, // Since we filtered for available slots
         actually_available: true,
         is_blocked_by_owner: slot.is_blocked_by_owner || false,
-        is_holiday: slot.is_holiday || false
+        is_holiday: slot.is_holiday || false,
       }));
 
       console.log("Returning", formattedSlots.length, "available slots");
@@ -114,7 +121,7 @@ const arenaController = {
       res.status(500).json({
         message: "Server error",
         error: error.message,
-        stack: process.env.NODE_ENV === "development" ? error.stack : undefined
+        stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
       });
     }
   },
@@ -152,8 +159,8 @@ const arenaController = {
       }
 
       const slot = slots[0];
-      const currentDate = new Date().toISOString().split('T')[0];
-      const slotDate = new Date(slot.date).toISOString().split('T')[0];
+      const currentDate = new Date().toISOString().split("T")[0];
+      const slotDate = new Date(slot.date).toISOString().split("T")[0];
 
       // Ensure we're only locking slots for today or future dates
       if (slotDate < currentDate) {
@@ -164,11 +171,15 @@ const arenaController = {
       }
 
       // Check if someone else locked it recently
-      if (slot.locked_until && slot.locked_until > new Date() && slot.locked_by_user_id !== req.user.id) {
+      if (
+        slot.locked_until &&
+        slot.locked_until > new Date() &&
+        slot.locked_by_user_id !== req.user.id
+      ) {
         await connection.rollback();
         return res.status(400).json({
           message: "Slot is currently being booked by another user",
-          locked_until: slot.locked_until
+          locked_until: slot.locked_until,
         });
       }
 
@@ -189,7 +200,7 @@ const arenaController = {
         slot_date: slot.date,
         start_time: slot.start_time,
         end_time: slot.end_time,
-        price: slot.price
+        price: slot.price,
       });
     } catch (error) {
       await connection.rollback();
@@ -222,7 +233,7 @@ const arenaController = {
 
       res.json({
         message: "Slot released successfully",
-        slot_id: slot_id
+        slot_id: slot_id,
       });
     } catch (error) {
       console.error(error);
