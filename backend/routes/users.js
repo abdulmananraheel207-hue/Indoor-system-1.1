@@ -26,12 +26,9 @@ router.get("/arenas/all", userController.getAllArenas);
 
 // Favorites
 // In routes/user.js
-router.get("/users/favorites", userController.getFavoriteArenas); // Add /users
-router.post("/users/arenas/:arena_id/favorite", userController.addToFavorites); // Add /users
-router.delete(
-  "/users/arenas/:arena_id/favorite",
-  userController.removeFromFavorites
-); // Add /users
+router.get("/favorites", userController.getFavoriteArenas);
+router.post("/arenas/:arena_id/favorite", userController.addToFavorites);
+router.delete("/arenas/:arena_id/favorite", userController.removeFromFavorites);
 
 // Sports categories
 router.get("/sports", arenaController.getSportsCategories);

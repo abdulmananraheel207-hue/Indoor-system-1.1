@@ -406,23 +406,47 @@ const userController = {
     }
   },
   // Get user's favorite arenas
+
+  // Then in getFavoriteArenas:
   getFavoriteArenas: async (req, res) => {
     try {
+      console.log("Fetching favorites for user ID:", req.user?.id);
+
+      if (!req.user || !req.user.id) {
+        return res.status(401).json({ message: "User not authenticated" });
+      }
+
       const [favorites] = await pool.execute(
         `
-            SELECT a.arena_id, a.name, a.sport_type, a.rating, a.location
+            SELECT 
+              a.arena_id, 
+              a.name, 
+              a.description,
+              a.location_lat,
+              a.location_lng,
+              a.address,
+              a.base_price_per_hour,
+              a.rating,
+              a.total_reviews,
+              a.is_active
             FROM favorite_arenas fa
-            JOIN arenas a ON fa.arena_id = a.arena_id
-            WHERE fa.user_id = ? AND a.is_active = TRUE
-            ORDER BY fa.created_at DESC
+            INNER JOIN arenas a ON fa.arena_id = a.arena_id
+            WHERE fa.user_id = ?
+            AND a.is_active = TRUE
+            AND a.is_blocked = FALSE
+            ORDER BY fa.added_at DESC
         `,
         [req.user.id]
       );
 
+      console.log("Found favorites:", favorites.length);
       res.json(favorites);
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Server error", error: error.message });
+      console.error("Error in getFavoriteArenas:", error);
+      res.status(500).json({
+        message: "Server error fetching favorites",
+        error: error.message,
+      });
     }
   },
   // Add arena to favorites

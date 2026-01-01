@@ -31,8 +31,8 @@ const UserProfile = () => {
     try {
       setLoading(true);
       // This should call getFavoriteArenas, not getUserFavorites
-      const response = await integrationService.getFavoriteArenas();
-      setFavoriteArenas(response);
+      const favorites = await integrationService.getFavoriteArenas();
+      setFavoriteArenas(favorites);
     } catch (error) {
       console.error("Error fetching favorite arenas:", error);
       alert("Failed to load favorite arenas");

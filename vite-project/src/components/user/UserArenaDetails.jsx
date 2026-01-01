@@ -21,6 +21,8 @@ const UserArenaDetails = () => {
   const [newReview, setNewReview] = useState({ rating: 5, comment: "" });
   const [lockExpiry, setLockExpiry] = useState(null);
   const [timeLeft, setTimeLeft] = useState(null);
+  const [isFavorited, setIsFavorited] = useState(false);
+  const [favorites, setFavorites] = useState([]);
 
   useEffect(() => {
     fetchArenaDetails();
@@ -61,7 +63,31 @@ const UserArenaDetails = () => {
     }, 1000);
     return () => clearInterval(interval);
   }, [lockExpiry]);
+  // UPDATE THIS useEffect TO HANDLE 500 ERRORS
+  useEffect(() => {
+    const checkFavoriteStatus = async () => {
+      try {
+        const favorites = await integrationService.getFavoriteArenas();
+        setFavorites(favorites || []);
 
+        // Check if current arena is already in favorites
+        const isAlreadyFavorited = favorites.some(
+          (favorite) =>
+            favorite.id === parseInt(arenaId) ||
+            favorite.arena_id === parseInt(arenaId) ||
+            favorite.arenaId === parseInt(arenaId)
+        );
+
+        setIsFavorited(isAlreadyFavorited);
+      } catch (error) {
+        console.error("Error checking favorite status:", error);
+        // Don't throw error here, just log it
+        // The 500 error is likely from the profile page, not this page
+      }
+    };
+
+    checkFavoriteStatus();
+  }, [arenaId]); // Add this line
   // In UserArenaDetails.jsx, replace the fetchArenaDetails function:
   const fetchArenaDetails = async () => {
     try {
@@ -321,15 +347,35 @@ const UserArenaDetails = () => {
 
   const handleAddFavorite = async () => {
     try {
+      // Check if already favorited first
+      if (isFavorited) {
+        alert("This arena is already in your favorites!");
+        return;
+      }
+
       console.log("Adding favorite with arenaId:", arenaId);
       console.log("Full URL would be:", `/users/arenas/${arenaId}/favorite`);
 
       await integrationService.addToFavorites(arenaId);
+
+      // Update state to reflect it's now favorited
+      setIsFavorited(true);
+      setFavorites((prev) => [...prev, { arenaId: parseInt(arenaId) }]);
       alert("Arena added to favorites!");
     } catch (error) {
       console.error("Error adding favorite:", error);
       console.error("Error response:", error.response);
-      alert("Failed to add to favorites");
+
+      // Check if it's the "already in favorites" error
+      if (
+        error.response?.status === 400 &&
+        error.response?.data?.message?.includes("already in favorites")
+      ) {
+        setIsFavorited(true); // Update state
+        alert("This arena is already in your favorites!");
+      } else {
+        alert("Failed to add to favorites");
+      }
     }
   };
 
@@ -399,11 +445,15 @@ const UserArenaDetails = () => {
             <button
               type="button"
               onClick={handleAddFavorite}
-              className="text-red-500 hover:text-red-700"
+              className={`${
+                isFavorited ? "text-red-700" : "text-red-500 hover:text-red-700"
+              }`}
+              disabled={isFavorited}
+              title={isFavorited ? "Already in favorites" : "Add to favorites"}
             >
               <svg
                 className="h-6 w-6"
-                fill="none"
+                fill={isFavorited ? "currentColor" : "none"}
                 stroke="currentColor"
                 viewBox="0 0 24 24"
               >
