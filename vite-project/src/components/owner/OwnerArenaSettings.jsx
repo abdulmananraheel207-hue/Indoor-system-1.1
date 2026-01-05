@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { ownerAPI } from "../../services/api";
+import { integrationService } from "../../services/integrationService";
+import PhotoUpload from '../uploads/PhotoUpload';
 
 const OwnerArenaSettings = ({ dashboardData }) => {
   const [arenas, setArenas] = useState([]);
@@ -23,6 +25,9 @@ const OwnerArenaSettings = ({ dashboardData }) => {
     description: "",
     sports: [],
   });
+
+  // Refs for file inputs
+  const fileInputRefs = useRef({});
 
   const availableSports = [
     { id: 1, name: "Badminton", icon: "🏸" },
@@ -53,6 +58,7 @@ const OwnerArenaSettings = ({ dashboardData }) => {
   const fetchCourts = async () => {
     try {
       const response = await ownerAPI.getCourts(selectedArena);
+      console.log('Fetched courts:', response.data);
       setCourts(response.data || []);
     } catch (error) {
       console.error("Error fetching courts:", error);
@@ -122,40 +128,99 @@ const OwnerArenaSettings = ({ dashboardData }) => {
     }
   };
 
-  const handlePhotoUpload = async (courtId, event) => {
-    const files = event.target.files;
-    if (!files.length) return;
+  const uploadPhotosToCourt = async (courtId, files) => {
+    console.log('=== UPLOAD FUNCTION CALLED ===');
+    console.log('Court ID:', courtId);
+    console.log('Number of files:', files.length);
 
     setUploadingPhotos({ ...uploadingPhotos, [courtId]: true });
 
+    // Create FormData
     const formData = new FormData();
     for (let i = 0; i < files.length; i++) {
-      formData.append("photos", files[i]);
+      console.log(`Adding file ${i}: court_images <- ${files[i].name}`);
+      formData.append("court_images", files[i]); // MUST be "court_images"
+    }
+
+    // Debug FormData
+    console.log('FormData entries:');
+    for (let pair of formData.entries()) {
+      console.log(`Field: "${pair[0]}", File: ${pair[1].name}`);
     }
 
     try {
-      const response = await ownerAPI.uploadCourtPhotos(courtId, formData);
-      alert("Photos uploaded successfully");
-      fetchCourts();
+      const token = localStorage.getItem('token');
+      console.log('Token exists:', !!token);
+
+      const response = await fetch(
+        `http://localhost:5000/api/owners/courts/${courtId}/photos`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          },
+          body: formData
+        }
+      );
+
+      console.log('Response status:', response.status);
+
+      // Get response as text first
+      const responseText = await response.text();
+      console.log('Response text:', responseText);
+
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (e) {
+        console.error('Failed to parse JSON:', e);
+        data = { message: 'Invalid JSON response' };
+      }
+
+      console.log('Response data:', data);
+
+      if (!response.ok) {
+        throw new Error(data.message || `Upload failed: ${response.status}`);
+      }
+
+      alert(`✅ ${data.message || 'Photos uploaded successfully!'}`);
+
+      // Refresh courts list
+      await fetchCourts();
+
     } catch (error) {
-      console.error("Error uploading photos:", error);
-      alert(error.response?.data?.message || "Failed to upload photos");
+      console.error('❌ Upload error:', error);
+      alert(`❌ Upload failed: ${error.message}`);
     } finally {
       setUploadingPhotos({ ...uploadingPhotos, [courtId]: false });
-      event.target.value = "";
+
+      // Reset the file input
+      const fileInput = document.getElementById(`file-input-${courtId}`);
+      if (fileInput) fileInput.value = "";
     }
   };
 
-  const handleDeletePhoto = async (courtId, photoPath) => {
+
+
+  const handleDeletePhoto = async (courtId, photo) => {
     if (!window.confirm("Are you sure you want to delete this photo?")) return;
 
     try {
-      await ownerAPI.deleteCourtPhoto(courtId, { photo_path: photoPath });
+      // If photo has an ID (from database), use it
+      if (photo.id) {
+        await integrationService.deleteCourtPhoto(courtId, photo.id);
+        alert("Photo deleted successfully");
+        fetchCourts();
+        return;
+      }
+
+      // Fallback: Delete by URL if no ID
+      await integrationService.deleteCourtPhotoByUrl(courtId, photo.path);
       alert("Photo deleted successfully");
       fetchCourts();
     } catch (error) {
       console.error("Error deleting photo:", error);
-      alert(error.response?.data?.message || "Failed to delete photo");
+      alert("Failed to delete photo: " + error.message);
     }
   };
 
@@ -179,18 +244,20 @@ const OwnerArenaSettings = ({ dashboardData }) => {
     }
   };
 
-  // In OwnerArenaSettings.jsx, update the getAllCourtPhotos function:
   const getAllCourtPhotos = (court) => {
     const photos = [];
 
     // Check if court has images array (from API)
     if (court.images && court.images.length > 0) {
-      court.images.forEach((img, index) => {
+      court.images.forEach((img) => {
         photos.push({
+          id: img.image_id, // Database ID
+          public_id: img.cloudinary_id, // Cloudinary public ID
           path: img.image_url,
-          is_primary: img.is_primary || index === 0,
+          is_primary: img.is_primary || false,
         });
       });
+      return photos; // Return immediately if we have proper images
     }
 
     // Fallback to old structure if exists
@@ -330,24 +397,24 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                       <h4 className="text-sm font-bold text-gray-900 uppercase tracking-tight">
                         Gallery
                       </h4>
-                      <label className="cursor-pointer">
-                        <input
-                          type="file"
-                          multiple
-                          accept="image/*"
-                          onChange={(e) => handlePhotoUpload(court.court_id, e)}
-                          className="hidden"
-                        />
-                        <span className="px-4 py-2 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-black transition">
-                          {uploadingPhotos[court.court_id]
-                            ? "UPLOADING..."
-                            : "+ ADD PHOTOS"}
-                        </span>
-                      </label>
+
+                      {/* UPDATED UPLOAD BUTTON WITH REF */}
+                      <PhotoUpload
+                        type="court"
+                        entityId={court.court_id}
+                        entityName={court.court_name}
+                        onUploadComplete={(data) => {
+                          console.log('Upload complete, refreshing courts...', data);
+                          fetchCourts(); // Refresh courts after upload
+                        }}
+                        maxFiles={10}
+                        accept="image/*"
+                      />
                     </div>
 
                     {(() => {
                       const allPhotos = getAllCourtPhotos(court);
+                      console.log(`Photos for court ${court.court_id}:`, allPhotos);
 
                       if (allPhotos.length > 0) {
                         return (
@@ -355,15 +422,12 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                             {allPhotos.map((photo, index) => (
                               <div key={index} className="relative group">
                                 <img
-                                  src={`http://localhost:5000${photo.path}`}
-                                  alt={`Court ${court.court_name} - ${
-                                    index + 1
-                                  }`}
+                                  src={photo.path}
+                                  alt={`Court ${court.court_name} - ${index + 1}`}
                                   className="w-full h-32 object-cover rounded-xl shadow-sm border border-gray-100"
                                   onError={(e) => {
                                     e.target.onerror = null;
-                                    e.target.src =
-                                      "https://via.placeholder.com/300x200?text=Image+Not+Found";
+                                    e.target.src = "https://via.placeholder.com/300x200?text=Image+Not+Found";
                                   }}
                                 />
                                 <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition rounded-xl flex items-center justify-center opacity-0 group-hover:opacity-100">
@@ -376,7 +440,7 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                                     onClick={() =>
                                       handleDeletePhoto(
                                         court.court_id,
-                                        photo.path
+                                        photo
                                       )
                                     }
                                     className="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
@@ -391,9 +455,12 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                       } else {
                         return (
                           <div className="bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl p-8 text-center">
-                            <p className="text-sm text-gray-400">
-                              No photos available. Upload your first court
-                              photo.
+                            <div className="text-gray-400 mb-4">📷</div>
+                            <p className="text-sm text-gray-400 mb-2">
+                              No photos available yet.
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              Click "ADD PHOTOS" to upload court images
                             </p>
                           </div>
                         );
@@ -496,11 +563,10 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                       key={sport.id}
                       type="button"
                       onClick={() => toggleSport(sport.id, "edit")}
-                      className={`flex flex-col items-center p-3 border-2 rounded-lg transition ${
-                        courtForm.sports.includes(sport.id)
-                          ? "border-blue-500 bg-blue-50"
-                          : "border-gray-200 hover:border-gray-300"
-                      }`}
+                      className={`flex flex-col items-center p-3 border-2 rounded-lg transition ${courtForm.sports.includes(sport.id)
+                        ? "border-blue-500 bg-blue-50"
+                        : "border-gray-200 hover:border-gray-300"
+                        }`}
                     >
                       <span className="text-2xl">{sport.icon}</span>
                       <span className="text-xs mt-1">{sport.name}</span>
@@ -540,6 +606,7 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                   Cancel
                 </button>
                 <button
+                  type="button"
                   onClick={handleCourtUpdate}
                   disabled={loading}
                   className="px-8 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 disabled:bg-blue-300"
@@ -652,11 +719,10 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                       key={sport.id}
                       type="button"
                       onClick={() => toggleSport(sport.id, "add")}
-                      className={`flex flex-col items-center p-3 border-2 rounded-lg transition ${
-                        newCourtForm.sports.includes(sport.id)
-                          ? "border-blue-500 bg-blue-50"
-                          : "border-gray-200 hover:border-gray-300"
-                      }`}
+                      className={`flex flex-col items-center p-3 border-2 rounded-lg transition ${newCourtForm.sports.includes(sport.id)
+                        ? "border-blue-500 bg-blue-50"
+                        : "border-gray-200 hover:border-gray-300"
+                        }`}
                     >
                       <span className="text-2xl">{sport.icon}</span>
                       <span className="text-xs mt-1">{sport.name}</span>

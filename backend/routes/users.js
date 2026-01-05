@@ -4,6 +4,7 @@ const userController = require("../Controllers/userController");
 const arenaController = require("../Controllers/arenaController");
 const auth = require("../middleware/auth");
 const { userValidation } = require("../middleware/validation");
+const { uploadProfilePicture } = require("../middleware/upload"); // ADD THIS IMPORT
 
 // All routes require user authentication
 router.use(auth.verifyToken, auth.isUser);
@@ -15,7 +16,14 @@ router.put(
   userValidation.updateProfile,
   userController.updateProfile
 );
-router.put("/profile/picture", userController.updateProfilePicture);
+
+// === UPDATE THIS ROUTE FOR PROFILE PICTURE ===
+router.post(
+  "/profile/picture", // Changed from PUT to POST
+  uploadProfilePicture, // ADD THIS MIDDLEWARE
+  userController.uploadProfilePicture // Change from updateProfilePicture
+);
+
 router.put("/profile/password", userController.changePassword);
 
 // Arena discovery and search
@@ -25,7 +33,6 @@ router.get("/arenas/:arena_id", userController.getArenaDetails);
 router.get("/arenas/all", userController.getAllArenas);
 
 // Favorites
-// In routes/user.js
 router.get("/favorites", userController.getFavoriteArenas);
 router.post("/arenas/:arena_id/favorite", userController.addToFavorites);
 router.delete("/arenas/:arena_id/favorite", userController.removeFromFavorites);

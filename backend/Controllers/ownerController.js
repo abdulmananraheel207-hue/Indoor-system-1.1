@@ -159,9 +159,9 @@ const ownerController = {
           // Add arena sports
           for (const sport_id of sports) {
             await connection.execute(
-              `INSERT INTO arena_sports (arena_id, sport_id, price_per_hour)
-               VALUES (?, ?, ?)`,
-              [arena_id, sport_id, parseFloat(base_price_per_hour) || 500]
+              `INSERT INTO arena_sports (arena_id, sport_id)
+   VALUES (?, ?)`,
+              [arena_id, sport_id]
             );
           }
         }
@@ -312,10 +312,10 @@ const ownerController = {
   uploadArenaPhotos: async (req, res) => {
     try {
       const { arena_id } = req.params;
-      const files = req.files;
+      const files = req.files; // Array of files from Cloudinary
 
       if (!files || files.length === 0) {
-        return res.status(400).json({ message: "No files uploaded" });
+        return res.status(400).json({ message: 'No files uploaded' });
       }
 
       // Verify owner owns this arena
@@ -325,79 +325,305 @@ const ownerController = {
       );
 
       if (arenaCheck.length === 0) {
-        return res
-          .status(404)
-          .json({ message: "Arena not found or access denied" });
+        return res.status(404).json({
+          message: "Arena not found or access denied"
+        });
       }
 
-      // Save photos to database
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        await pool.execute(
-          `INSERT INTO arena_images (arena_id, image_url, is_primary, uploaded_at)
-           VALUES (?, ?, ?, NOW())`,
-          [arena_id, `/uploads/arenas/${file.filename}`, i === 0]
+      const connection = await pool.getConnection();
+      await connection.beginTransaction();
+
+      try {
+        // Check existing primary image
+        const [existingPrimary] = await connection.execute(
+          "SELECT image_id FROM arena_images WHERE arena_id = ? AND is_primary = TRUE",
+          [arena_id]
         );
-      }
 
-      res.json({
-        message: "Arena photos uploaded successfully",
-        count: files.length,
-        files: files.map((f) => f.filename),
-      });
+        // Save photos to database
+        const uploadedImages = [];
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const image_url = file.path; // Cloudinary URL
+
+          // Set first image as primary if no primary exists
+          const is_primary = (existingPrimary.length === 0 && i === 0);
+
+          const [result] = await connection.execute(
+            `INSERT INTO arena_images (arena_id, image_url, is_primary, uploaded_at)
+           VALUES (?, ?, ?, NOW())`,
+            [arena_id, image_url, is_primary]
+          );
+
+          uploadedImages.push({
+            image_id: result.insertId,
+            image_url,
+            is_primary,
+            arena_id
+          });
+        }
+
+        await connection.commit();
+
+        res.json({
+          message: "Arena photos uploaded successfully",
+          count: files.length,
+          images: uploadedImages
+        });
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      } finally {
+        connection.release();
+      }
     } catch (error) {
-      console.error("Photo upload error:", error);
-      res.status(500).json({ message: "Server error", error: error.message });
+      console.error("Arena photo upload error:", error);
+      res.status(500).json({
+        message: "Server error",
+        error: error.message
+      });
     }
   },
 
-  // Upload court photos
+
   uploadCourtPhotos: async (req, res) => {
     try {
       const { court_id } = req.params;
       const files = req.files;
 
+      console.log('=== 🚨 UPLOAD COURT PHOTOS DEBUG ===');
+      console.log('1. Court ID:', court_id);
+      console.log('2. Files received:', files);
+      console.log('3. Number of files:', files ? files.length : 0);
+
       if (!files || files.length === 0) {
-        return res.status(400).json({ message: "No files uploaded" });
+        console.log('❌ NO FILES IN REQ.FILES!');
+        console.log('Request body:', req.body);
+        console.log('Request headers:', req.headers);
+        return res.status(400).json({
+          message: 'No files uploaded',
+          debug: { files: files, body: req.body }
+        });
       }
 
-      // Verify court belongs to owner's arena
+      // Show each file
+      files.forEach((file, i) => {
+        console.log(`File ${i}:`, {
+          fieldname: file.fieldname,
+          originalname: file.originalname,
+          encoding: file.encoding,
+          mimetype: file.mimetype,
+          size: file.size,
+          filename: file.filename,
+          path: file.path,
+          buffer: file.buffer ? 'Has buffer' : 'No buffer'
+        });
+      });
+
+      // Verify court exists
       const [courtCheck] = await pool.execute(
-        `SELECT cd.court_id FROM court_details cd
-         JOIN arenas a ON cd.arena_id = a.arena_id
-         WHERE cd.court_id = ? AND a.owner_id = ?`,
+        `SELECT cd.court_id, cd.court_name 
+       FROM court_details cd
+       JOIN arenas a ON cd.arena_id = a.arena_id
+       WHERE cd.court_id = ? AND a.owner_id = ?`,
         [court_id, req.user.id]
       );
 
+      console.log('4. Court check:', courtCheck);
+
       if (courtCheck.length === 0) {
-        return res
-          .status(404)
-          .json({ message: "Court not found or access denied" });
+        return res.status(404).json({
+          message: "Court not found or access denied"
+        });
       }
 
-      // Save photos to database
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        await pool.execute(
-          `INSERT INTO court_images (court_id, image_url, is_primary, uploaded_at)
-           VALUES (?, ?, ?, NOW())`,
-          [court_id, `/uploads/courts/${file.filename}`, i === 0]
+      const court = courtCheck[0];
+      const connection = await pool.getConnection();
+
+      console.log('5. Starting transaction...');
+      await connection.beginTransaction();
+
+      try {
+        // Check existing primary image
+        const [existingPrimary] = await connection.execute(
+          "SELECT image_id FROM court_images WHERE court_id = ? AND is_primary = TRUE",
+          [court_id]
         );
+
+        console.log('6. Existing primary images:', existingPrimary.length);
+
+        // Save photos to database
+        const uploadedImages = [];
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const image_url = file.path; // Cloudinary URL
+          const cloudinary_id = file.filename; // Cloudinary public_id
+
+          console.log(`7. Saving file ${i} to DB:`, {
+            image_url,
+            cloudinary_id,
+            size: file.size
+          });
+
+          // Set first image as primary if no primary exists
+          const is_primary = (existingPrimary.length === 0 && i === 0);
+
+          const [result] = await connection.execute(
+            `INSERT INTO court_images (court_id, image_url, cloudinary_id, is_primary, uploaded_at)
+           VALUES (?, ?, ?, ?, NOW())`,
+            [court_id, image_url, cloudinary_id, is_primary]
+          );
+
+          console.log(`8. File ${i} saved with ID:`, result.insertId);
+
+          uploadedImages.push({
+            image_id: result.insertId,
+            image_url,
+            cloudinary_id,
+            is_primary,
+            court_id,
+            court_name: court.court_name
+          });
+        }
+
+        await connection.commit();
+        console.log('9. Transaction committed');
+
+        // Log success
+        console.log(`✅ Uploaded ${files.length} photos for court ${court_id} (${court.court_name})`);
+
+        res.json({
+          message: "Court photos uploaded successfully",
+          count: files.length,
+          court: {
+            court_id: court.court_id,
+            court_name: court.court_name
+          },
+          images: uploadedImages
+        });
+
+      } catch (error) {
+        await connection.rollback();
+        console.error("❌ Database error:", error);
+        throw error;
+      } finally {
+        connection.release();
+      }
+    } catch (error) {
+      console.error("❌ Court photo upload error:", error);
+      res.status(500).json({
+        message: "Server error",
+        error: error.message,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      });
+    }
+  },
+  // Get arena images
+  getArenaImages: async (req, res) => {
+    try {
+      const { arena_id } = req.params;
+
+      // Verify owner owns this arena
+      const [arenaCheck] = await pool.execute(
+        "SELECT arena_id FROM arenas WHERE arena_id = ? AND owner_id = ?",
+        [arena_id, req.user.id]
+      );
+
+      if (arenaCheck.length === 0) {
+        return res.status(404).json({
+          message: "Arena not found or access denied"
+        });
       }
 
-      res.json({
-        message: "Court photos uploaded successfully",
-        count: files.length,
-        files: files.map((f) => f.filename),
-      });
+      const [images] = await pool.execute(
+        "SELECT * FROM arena_images WHERE arena_id = ? ORDER BY is_primary DESC, uploaded_at DESC",
+        [arena_id]
+      );
+
+      res.json({ images });
     } catch (error) {
-      console.error("Court photo upload error:", error);
+      console.error("Error getting arena images:", error);
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
 
-  // Get owner dashboard data
-  // Get owner dashboard data
+  // Get court images
+  getCourtImages: async (req, res) => {
+    try {
+      const { court_id } = req.params;
+
+      // Verify court belongs to owner
+      const [courtCheck] = await pool.execute(
+        `SELECT cd.court_id FROM court_details cd
+       JOIN arenas a ON cd.arena_id = a.arena_id
+       WHERE cd.court_id = ? AND a.owner_id = ?`,
+        [court_id, req.user.id]
+      );
+
+      if (courtCheck.length === 0) {
+        return res.status(404).json({
+          message: "Court not found or access denied"
+        });
+      }
+
+      const [images] = await pool.execute(
+        "SELECT * FROM court_images WHERE court_id = ? ORDER BY is_primary DESC, uploaded_at DESC",
+        [court_id]
+      );
+
+      res.json({ images });
+    } catch (error) {
+      console.error("Error getting court images:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+
+  // Delete court photo
+  deleteCourtPhoto: async (req, res) => {
+    try {
+      const { court_id } = req.params;
+      const { image_url } = req.body;
+
+      // Verify court belongs to owner
+      const [courtCheck] = await pool.execute(
+        `SELECT cd.court_id FROM court_details cd
+       JOIN arenas a ON cd.arena_id = a.arena_id
+       WHERE cd.court_id = ? AND a.owner_id = ?`,
+        [court_id, req.user.id]
+      );
+
+      if (courtCheck.length === 0) {
+        return res.status(404).json({
+          message: "Court not found or access denied"
+        });
+      }
+
+      // Delete from database
+      await pool.execute(
+        "DELETE FROM court_images WHERE court_id = ? AND image_url = ?",
+        [court_id, image_url]
+      );
+
+      // If we deleted the primary photo, set a new primary if available
+      const [remainingPhotos] = await pool.execute(
+        "SELECT image_id FROM court_images WHERE court_id = ? ORDER BY uploaded_at LIMIT 1",
+        [court_id]
+      );
+
+      if (remainingPhotos.length > 0) {
+        await pool.execute(
+          "UPDATE court_images SET is_primary = TRUE WHERE image_id = ?",
+          [remainingPhotos[0].image_id]
+        );
+      }
+
+      res.json({ message: "Photo deleted successfully" });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+
   getDashboard: async (req, res) => {
     try {
       const owner_id = req.user.id;
@@ -509,29 +735,30 @@ const ownerController = {
       const ownerId = req.user.id;
 
       let query = `
-        SELECT 
-          b.booking_id,
-          b.status,
-          b.total_amount,
-          b.commission_amount,
-          b.booking_date,
-          b.payment_status,
-          u.name as user_name,
-          u.email as user_email,
-          u.phone_number as user_phone,
-          st.name as sport_name,
-          a.name as arena_name,
-          ts.date,
-          ts.start_time,
-          ts.end_time,
-          DATEDIFF(ts.date, CURDATE()) as days_until
-        FROM bookings b
-        JOIN users u ON b.user_id = u.user_id
-        JOIN sports_types st ON b.sport_id = st.sport_id
-        JOIN time_slots ts ON b.slot_id = ts.slot_id
-        JOIN arenas a ON b.arena_id = a.arena_id
-        WHERE a.owner_id = ?
-      `;
+      SELECT 
+        b.booking_id,
+        b.status,
+        b.total_amount,
+        b.commission_amount,
+        b.booking_date,
+        b.payment_status,
+        u.name as user_name,
+        u.email as user_email,
+        u.phone_number as user_phone,
+        st.name as sport_name,
+        a.name as arena_name,
+        ts.date,
+        ts.start_time,
+        ts.end_time,
+        DATEDIFF(ts.date, CURDATE()) as days_until,
+        TIMESTAMP(ts.date, ts.end_time) as slot_end_datetime
+      FROM bookings b
+      JOIN users u ON b.user_id = u.user_id
+      JOIN sports_types st ON b.sport_id = st.sport_id
+      JOIN time_slots ts ON b.slot_id = ts.slot_id
+      JOIN arenas a ON b.arena_id = a.arena_id
+      WHERE a.owner_id = ?
+    `;
 
       const params = [ownerId];
 
@@ -540,11 +767,14 @@ const ownerController = {
         params.push(status);
       }
 
-      // Filter by booking type
+      // Filter by booking type - MODIFIED THIS SECTION
       if (type === "upcoming") {
-        query += " AND ts.date >= CURDATE() AND b.status IN ('accepted', 'pending')";
+        query += " AND b.status IN ('accepted', 'pending')"; // Keep even if time has passed
       } else if (type === "past") {
-        query += " AND (ts.date < CURDATE() OR b.status IN ('completed', 'cancelled', 'rejected'))";
+        query += " AND b.status IN ('completed', 'cancelled', 'rejected')";
+      } else if (type === "history") {
+        // Show all except pending/accepted (these are in upcoming)
+        query += " AND b.status IN ('completed', 'cancelled', 'rejected')";
       }
 
       if (date_from) {
@@ -823,15 +1053,13 @@ const ownerController = {
         const arena_id = arenaResult.insertId;
 
         // Add sports
-        if (sports && sports.length > 0) {
-          for (const sport of sports) {
+        if (sports.length > 0) {
+          // Add arena sports WITHOUT price
+          for (const sport_id of sports) {
             await connection.execute(
-              "INSERT INTO arena_sports (arena_id, sport_id, price_per_hour) VALUES (?, ?, ?)",
-              [
-                arena_id,
-                sport.sport_id,
-                sport.price_per_hour || base_price_per_hour,
-              ]
+              `INSERT INTO arena_sports (arena_id, sport_id)
+       VALUES (?, ?)`,
+              [arena_id, sport_id]
             );
           }
         }
@@ -1118,47 +1346,75 @@ const ownerController = {
   },
 
   // Delete court photo
+  // Add this function to ownerController.js
   deleteCourtPhoto: async (req, res) => {
     try {
-      const { court_id } = req.params;
-      const { photo_path } = req.body;
+      const { court_id, photo_id } = req.params;
 
       // Verify court belongs to owner's arena
       const [courtCheck] = await pool.execute(
         `SELECT cd.court_id FROM court_details cd
-         JOIN arenas a ON cd.arena_id = a.arena_id
-         WHERE cd.court_id = ? AND a.owner_id = ?`,
+       JOIN arenas a ON cd.arena_id = a.arena_id
+       WHERE cd.court_id = ? AND a.owner_id = ?`,
         [court_id, req.user.id]
       );
 
       if (courtCheck.length === 0) {
-        return res
-          .status(404)
-          .json({ message: "Court not found or access denied" });
+        return res.status(404).json({
+          message: "Court not found or access denied"
+        });
       }
 
-      // Delete the photo
+      // Get photo details before deletion
+      const [photoDetails] = await pool.execute(
+        "SELECT image_url, cloudinary_id, is_primary FROM court_images WHERE image_id = ? AND court_id = ?",
+        [photo_id, court_id]
+      );
+
+      if (photoDetails.length === 0) {
+        return res.status(404).json({ message: "Photo not found" });
+      }
+
+      const photo = photoDetails[0];
+
+      // Delete from database
       await pool.execute(
-        "DELETE FROM court_images WHERE court_id = ? AND image_url = ?",
-        [court_id, photo_path]
+        "DELETE FROM court_images WHERE image_id = ? AND court_id = ?",
+        [photo_id, court_id]
       );
 
       // If we deleted the primary photo, set a new primary if available
-      const [remainingPhotos] = await pool.execute(
-        "SELECT image_id FROM court_images WHERE court_id = ? ORDER BY uploaded_at LIMIT 1",
-        [court_id]
-      );
-
-      if (remainingPhotos.length > 0) {
-        await pool.execute(
-          "UPDATE court_images SET is_primary = TRUE WHERE image_id = ?",
-          [remainingPhotos[0].image_id]
+      if (photo.is_primary) {
+        const [remainingPhotos] = await pool.execute(
+          "SELECT image_id FROM court_images WHERE court_id = ? ORDER BY uploaded_at LIMIT 1",
+          [court_id]
         );
+
+        if (remainingPhotos.length > 0) {
+          await pool.execute(
+            "UPDATE court_images SET is_primary = TRUE WHERE image_id = ?",
+            [remainingPhotos[0].image_id]
+          );
+        }
       }
 
-      res.json({ message: "Photo deleted successfully" });
+      // Optionally delete from Cloudinary
+      if (photo.cloudinary_id && process.env.CLOUDINARY_CLOUD_NAME) {
+        try {
+          const cloudinary = require('cloudinary').v2;
+          await cloudinary.uploader.destroy(photo.cloudinary_id);
+          console.log(`Deleted from Cloudinary: ${photo.cloudinary_id}`);
+        } catch (cloudinaryError) {
+          console.warn("Could not delete from Cloudinary:", cloudinaryError.message);
+        }
+      }
+
+      res.json({
+        message: "Photo deleted successfully",
+        deleted_photo: photo
+      });
     } catch (error) {
-      console.error(error);
+      console.error("Error deleting court photo:", error);
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
@@ -1861,31 +2117,33 @@ const ownerController = {
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
-};
 
-cleanupExpiredLocks: async (req, res) => {
-  try {
-    // Only allow admins or the system to call this
-    if (req.user && req.user.role !== 'admin') {
-      return res.status(403).json({ message: "Access denied" });
-    }
 
-    const [result] = await pool.execute(
-      `UPDATE time_slots 
+  cleanupExpiredLocks: async (req, res) => {
+    try {
+      // Only allow admins or the system to call this
+      if (req.user && req.user.role !== 'admin') {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const [result] = await pool.execute(
+        `UPDATE time_slots 
        SET locked_until = NULL,
            locked_by_user_id = NULL
        WHERE locked_until IS NOT NULL 
          AND locked_until <= NOW()`
-    );
+      );
 
-    res.json({
-      message: `Cleaned up ${result.affectedRows} expired locks`,
-      affected_rows: result.affectedRows,
-      timestamp: new Date()
-    });
-  } catch (error) {
-    console.error("Error cleaning up expired locks:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+      res.json({
+        message: `Cleaned up ${result.affectedRows} expired locks`,
+        affected_rows: result.affectedRows,
+        timestamp: new Date()
+      });
+    } catch (error) {
+      console.error("Error cleaning up expired locks:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
   }
-}
+
+};
 module.exports = ownerController;

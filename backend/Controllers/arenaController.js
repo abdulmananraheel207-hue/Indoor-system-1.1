@@ -279,6 +279,8 @@ const arenaController = {
     }
   },
 
+
+
   // Get arena reviews
   getArenaReviews: async (req, res) => {
     try {
@@ -432,11 +434,14 @@ const arenaController = {
     }
   },
 
-  // Get arena details by ID
+
   getArenaDetails: async (req, res) => {
     try {
       const { arena_id } = req.params;
 
+      console.log("Fetching details for arena:", arena_id);
+
+      // Get basic arena info
       const [arenas] = await pool.execute(
         "SELECT * FROM arenas WHERE arena_id = ? AND is_active = 1 AND is_blocked = 0",
         [arena_id]
@@ -448,51 +453,193 @@ const arenaController = {
 
       const arena = arenas[0];
 
-      // Fetch courts with their sports and primary image
+      // 1. Get courts with their sports
       const [courts] = await pool.execute(
-        `SELECT cd.*, 
-                GROUP_CONCAT(DISTINCT st.sport_id) as sport_ids,
-                GROUP_CONCAT(DISTINCT st.name) as sports,
-                (SELECT image_url FROM court_images WHERE court_id = cd.court_id AND is_primary = TRUE LIMIT 1) as primary_image
-         FROM court_details cd
-         LEFT JOIN court_sports cs ON cd.court_id = cs.court_id
-         LEFT JOIN sports_types st ON cs.sport_id = st.sport_id
-         WHERE cd.arena_id = ?
-         GROUP BY cd.court_id
-         ORDER BY cd.court_number`,
+        `SELECT 
+        cd.*,
+        GROUP_CONCAT(DISTINCT st.sport_id) as sport_ids,
+        GROUP_CONCAT(DISTINCT st.name) as sports_names,
+        GROUP_CONCAT(DISTINCT st.name) as sports,
+        (SELECT image_url FROM court_images WHERE court_id = cd.court_id AND is_primary = TRUE LIMIT 1) as primary_image
+       FROM court_details cd
+       LEFT JOIN court_sports cs ON cd.court_id = cs.court_id
+       LEFT JOIN sports_types st ON cs.sport_id = st.sport_id
+       WHERE cd.arena_id = ?
+       GROUP BY cd.court_id
+       ORDER BY cd.court_number`,
         [arena_id]
       );
 
-      // Normalize sports list for arena: distinct sports from courts and time_slots
-      const [sportsFromCourts] = await pool.execute(
-        `SELECT DISTINCT st.sport_id, st.name
-         FROM sports_types st
-         JOIN court_sports cs ON st.sport_id = cs.sport_id
-         JOIN court_details cd ON cs.court_id = cd.court_id
-         WHERE cd.arena_id = ?`,
+      // Format courts data
+      const formattedCourts = courts.map(court => ({
+        ...court,
+        sport_ids: court.sport_ids ? court.sport_ids.split(',').map(Number) : [],
+        sports: court.sports_names ? court.sports_names.split(',') : [],
+        sports_names: court.sports_names ? court.sports_names.split(',') : []
+      }));
+
+      // 2. Get sports available at this arena (from arena_sports table)
+      const [arenaSports] = await pool.execute(
+        `SELECT DISTINCT st.* 
+       FROM sports_types st
+       JOIN arena_sports ars ON st.sport_id = ars.sport_id
+       WHERE ars.arena_id = ?
+       ORDER BY st.name`,
         [arena_id]
       );
 
-      // Fallback: if no court sports, look for sports in time_slots
-      let sports = sportsFromCourts;
-      if (!sports || sports.length === 0) {
-        const [sportsFromSlots] = await pool.execute(
-          `SELECT DISTINCT st.sport_id, st.name
-           FROM sports_types st
-           JOIN time_slots ts ON st.sport_id = ts.sport_id
-           WHERE ts.arena_id = ?`,
-          [arena_id]
-        );
-        sports = sportsFromSlots;
-      }
+      // 3. Get sports from all courts in this arena
+      const [courtSports] = await pool.execute(
+        `SELECT DISTINCT st.* 
+       FROM sports_types st
+       JOIN court_sports cs ON st.sport_id = cs.sport_id
+       JOIN court_details cd ON cs.court_id = cd.court_id
+       WHERE cd.arena_id = ?
+       ORDER BY st.name`,
+        [arena_id]
+      );
 
-      res.json({ ...arena, courts, sports });
+      // 4. Combine and deduplicate sports
+      const allSports = [...arenaSports, ...courtSports];
+      const sportsMap = new Map();
+
+      allSports.forEach(sport => {
+        const key = sport.sport_id || sport.id;
+        if (!sportsMap.has(key)) {
+          sportsMap.set(key, {
+            sport_id: sport.sport_id || sport.id,
+            name: sport.name || sport.sport_name,
+            icon_url: sport.icon_url
+          });
+        }
+      });
+
+      const uniqueSports = Array.from(sportsMap.values());
+      const sportsList = uniqueSports.map(sport => sport.name);
+
+      // 5. Get arena images
+      const [images] = await pool.execute(
+        "SELECT * FROM arena_images WHERE arena_id = ? ORDER BY is_primary DESC",
+        [arena_id]
+      );
+
+      // 6. Get reviews count and average rating
+      const [reviewStats] = await pool.execute(
+        `SELECT 
+        COUNT(*) as total_reviews,
+        AVG(rating) as avg_rating
+       FROM arena_reviews 
+       WHERE arena_id = ?`,
+        [arena_id]
+      );
+
+      console.log("Arena details fetched:", {
+        arenaId: arena_id,
+        courtsCount: formattedCourts.length,
+        sportsCount: uniqueSports.length,
+        imagesCount: images.length
+      });
+
+      res.json({
+        ...arena,
+        courts: formattedCourts,
+        sports: uniqueSports, // Array of sport objects with id and name
+        sports_list: sportsList, // Simple array of sport names for easy display
+        images: images,
+        total_reviews: reviewStats[0]?.total_reviews || 0,
+        avg_rating: reviewStats[0]?.avg_rating || 0,
+        rating: reviewStats[0]?.avg_rating || arena.rating || 0
+      });
+
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Server error", error: error.message });
+      console.error("Error in getArenaDetails:", error);
+      res.status(500).json({
+        message: "Server error",
+        error: error.message,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      });
     }
   },
 
+  // Get sports for a specific arena
+  getArenaSports: async (req, res) => {
+    try {
+      const { arena_id } = req.params;
+
+      console.log("Fetching sports for arena:", arena_id);
+
+      // Query to get sports for this arena from arena_sports table
+      const [sports] = await pool.execute(`
+      SELECT DISTINCT st.* 
+      FROM sports_types st
+      JOIN arena_sports ars ON st.sport_id = ars.sport_id
+      WHERE ars.arena_id = ?
+      ORDER BY st.name
+    `, [arena_id]);
+
+      console.log("Found sports:", sports.length);
+
+      // If no sports in arena_sports, check court_sports
+      if (sports.length === 0) {
+        const [courtSports] = await pool.execute(`
+        SELECT DISTINCT st.* 
+        FROM sports_types st
+        JOIN court_sports cs ON st.sport_id = cs.sport_id
+        JOIN court_details cd ON cs.court_id = cd.court_id
+        WHERE cd.arena_id = ?
+        ORDER BY st.name
+      `, [arena_id]);
+
+        res.json({ sports: courtSports });
+      } else {
+        res.json({ sports });
+      }
+    } catch (error) {
+      console.error("Error fetching arena sports:", error);
+      res.status(500).json({
+        message: "Server error",
+        error: error.message,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      });
+    }
+  },
+
+  // Get sports available for a specific arena
+  getAvailableSportsForArena: async (req, res) => {
+    try {
+      const { arena_id } = req.params;
+
+      // Get sports from arena_sports
+      const [arenaSports] = await pool.execute(`
+      SELECT st.* 
+      FROM sports_types st
+      JOIN arena_sports ars ON st.sport_id = ars.sport_id
+      WHERE ars.arena_id = ?
+    `, [arena_id]);
+
+      // Get sports from court_sports
+      const [courtSports] = await pool.execute(`
+      SELECT DISTINCT st.* 
+      FROM sports_types st
+      JOIN court_sports cs ON st.sport_id = cs.sport_id
+      JOIN court_details cd ON cs.court_id = cd.court_id
+      WHERE cd.arena_id = ?
+    `, [arena_id]);
+
+      // Combine and deduplicate
+      const allSports = [...arenaSports, ...courtSports];
+      const uniqueSports = allSports.filter((sport, index, self) =>
+        index === self.findIndex(s =>
+          s.sport_id === sport.sport_id || s.name === sport.name
+        )
+      );
+
+      res.json({ sports: uniqueSports });
+    } catch (error) {
+      console.error("Error fetching available sports:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
   // Search arenas
   searchArenas: async (req, res) => {
     try {

@@ -2,6 +2,36 @@ const bcrypt = require("bcryptjs");
 const pool = require("../db");
 
 const userController = {
+  // In userController.js - uploadProfilePicture function
+  uploadProfilePicture: async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: 'No file uploaded' });
+      }
+
+      const user_id = req.user.id;
+
+      // Cloudinary returns secure_url in req.file
+      const profilePictureUrl = req.file.path; // This is the Cloudinary URL
+
+      console.log('Uploaded to Cloudinary:', profilePictureUrl);
+
+      // Update user profile picture in database
+      await pool.execute(
+        'UPDATE users SET profile_picture_url = ? WHERE user_id = ?',
+        [profilePictureUrl, user_id]
+      );
+
+      res.json({
+        message: 'Profile picture uploaded successfully',
+        image_url: profilePictureUrl
+      });
+    } catch (error) {
+      console.error('Profile picture upload error:', error);
+      res.status(500).json({ message: 'Server error', error: error.message });
+    }
+  },
+
   // Get user profile
   getProfile: async (req, res) => {
     try {

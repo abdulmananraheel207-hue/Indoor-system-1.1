@@ -12,6 +12,10 @@ router.get("/:arena_id", arenaController.getArenaDetails);
 router.get("/:arena_id/slots", arenaController.getAvailableSlots);
 router.get("/:arena_id/reviews", arenaController.getArenaReviews);
 router.get("/:arena_id/courts", arenaController.getCourtDetails);
+// Add this endpoint for getting sports for a specific arena
+router.get("/:arena_id/sports", arenaController.getArenaSports); // NEW LINE
+// Add this route
+router.get("/:arena_id/available-sports", arenaController.getAvailableSportsForArena);
 
 // Protected routes
 router.use(auth.verifyToken);
