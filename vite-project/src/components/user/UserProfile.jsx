@@ -78,37 +78,41 @@ const UserProfile = () => {
           <nav className="-mb-px flex space-x-8">
             <button
               onClick={() => setActiveTab("profile")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === "profile"
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === "profile"
                   ? "border-primary-500 text-primary-600"
                   : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                }`}
+              }`}
             >
               Profile Info
             </button>
             <button
               onClick={() => setActiveTab("payment")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === "payment"
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === "payment"
                   ? "border-primary-500 text-primary-600"
                   : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                }`}
+              }`}
             >
               Payment Methods
             </button>
             <button
               onClick={() => setActiveTab("favorites")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === "favorites"
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === "favorites"
                   ? "border-primary-500 text-primary-600"
                   : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                }`}
+              }`}
             >
               Favorite Arenas
             </button>
             <button
               onClick={() => setActiveTab("support")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === "support"
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === "support"
                   ? "border-primary-500 text-primary-600"
                   : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                }`}
+              }`}
             >
               Help & Support
             </button>

@@ -6,9 +6,6 @@
 
 import { userAPI, ownerAPI, bookingAPI, arenaAPI, reviewAPI } from "./api";
 
-
-
-
 export const integrationService = {
   // ===== PHOTO UPLOAD SERVICES =====
 
@@ -17,27 +14,27 @@ export const integrationService = {
    */
   uploadArenaPhotos: async (arenaId, formData) => {
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem("token");
       const response = await fetch(
         `http://localhost:5000/api/owners/arenas/${arenaId}/photos`,
         {
-          method: 'POST',
+          method: "POST",
           headers: {
-            'Authorization': `Bearer ${token}`
+            Authorization: `Bearer ${token}`,
             // Note: Don't set Content-Type for FormData
           },
-          body: formData
+          body: formData,
         }
       );
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to upload arena photos');
+        throw new Error(errorData.message || "Failed to upload arena photos");
       }
 
       return await response.json();
     } catch (error) {
-      console.error('Error uploading arena photos:', error);
+      console.error("Error uploading arena photos:", error);
       throw error;
     }
   },
@@ -47,26 +44,26 @@ export const integrationService = {
    */
   uploadCourtPhotos: async (courtId, formData) => {
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem("token");
       const response = await fetch(
         `http://localhost:5000/api/owners/courts/${courtId}/photos`,
         {
-          method: 'POST',
+          method: "POST",
           headers: {
-            'Authorization': `Bearer ${token}`
+            Authorization: `Bearer ${token}`,
           },
-          body: formData
+          body: formData,
         }
       );
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to upload court photos');
+        throw new Error(errorData.message || "Failed to upload court photos");
       }
 
       return await response.json();
     } catch (error) {
-      console.error('Error uploading court photos:', error);
+      console.error("Error uploading court photos:", error);
       throw error;
     }
   },
@@ -76,26 +73,28 @@ export const integrationService = {
    */
   uploadProfilePicture: async (formData) => {
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem("token");
       const response = await fetch(
-        'http://localhost:5000/api/users/profile/picture',
+        "http://localhost:5000/api/users/profile/picture",
         {
-          method: 'POST',
+          method: "POST",
           headers: {
-            'Authorization': `Bearer ${token}`
+            Authorization: `Bearer ${token}`,
           },
-          body: formData
+          body: formData,
         }
       );
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to upload profile picture');
+        throw new Error(
+          errorData.message || "Failed to upload profile picture"
+        );
       }
 
       return await response.json();
     } catch (error) {
-      console.error('Error uploading profile picture:', error);
+      console.error("Error uploading profile picture:", error);
       throw error;
     }
   },
@@ -105,24 +104,24 @@ export const integrationService = {
    */
   getArenaImages: async (arenaId) => {
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem("token");
       const response = await fetch(
         `http://localhost:5000/api/owners/arenas/${arenaId}/images`,
         {
           headers: {
-            'Authorization': `Bearer ${token}`
-          }
+            Authorization: `Bearer ${token}`,
+          },
         }
       );
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to get arena images');
+        throw new Error(errorData.message || "Failed to get arena images");
       }
 
       return await response.json();
     } catch (error) {
-      console.error('Error getting arena images:', error);
+      console.error("Error getting arena images:", error);
       throw error;
     }
   },
@@ -132,24 +131,24 @@ export const integrationService = {
    */
   getCourtImages: async (courtId) => {
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem("token");
       const response = await fetch(
         `http://localhost:5000/api/owners/courts/${courtId}/images`,
         {
           headers: {
-            'Authorization': `Bearer ${token}`
-          }
+            Authorization: `Bearer ${token}`,
+          },
         }
       );
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to get court images');
+        throw new Error(errorData.message || "Failed to get court images");
       }
 
       return await response.json();
     } catch (error) {
-      console.error('Error getting court images:', error);
+      console.error("Error getting court images:", error);
       throw error;
     }
   },
@@ -158,31 +157,31 @@ export const integrationService = {
    * Delete court photo (Owner)
    */
   /**
- * Delete court photo (Owner) - UPDATED
- */
+   * Delete court photo (Owner) - UPDATED
+   */
   deleteCourtPhoto: async (courtId, photoId) => {
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem("token");
       const response = await fetch(
         `http://localhost:5000/api/owners/courts/${courtId}/photos/${photoId}`,
         {
-          method: 'DELETE',
+          method: "DELETE",
           headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
           // Note: No body needed when using URL parameter
         }
       );
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to delete photo');
+        throw new Error(errorData.message || "Failed to delete photo");
       }
 
       return await response.json();
     } catch (error) {
-      console.error('Error deleting court photo:', error);
+      console.error("Error deleting court photo:", error);
       throw error;
     }
   },
@@ -192,27 +191,27 @@ export const integrationService = {
    */
   deleteCourtPhotoByUrl: async (courtId, imageUrl) => {
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem("token");
       const response = await fetch(
         `http://localhost:5000/api/owners/courts/${courtId}/photos/delete`,
         {
-          method: 'DELETE',
+          method: "DELETE",
           headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
           },
-          body: JSON.stringify({ photo_path: imageUrl })
+          body: JSON.stringify({ photo_path: imageUrl }),
         }
       );
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to delete photo');
+        throw new Error(errorData.message || "Failed to delete photo");
       }
 
       return await response.json();
     } catch (error) {
-      console.error('Error deleting court photo:', error);
+      console.error("Error deleting court photo:", error);
       throw error;
     }
   },
@@ -222,26 +221,26 @@ export const integrationService = {
    */
   setPrimaryArenaImage: async (arenaId, imageId) => {
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem("token");
       const response = await fetch(
         `http://localhost:5000/api/owners/arenas/${arenaId}/images/${imageId}/set-primary`,
         {
-          method: 'PUT',
+          method: "PUT",
           headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
         }
       );
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to set primary image');
+        throw new Error(errorData.message || "Failed to set primary image");
       }
 
       return await response.json();
     } catch (error) {
-      console.error('Error setting primary arena image:', error);
+      console.error("Error setting primary arena image:", error);
       throw error;
     }
   },
@@ -249,17 +248,17 @@ export const integrationService = {
   // ===== USER PROFILE METHODS =====
   getProfile: async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:5000/api/user/profile', {
-        method: 'GET',
+      const token = localStorage.getItem("token");
+      const response = await fetch("http://localhost:5000/api/user/profile", {
+        method: "GET",
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
       });
 
       if (!response.ok) {
-        throw new Error('Failed to fetch profile');
+        throw new Error("Failed to fetch profile");
       }
 
       return await response.json();
@@ -271,18 +270,21 @@ export const integrationService = {
 
   updateProfile: async (profileData) => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:5000/api/user/update-profile', {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(profileData)
-      });
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        "http://localhost:5000/api/user/update-profile",
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(profileData),
+        }
+      );
 
       if (!response.ok) {
-        throw new Error('Failed to update profile');
+        throw new Error("Failed to update profile");
       }
 
       return await response.json();
@@ -294,39 +296,93 @@ export const integrationService = {
 
   getFavoriteArenas: async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:5000/api/user/favorites', {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch favorites');
+      const token = localStorage.getItem("token");
+      if (!token) {
+        console.warn("No token found");
+        return [];
       }
 
-      return await response.json();
+      const response = await fetch(
+        "http://localhost:5000/api/users/favorites",
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (!response.ok) {
+        // Try alternative endpoint
+        const altResponse = await fetch(
+          "http://localhost:5000/api/user/favorites",
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          }
+        );
+
+        if (!altResponse.ok) {
+          console.log("Both endpoints failed, returning empty array");
+          return [];
+        }
+
+        const favorites = await altResponse.json();
+        return favorites.map((favorite) => ({
+          ...favorite,
+          id: favorite.arena_id,
+          arenaId: favorite.arena_id,
+        }));
+      }
+
+      const favorites = await response.json();
+      return favorites.map((favorite) => ({
+        ...favorite,
+        id: favorite.arena_id,
+        arenaId: favorite.arena_id,
+      }));
     } catch (error) {
       console.error("Error fetching favorites:", error);
-      throw error;
+      return [];
     }
   },
 
   removeFromFavorites: async (arenaId) => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:5000/api/user/favorites/${arenaId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        `http://localhost:5000/api/users/arenas/${arenaId}/favorite`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
         }
-      });
+      );
 
       if (!response.ok) {
-        throw new Error('Failed to remove favorite');
+        // Try alternative endpoint if first fails
+        const altResponse = await fetch(
+          `http://localhost:5000/api/user/arenas/${arenaId}/favorite`,
+          {
+            method: "DELETE",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          }
+        );
+
+        if (!altResponse.ok) {
+          throw new Error("Failed to remove favorite");
+        }
+
+        return await altResponse.json();
       }
 
       return await response.json();
@@ -362,7 +418,6 @@ export const integrationService = {
     }
   },
 
-
   getArenaDetails: async (arenaId) => {
     try {
       // Fetch all data in parallel
@@ -375,8 +430,8 @@ export const integrationService = {
             .catch(() => ({ data: { reviews: [] } })),
           // Fetch sports for this arena
           fetch(`http://localhost:5000/api/arenas/${arenaId}/sports`)
-            .then(res => res.ok ? res.json() : { sports: [] })
-            .catch(() => ({ sports: [] }))
+            .then((res) => (res.ok ? res.json() : { sports: [] }))
+            .catch(() => ({ sports: [] })),
         ]);
 
       // Transform court data to include sports
@@ -398,15 +453,17 @@ export const integrationService = {
       return {
         arena: {
           ...arenaResponse.data,
-          sports: arenaSports
+          sports: arenaSports,
         },
-        courts: courts.map(court => ({
+        courts: courts.map((court) => ({
           ...court,
           // Ensure sports is always an array
           sports: Array.isArray(court.sports) ? court.sports : [],
           sports_names: Array.isArray(court.sports_names)
             ? court.sports_names
-            : (court.sports_names ? court.sports_names.split(",") : [])
+            : court.sports_names
+            ? court.sports_names.split(",")
+            : [],
         })),
         reviews: reviewsResponse.data.reviews || [],
       };
@@ -440,7 +497,7 @@ export const integrationService = {
       // Ensure we return an array with proper structure
       return Array.isArray(response.data)
         ? response.data
-        : (response.data.sports || response.data.categories || []);
+        : response.data.sports || response.data.categories || [];
     } catch (error) {
       console.error("Error fetching sports:", error);
       // Return empty array instead of throwing to prevent page crashes
@@ -542,13 +599,13 @@ export const integrationService = {
    */
   getOwnerBookingRequests: async (filters = {}) => {
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem("token");
 
       // Build query parameters
       const queryParams = new URLSearchParams();
 
       // Add filters
-      Object.keys(filters).forEach(key => {
+      Object.keys(filters).forEach((key) => {
         if (filters[key]) {
           queryParams.append(key, filters[key]);
         }
@@ -558,8 +615,8 @@ export const integrationService = {
         `http://localhost:5000/api/owners/bookings?${queryParams.toString()}`,
         {
           headers: {
-            'Authorization': `Bearer ${token}`
-          }
+            Authorization: `Bearer ${token}`,
+          },
         }
       );
 
@@ -795,7 +852,6 @@ export const integrationService = {
    *
    */
 
-
   addToFavorites: async (arenaId) => {
     try {
       const response = await userAPI.addToFavorites(arenaId); // Correct method name
@@ -805,8 +861,6 @@ export const integrationService = {
       throw error;
     }
   },
-
-
 
   // ===== OWNER PROFILE =====
 

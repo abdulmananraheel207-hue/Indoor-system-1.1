@@ -2,7 +2,10 @@ const express = require("express");
 const router = express.Router();
 const ownerController = require("../Controllers/ownerController");
 const auth = require("../middleware/auth");
-const { uploadArenaImages, uploadCourtImages } = require("../middleware/upload"); // UPDATE THIS IMPORT
+const {
+  uploadArenaImages,
+  uploadCourtImages,
+} = require("../middleware/upload"); // UPDATE THIS IMPORT
 
 // Public registration route (no authentication required)
 router.post("/register/complete", ownerController.registerOwnerComplete);
@@ -14,30 +17,30 @@ router.post(
   ownerController.uploadArenaPhotos
 );
 
-router.post(
-  "/courts/:court_id/photos",
-  uploadCourtImages, // Use the Cloudinary middleware
-  ownerController.uploadCourtPhotos
+router.delete(
+  "/courts/:court_id/photos/:photo_id",
+  auth.verifyToken,
+  auth.isOwnerOrManager,
+  ownerController.deleteCourtPhoto
 );
 
-
 // Add this route - NO AUTH required
-router.post('/debug-upload', uploadCourtImages, (req, res) => {
-  console.log('=== DEBUG UPLOAD ===');
-  console.log('1. Request received');
-  console.log('2. Files:', req.files);
-  console.log('3. Number of files:', req.files ? req.files.length : 0);
-  console.log('4. Request body keys:', Object.keys(req.body));
-  console.log('5. Headers:', req.headers['content-type']);
+router.post("/debug-upload", uploadCourtImages, (req, res) => {
+  console.log("=== DEBUG UPLOAD ===");
+  console.log("1. Request received");
+  console.log("2. Files:", req.files);
+  console.log("3. Number of files:", req.files ? req.files.length : 0);
+  console.log("4. Request body keys:", Object.keys(req.body));
+  console.log("5. Headers:", req.headers["content-type"]);
 
   if (!req.files || req.files.length === 0) {
-    console.log('❌ NO FILES!');
+    console.log("❌ NO FILES!");
     return res.status(400).json({
-      message: 'No files received',
+      message: "No files received",
       debug: {
         filesCount: req.files ? req.files.length : 0,
-        body: req.body
-      }
+        body: req.body,
+      },
     });
   }
 
@@ -48,19 +51,19 @@ router.post('/debug-upload', uploadCourtImages, (req, res) => {
       originalname: file.originalname,
       filename: file.filename,
       path: file.path,
-      size: file.size
+      size: file.size,
     });
   });
 
   res.json({
     success: true,
-    message: 'Files received',
+    message: "Files received",
     count: req.files.length,
-    files: req.files.map(f => ({
+    files: req.files.map((f) => ({
       name: f.originalname,
       url: f.path,
-      size: f.size
-    }))
+      size: f.size,
+    })),
   });
 });
 // All other routes require owner or manager authentication
@@ -87,7 +90,8 @@ router.get("/arenas/:arena_id/courts", ownerController.getCourts);
 router.post("/arenas/:arena_id/courts", ownerController.addCourt);
 router.put("/courts/:court_id", ownerController.updateCourt);
 // Add this route to your owners.js
-router.delete('/courts/:court_id/photos/:photo_id',
+router.delete(
+  "/courts/:court_id/photos/:photo_id",
   auth.verifyToken,
   auth.isOwnerOrManager,
   ownerController.deleteCourtPhoto
@@ -114,7 +118,5 @@ router.put("/profile", ownerController.updateOwnerProfile);
 
 // === ADD CLEANUP ROUTE ===
 router.post("/cleanup/expired-locks", ownerController.cleanupExpiredLocks); // ADD THIS
-
-
 
 module.exports = router;
