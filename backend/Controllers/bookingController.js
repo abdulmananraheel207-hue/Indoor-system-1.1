@@ -34,6 +34,11 @@ const bookingController = {
         return res.status(400).json({ message: "Arena ID is required" });
       }
 
+      // Add court validation
+      // if (!courtIdNum) {
+      // return res.status(400).json({ message: "Court ID is required" });
+      //}
+
       if (
         slotIds.length === 0 &&
         !slotIdNum &&
@@ -80,23 +85,25 @@ const bookingController = {
         // Multiple slots booking
         const placeholders = slotIds.map(() => "?").join(",");
 
-        // Check all slots are available and belong to the same arena
+        // Check all slots are available and belong to the same arena and court
+        // Multiple slots booking
         const [slots] = await connection.execute(
           `SELECT ts.*, 
-                  b.booking_id as existing_booking,
-                  b.status as existing_status
-           FROM time_slots ts
-           LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
-             AND b.status IN ('pending', 'accepted', 'completed')
-           WHERE ts.slot_id IN (${placeholders})
-             AND ts.arena_id = ?`,
-          [...slotIds, arenaIdNum]
+          b.booking_id as existing_booking,
+          b.status as existing_status
+   FROM time_slots ts
+   LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
+     AND b.status IN ('pending', 'accepted', 'completed')
+   WHERE ts.slot_id IN (${placeholders})
+     AND ts.arena_id = ?
+     AND ts.court_id = ?`,
+          [...slotIds, arenaIdNum, courtIdNum || null] // Add courtIdNum
         );
-
         if (slots.length !== slotIds.length) {
           await connection.rollback();
           return res.status(400).json({
-            message: "One or more selected slots were not found for this arena",
+            message:
+              "One or more selected slots were not found for this arena and court",
           });
         }
 
@@ -114,6 +121,7 @@ const bookingController = {
               date: s.date,
               start_time: s.start_time,
               end_time: s.end_time,
+              court_id: s.court_id,
               reason: s.existing_booking
                 ? "Already booked"
                 : s.is_blocked_by_owner
@@ -135,6 +143,7 @@ const bookingController = {
               slot_id: s.slot_id,
               date: s.date,
               start_time: s.start_time,
+              court_id: s.court_id,
               reason: "Time has already passed",
             })),
           });
@@ -156,6 +165,7 @@ const bookingController = {
               date: s.date,
               start_time: s.start_time,
               end_time: s.end_time,
+              court_id: s.court_id,
             })),
           });
         }
@@ -168,18 +178,20 @@ const bookingController = {
 
           const [bookingResult] = await connection.execute(
             `INSERT INTO bookings 
-             (user_id, arena_id, slot_id, sport_id, total_amount, 
-              commission_percentage, commission_amount, payment_method, status, booking_date)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', NOW())`,
+ (user_id, arena_id, slot_id, sport_id, court_id, total_amount, 
+  commission_percentage, commission_amount, payment_method, status)
+ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
             [
               req.user.id,
               arenaIdNum,
               slot.slot_id,
               sportIdNum || slot.sport_id,
+              courtIdNum || slot.court_id,
               priceForSlot,
               commission_percentage,
               commission_amount,
               payment_method || "pay_after",
+              "pending",
             ]
           );
 
@@ -192,6 +204,7 @@ const bookingController = {
             date: slot.date,
             start_time: slot.start_time,
             end_time: slot.end_time,
+            court_id: slot.court_id,
             price: priceForSlot,
           });
 
@@ -209,19 +222,21 @@ const bookingController = {
         // Single slot booking
         const [slots] = await connection.execute(
           `SELECT ts.*, 
-                  b.booking_id as existing_booking,
-                  b.status as existing_status
-           FROM time_slots ts
-           LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
-             AND b.status IN ('pending', 'accepted', 'completed')
-           WHERE ts.slot_id = ? 
-             AND ts.arena_id = ?`,
-          [slotIdNum, arenaIdNum]
+          b.booking_id as existing_booking,
+          b.status as existing_status
+   FROM time_slots ts
+   LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
+     AND b.status IN ('pending', 'accepted', 'completed')
+   WHERE ts.slot_id = ? 
+     AND ts.arena_id = ?
+     AND ts.court_id = ?`,
+          [slotIdNum, arenaIdNum, courtIdNum || null]
         );
-
         if (slots.length === 0) {
           await connection.rollback();
-          return res.status(400).json({ message: "Time slot not available" });
+          return res.status(400).json({
+            message: "Time slot not available for this arena and court",
+          });
         }
 
         const slot = slots[0];
@@ -237,6 +252,7 @@ const bookingController = {
             slot_date: slot.date,
             start_time: slot.start_time,
             end_time: slot.end_time,
+            court_id: slot.court_id,
             reason: slot.existing_booking
               ? "Already booked"
               : slot.is_blocked_by_owner
@@ -253,6 +269,7 @@ const bookingController = {
             message: "Cannot book past time slots",
             slot_date: slot.date,
             start_time: slot.start_time,
+            court_id: slot.court_id,
             reason: "Time has already passed",
           });
         }
@@ -268,6 +285,7 @@ const bookingController = {
           return res.status(400).json({
             message: "Time slot is currently locked by another user",
             locked_until: slot.locked_until,
+            court_id: slot.court_id,
           });
         }
 
@@ -276,18 +294,20 @@ const bookingController = {
 
         const [bookingResult] = await connection.execute(
           `INSERT INTO bookings 
-           (user_id, arena_id, slot_id, sport_id, total_amount, 
-            commission_percentage, commission_amount, payment_method, status, booking_date)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', NOW())`,
+ (user_id, arena_id, slot_id, sport_id, court_id, total_amount, 
+  commission_percentage, commission_amount, payment_method, status)
+ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
           [
             req.user.id,
             arenaIdNum,
             slot.slot_id,
             sportIdNum || slot.sport_id,
+            courtIdNum || slot.court_id,
             priceForSlot,
             commission_percentage,
             commission_amount,
             payment_method || "pay_after",
+            "pending",
           ]
         );
 
@@ -300,6 +320,7 @@ const bookingController = {
           date: slot.date,
           start_time: slot.start_time,
           end_time: slot.end_time,
+          court_id: slot.court_id,
           price: priceForSlot,
         });
 
@@ -331,7 +352,8 @@ const bookingController = {
         const placeholders = bookingIds.map(() => "?").join(",");
         const [bookings] = await pool.execute(
           `SELECT b.*, a.name as arena_name, st.name as sport_name,
-                  ts.date, ts.start_time, ts.end_time, ao.arena_name as owner_name,
+                  ts.date, ts.start_time, ts.end_time, ts.court_id, 
+                  ao.arena_name as owner_name,
                   ao.owner_id, ao.email as owner_email
            FROM bookings b
            JOIN arenas a ON b.arena_id = a.arena_id
@@ -351,7 +373,7 @@ const bookingController = {
               bookingId: booking.booking_id,
               type: "booking.pending",
               title: "New booking request",
-              message: `New booking request for ${booking.date} ${booking.start_time}-${booking.end_time}`,
+              message: `New booking request for Court ${booking.court_id} on ${booking.date} ${booking.start_time}-${booking.end_time}`,
             });
           } catch (notifError) {
             console.warn("Notification error:", notifError.message);

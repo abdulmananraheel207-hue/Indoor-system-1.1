@@ -581,15 +581,23 @@ export const integrationService = {
 
   // ===== BOOKING MANAGEMENT (Owner Module) =====
 
-  getAvailableSportsForArena: async (arenaId) => {
+  getAvailableSlots: async (
+    arenaId,
+    date = null,
+    sportId = null,
+    courtId = null
+  ) => {
     try {
-      const response = await fetch(
-        `http://localhost:5000/api/arenas/${arenaId}/available-sports`
-      );
-      return await response.json();
+      const params = {};
+      if (date) params.date = date;
+      if (sportId) params.sport_id = sportId;
+      if (courtId) params.court_id = courtId; // Add court_id
+
+      const response = await arenaAPI.getAvailableSlots(arenaId, params);
+      return response.data;
     } catch (error) {
-      console.error("Error fetching available sports:", error);
-      return [];
+      console.error("Error fetching available slots:", error);
+      throw error;
     }
   },
   /**

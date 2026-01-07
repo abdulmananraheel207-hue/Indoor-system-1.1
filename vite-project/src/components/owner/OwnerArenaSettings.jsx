@@ -124,14 +124,21 @@ const OwnerArenaSettings = ({ dashboardData }) => {
     }
   };
 
-  // FIXED PHOTO UPLOAD FUNCTION
   const handlePhotoUpload = async (courtId, courtName, files) => {
     console.log("Uploading photos for court:", courtId, courtName);
+    console.log("Files to upload:", files.length);
+
     setUploadingPhotos({ ...uploadingPhotos, [courtId]: true });
 
     const formData = new FormData();
     for (let i = 0; i < files.length; i++) {
-      formData.append("court_images", files[i]);
+      formData.append("court_images", files[i]); // 🔥 Make sure fieldname matches
+      console.log(
+        `Added file ${i}:`,
+        files[i].name,
+        files[i].type,
+        files[i].size
+      );
     }
 
     try {
@@ -140,12 +147,18 @@ const OwnerArenaSettings = ({ dashboardData }) => {
         throw new Error("Please login again");
       }
 
+      console.log(
+        "Uploading to:",
+        `http://localhost:5000/api/owners/courts/${courtId}/photos`
+      );
+
       const response = await fetch(
         `http://localhost:5000/api/owners/courts/${courtId}/photos`,
         {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
+            // 🔥 NO Content-Type header for FormData
           },
           body: formData,
         }
@@ -153,6 +166,7 @@ const OwnerArenaSettings = ({ dashboardData }) => {
 
       const data = await response.json();
       console.log("Upload response:", data);
+      console.log("Response status:", response.status);
 
       if (!response.ok) {
         throw new Error(data.message || "Upload failed");

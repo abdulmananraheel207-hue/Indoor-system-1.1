@@ -233,19 +233,29 @@ const ownerController = {
             .toLowerCase();
 
           if (days_available[dayName] !== false) {
-            for (const slot of timeSlots) {
-              await connection.execute(
-                `INSERT INTO time_slots 
-                 (arena_id, sport_id, date, start_time, end_time, price, is_available)
-                 VALUES (?, NULL, ?, ?, ?, ?, TRUE)`,
-                [
-                  arena_id,
-                  dateStr,
-                  slot.start_time,
-                  slot.end_time,
-                  parseFloat(base_price_per_hour) || 500,
-                ]
-              );
+            // Get all courts for this arena
+            const [courtRows] = await connection.execute(
+              "SELECT court_id FROM court_details WHERE arena_id = ?",
+              [arena_id]
+            );
+
+            // Create time slots for EACH court
+            for (const court of courtRows) {
+              for (const slot of timeSlots) {
+                await connection.execute(
+                  `INSERT INTO time_slots 
+       (arena_id, court_id, sport_id, date, start_time, end_time, price, is_available)
+       VALUES (?, ?, NULL, ?, ?, ?, ?, TRUE)`,
+                  [
+                    arena_id,
+                    court.court_id,
+                    dateStr,
+                    slot.start_time,
+                    slot.end_time,
+                    parseFloat(base_price_per_hour) || 500,
+                  ]
+                );
+              }
             }
           }
         }
@@ -385,24 +395,118 @@ const ownerController = {
     }
   },
 
+  // Delete arena photo
+  deleteArenaPhoto: async (req, res) => {
+    try {
+      const { arena_id, image_id } = req.params;
+
+      // Verify owner owns this arena
+      const [arenaCheck] = await pool.execute(
+        "SELECT arena_id FROM arenas WHERE arena_id = ? AND owner_id = ?",
+        [arena_id, req.user.id]
+      );
+
+      if (arenaCheck.length === 0) {
+        return res.status(404).json({
+          message: "Arena not found or access denied",
+        });
+      }
+
+      // Get photo details before deletion
+      const [photoDetails] = await pool.execute(
+        "SELECT image_url, cloudinary_id, is_primary FROM arena_images WHERE image_id = ? AND arena_id = ?",
+        [image_id, arena_id]
+      );
+
+      if (photoDetails.length === 0) {
+        return res.status(404).json({ message: "Photo not found" });
+      }
+
+      const photo = photoDetails[0];
+
+      // Delete from database
+      await pool.execute(
+        "DELETE FROM arena_images WHERE image_id = ? AND arena_id = ?",
+        [image_id, arena_id]
+      );
+
+      // If we deleted the primary photo, set a new primary if available
+      if (photo.is_primary) {
+        const [remainingPhotos] = await pool.execute(
+          "SELECT image_id FROM arena_images WHERE arena_id = ? ORDER BY uploaded_at LIMIT 1",
+          [arena_id]
+        );
+
+        if (remainingPhotos.length > 0) {
+          await pool.execute(
+            "UPDATE arena_images SET is_primary = TRUE WHERE image_id = ?",
+            [remainingPhotos[0].image_id]
+          );
+        }
+      }
+
+      // Optionally delete from Cloudinary
+      if (photo.cloudinary_id && process.env.CLOUDINARY_CLOUD_NAME) {
+        try {
+          const cloudinary = require("cloudinary").v2;
+          await cloudinary.uploader.destroy(photo.cloudinary_id);
+          console.log(`Deleted from Cloudinary: ${photo.cloudinary_id}`);
+        } catch (cloudinaryError) {
+          console.warn(
+            "Could not delete from Cloudinary:",
+            cloudinaryError.message
+          );
+        }
+      }
+
+      res.json({
+        message: "Photo deleted successfully",
+        deleted_photo: photo,
+      });
+    } catch (error) {
+      console.error("Error deleting arena photo:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+
   uploadCourtPhotos: async (req, res) => {
     try {
       const { court_id } = req.params;
       const files = req.files;
 
-      console.log("=== COURT PHOTO UPLOAD START ===");
-      console.log("Court ID:", court_id);
-      console.log("User ID:", req.user.id);
-      console.log("Files received:", files ? files.length : 0);
+      console.log("=== COURT PHOTO UPLOAD DEBUG ===");
+      console.log("1. Request received for court_id:", court_id);
+      console.log("2. User ID from token:", req.user?.id);
+      console.log("3. Files received:", files ? files.length : 0);
+      console.log("4. Request params:", req.params);
+      console.log("5. Request body keys:", Object.keys(req.body || {}));
 
       if (!files || files.length === 0) {
+        console.log("❌ No files in req.files");
         return res.status(400).json({
           success: false,
           message: "No files uploaded",
+          debug: {
+            filesCount: files ? files.length : 0,
+            user: req.user?.id,
+            courtId: court_id,
+          },
         });
       }
 
+      // Log each file
+      files.forEach((file, i) => {
+        console.log(`File ${i}:`, {
+          fieldname: file.fieldname,
+          originalname: file.originalname,
+          path: file.path,
+          filename: file.filename,
+          size: file.size,
+        });
+      });
+
       // Verify court belongs to owner
+      console.log("Checking court ownership...");
       const [courtCheck] = await pool.execute(
         `SELECT cd.court_id, cd.court_name 
        FROM court_details cd
@@ -411,14 +515,27 @@ const ownerController = {
         [court_id, req.user.id]
       );
 
+      console.log(
+        "Court check result:",
+        courtCheck.length > 0 ? "Found" : "NOT FOUND"
+      );
+
       if (courtCheck.length === 0) {
+        console.log("❌ Court ownership check failed");
         return res.status(403).json({
           success: false,
           message: "Court not found or access denied",
+          debug: {
+            courtId: court_id,
+            userId: req.user?.id,
+            ownershipCheck: false,
+          },
         });
       }
 
       const court = courtCheck[0];
+      console.log("Court found:", court.court_name);
+
       const connection = await pool.getConnection();
 
       try {
@@ -429,6 +546,7 @@ const ownerController = {
           "SELECT image_id FROM court_images WHERE court_id = ? AND is_primary = TRUE",
           [court_id]
         );
+        console.log("Existing primary images:", existingPrimary.length);
 
         const uploadedImages = [];
 
@@ -436,12 +554,15 @@ const ownerController = {
         for (let i = 0; i < files.length; i++) {
           const file = files[i];
 
-          // Cloudinary provides these fields
-          const image_url = file.path; // Cloudinary URL
-          const cloudinary_id = file.filename; // Cloudinary public_id
+          const image_url = file.path;
+          const cloudinary_id = file.filename;
 
-          // Set first image as primary if no primary exists
           const is_primary = existingPrimary.length === 0 && i === 0;
+          console.log(`Saving file ${i} to DB:`, {
+            image_url,
+            cloudinary_id,
+            is_primary,
+          });
 
           const [result] = await connection.execute(
             `INSERT INTO court_images (court_id, image_url, cloudinary_id, is_primary, uploaded_at)
@@ -462,7 +583,7 @@ const ownerController = {
         await connection.commit();
 
         console.log("=== UPLOAD SUCCESS ===");
-        console.log("Uploaded images:", uploadedImages);
+        console.log("Uploaded images count:", uploadedImages.length);
 
         res.json({
           success: true,
@@ -479,10 +600,12 @@ const ownerController = {
       }
     } catch (error) {
       console.error("Court photo upload error:", error);
+      console.error("Error stack:", error.stack);
       res.status(500).json({
         success: false,
         message: "Server error",
         error: error.message,
+        stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
       });
     }
   },

@@ -24,6 +24,11 @@ router.delete(
   ownerController.deleteCourtPhoto
 );
 
+// 🔧 ADD THESE DELETE ROUTES
+router.delete(
+  "/arenas/:arena_id/images/:image_id",
+  ownerController.deleteArenaPhoto // You need to create this function
+);
 // Add this route - NO AUTH required
 router.post("/debug-upload", uploadCourtImages, (req, res) => {
   console.log("=== DEBUG UPLOAD ===");
@@ -66,6 +71,19 @@ router.post("/debug-upload", uploadCourtImages, (req, res) => {
     })),
   });
 });
+
+// 🔧 ADD THIS ROUTE FOR COURT PHOTOS
+router.post(
+  "/courts/:court_id/photos",
+  auth.verifyToken, // ✅ Add auth middleware
+  auth.isOwnerOrManager, // ✅ Add owner/manager check
+  uploadCourtImages, // ✅ Use court images upload middleware
+  ownerController.uploadCourtPhotos // ✅ Use correct controller
+);
+
+// === ADD THESE IMAGE MANAGEMENT ROUTES ===
+router.get("/arenas/:arena_id/images", ownerController.getArenaImages);
+router.get("/courts/:court_id/images", ownerController.getCourtImages);
 // All other routes require owner or manager authentication
 router.use(auth.verifyToken, auth.isOwnerOrManager);
 
