@@ -119,12 +119,18 @@ export const ownerAPI = {
     API.delete(`/owners/courts/${courtId}/photos`, { data }),
 
   // Time Slots
-  getTimeSlots: (arenaId, date) =>
-    API.get(`/arenas/${arenaId}/slots`, {
-      params: {
-        date: typeof date === "object" ? date.date : date,
-      },
-    }),
+  getTimeSlots: (arenaId, date, courtId) => {
+    const params = {
+      date: typeof date === "object" ? date.date : date,
+    };
+
+    // Add court_id to params if provided
+    if (courtId !== undefined && courtId !== null) {
+      params.court_id = courtId;
+    }
+
+    return API.get(`/owners/arenas/${arenaId}/slots`, { params });
+  },
 
   updateTimeSlots: (arenaId, data) =>
     API.put(`/owners/arenas/${arenaId}/slots`, data),

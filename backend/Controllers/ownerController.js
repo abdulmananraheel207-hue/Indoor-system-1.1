@@ -1811,7 +1811,7 @@ const ownerController = {
   getTimeSlotsForDate: async (req, res) => {
     try {
       const { arena_id } = req.params;
-      const { date } = req.query;
+      const { date, court_id } = req.query;
 
       if (!date) {
         return res.status(400).json({ message: "Date is required" });
@@ -1829,24 +1829,38 @@ const ownerController = {
           .json({ message: "Arena not found or access denied" });
       }
 
-      const [slots] = await pool.execute(
-        `SELECT ts.*, 
-                b.booking_id,
-                b.status as booking_status,
-                u.name as booked_by,
-                CASE 
-                  WHEN b.booking_id IS NOT NULL THEN FALSE
-                  WHEN ts.is_blocked_by_owner = TRUE THEN FALSE
-                  WHEN ts.is_holiday = TRUE THEN FALSE
-                  ELSE TRUE
-                END as is_available_display
-         FROM time_slots ts
-         LEFT JOIN bookings b ON ts.slot_id = b.slot_id AND b.status IN ('pending', 'accepted', 'completed')
-         LEFT JOIN users u ON b.user_id = u.user_id
-         WHERE ts.arena_id = ? AND ts.date = ?
-         ORDER BY ts.start_time`,
-        [arena_id, date]
-      );
+      // Build query based on whether court_id is provided
+      let query = `
+      SELECT ts.*, 
+        b.booking_id,
+        b.status as booking_status,
+        u.name as booked_by,
+        cd.court_number,
+        cd.court_name,
+        CASE 
+          WHEN b.booking_id IS NOT NULL THEN FALSE
+          WHEN ts.is_blocked_by_owner = TRUE THEN FALSE
+          WHEN ts.is_holiday = TRUE THEN FALSE
+          ELSE TRUE
+        END as is_available_display
+      FROM time_slots ts
+      LEFT JOIN court_details cd ON ts.court_id = cd.court_id
+      LEFT JOIN bookings b ON ts.slot_id = b.slot_id AND b.status IN ('pending', 'accepted', 'completed')
+      LEFT JOIN users u ON b.user_id = u.user_id
+      WHERE ts.arena_id = ? AND ts.date = ?
+    `;
+
+      const params = [arena_id, date];
+
+      // Filter by court_id if provided
+      if (court_id) {
+        query += " AND ts.court_id = ?";
+        params.push(court_id);
+      }
+
+      query += " ORDER BY cd.court_number, ts.start_time";
+
+      const [slots] = await pool.execute(query, params);
 
       res.json(slots);
     } catch (error) {
@@ -1861,13 +1875,14 @@ const ownerController = {
       const { arena_id } = req.params;
       const {
         date,
-        action, // 'block_all', 'unblock_all', 'holiday', 'update_slots', 'block_range'
+        action,
         slots,
         is_blocked,
         is_holiday,
         start_time,
         end_time,
         price,
+        court_id, // ADD court_id parameter
       } = req.body;
 
       // Verify owner owns this arena
@@ -1882,96 +1897,135 @@ const ownerController = {
           .json({ message: "Arena not found or access denied" });
       }
 
+      // If court_id is provided, verify it belongs to this arena
+      let validCourtId = court_id;
+      if (court_id) {
+        const [courtCheck] = await pool.execute(
+          "SELECT court_id FROM court_details WHERE court_id = ? AND arena_id = ?",
+          [court_id, arena_id]
+        );
+
+        if (courtCheck.length === 0) {
+          return res.status(400).json({
+            message: "Court does not belong to this arena",
+          });
+        }
+        validCourtId = courtCheck[0].court_id;
+      }
+
       const connection = await pool.getConnection();
       await connection.beginTransaction();
 
       try {
         if (action === "block_all") {
-          // Block all slots for the specific date
-          await connection.execute(
-            `UPDATE time_slots 
-             SET is_blocked_by_owner = TRUE,
-                 is_available = FALSE,
-                 locked_until = NULL,
-                 locked_by_user_id = NULL
-             WHERE arena_id = ? AND date = ?`,
-            [arena_id, date]
-          );
+          let query = `UPDATE time_slots 
+                     SET is_blocked_by_owner = TRUE,
+                         is_available = FALSE,
+                         locked_until = NULL,
+                         locked_by_user_id = NULL
+                     WHERE arena_id = ? AND date = ?`;
+          const params = [arena_id, date];
+
+          // Add court filter if provided
+          if (validCourtId) {
+            query += " AND court_id = ?";
+            params.push(validCourtId);
+          }
+
+          await connection.execute(query, params);
         } else if (action === "unblock_all") {
-          // Unblock all slots for the specific date
-          await connection.execute(
-            `UPDATE time_slots 
-             SET is_blocked_by_owner = FALSE,
-                 is_available = TRUE,
-                 locked_until = NULL,
-                 locked_by_user_id = NULL
-             WHERE arena_id = ? AND date = ?`,
-            [arena_id, date]
-          );
+          let query = `UPDATE time_slots 
+                     SET is_blocked_by_owner = FALSE,
+                         is_available = TRUE,
+                         locked_until = NULL,
+                         locked_by_user_id = NULL
+                     WHERE arena_id = ? AND date = ?`;
+          const params = [arena_id, date];
+
+          // Add court filter if provided
+          if (validCourtId) {
+            query += " AND court_id = ?";
+            params.push(validCourtId);
+          }
+
+          await connection.execute(query, params);
         } else if (action === "holiday") {
-          // Mark as holiday
-          await connection.execute(
-            `UPDATE time_slots 
-             SET is_holiday = TRUE,
-                 is_blocked_by_owner = TRUE,
-                 is_available = FALSE,
-                 locked_until = NULL,
-                 locked_by_user_id = NULL
-             WHERE arena_id = ? AND date = ?`,
-            [arena_id, date]
-          );
+          let query = `UPDATE time_slots 
+                     SET is_holiday = TRUE,
+                         is_blocked_by_owner = TRUE,
+                         is_available = FALSE,
+                         locked_until = NULL,
+                         locked_by_user_id = NULL
+                     WHERE arena_id = ? AND date = ?`;
+          const params = [arena_id, date];
+
+          // Add court filter if provided
+          if (validCourtId) {
+            query += " AND court_id = ?";
+            params.push(validCourtId);
+          }
+
+          await connection.execute(query, params);
         } else if (action === "unholiday") {
-          // Remove holiday status
-          await connection.execute(
-            `UPDATE time_slots 
-             SET is_holiday = FALSE,
-                 is_blocked_by_owner = FALSE,
-                 is_available = TRUE
-             WHERE arena_id = ? AND date = ?`,
-            [arena_id, date]
-          );
+          let query = `UPDATE time_slots 
+                     SET is_holiday = FALSE,
+                         is_blocked_by_owner = FALSE,
+                         is_available = TRUE
+                     WHERE arena_id = ? AND date = ?`;
+          const params = [arena_id, date];
+
+          // Add court filter if provided
+          if (validCourtId) {
+            query += " AND court_id = ?";
+            params.push(validCourtId);
+          }
+
+          await connection.execute(query, params);
         } else if (action === "block_range" && start_time && end_time) {
-          // Block specific time range
-          await connection.execute(
-            `UPDATE time_slots 
-             SET is_blocked_by_owner = TRUE,
-                 is_available = FALSE,
-                 locked_until = NULL,
-                 locked_by_user_id = NULL
-             WHERE arena_id = ? AND date = ? 
-               AND start_time >= ? AND end_time <= ?`,
-            [arena_id, date, start_time, end_time]
-          );
+          let query = `UPDATE time_slots 
+                     SET is_blocked_by_owner = TRUE,
+                         is_available = FALSE,
+                         locked_until = NULL,
+                         locked_by_user_id = NULL
+                     WHERE arena_id = ? AND date = ? 
+                       AND start_time >= ? AND end_time <= ?`;
+          const params = [arena_id, date, start_time, end_time];
+
+          // Add court filter if provided
+          if (validCourtId) {
+            query += " AND court_id = ?";
+            params.push(validCourtId);
+          }
+
+          await connection.execute(query, params);
         } else if (action === "update_slots" && slots && slots.length > 0) {
           // Update specific slots
           for (const slot of slots) {
+            // Use provided court_id or slot.court_id
+            const slotCourtId = slot.court_id || validCourtId;
+
             // First check if slot exists
             const [existingSlot] = await connection.execute(
               `SELECT slot_id FROM time_slots 
-               WHERE arena_id = ? AND date = ? AND start_time = ? AND end_time = ?`,
-              [arena_id, date, slot.start_time, slot.end_time]
+             WHERE arena_id = ? AND date = ? AND start_time = ? AND end_time = ? 
+             ${slotCourtId ? "AND court_id = ?" : ""}`,
+              slotCourtId
+                ? [arena_id, date, slot.start_time, slot.end_time, slotCourtId]
+                : [arena_id, date, slot.start_time, slot.end_time]
             );
 
             if (existingSlot.length > 0) {
               // Update existing slot
               await connection.execute(
                 `UPDATE time_slots 
-                 SET is_blocked_by_owner = ?,
-                     is_holiday = ?,
-                     price = ?,
-                     is_available = CASE 
-                       WHEN ? = TRUE THEN FALSE 
-                       WHEN b.booking_id IS NOT NULL THEN FALSE 
-                       ELSE TRUE 
-                     END
-                 FROM (SELECT 1) as dummy
-                 LEFT JOIN bookings b ON time_slots.slot_id = b.slot_id AND b.status IN ('pending', 'accepted', 'completed')
-                 WHERE time_slots.slot_id = ?`,
+               SET is_blocked_by_owner = ?,
+                   is_holiday = ?,
+                   price = ?
+               WHERE slot_id = ?`,
                 [
                   slot.is_blocked || false,
                   slot.is_holiday || false,
                   slot.price || 500,
-                  slot.is_blocked || false,
                   existingSlot[0].slot_id,
                 ]
               );
@@ -1980,11 +2034,12 @@ const ownerController = {
               const slotAvailable = !(slot.is_blocked || false);
               await connection.execute(
                 `INSERT INTO time_slots 
-                 (arena_id, date, start_time, end_time, price, 
-                  is_blocked_by_owner, is_holiday, is_available)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+               (arena_id, court_id, date, start_time, end_time, price, 
+                is_blocked_by_owner, is_holiday, is_available)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                   arena_id,
+                  slotCourtId, // Use the court_id for this slot
                   date,
                   slot.start_time,
                   slot.end_time,
@@ -1998,12 +2053,18 @@ const ownerController = {
           }
         } else if (action === "update_price" && price) {
           // Update price for all slots on this date
-          await connection.execute(
-            `UPDATE time_slots 
-             SET price = ?
-             WHERE arena_id = ? AND date = ?`,
-            [price, arena_id, date]
-          );
+          let query = `UPDATE time_slots 
+                     SET price = ?
+                     WHERE arena_id = ? AND date = ?`;
+          const params = [price, arena_id, date];
+
+          // Add court filter if provided
+          if (validCourtId) {
+            query += " AND court_id = ?";
+            params.push(validCourtId);
+          }
+
+          await connection.execute(query, params);
         }
 
         await connection.commit();
@@ -2011,6 +2072,7 @@ const ownerController = {
           message: "Time slots updated successfully",
           date: date,
           action: action,
+          court_id: validCourtId || null,
         });
       } catch (error) {
         await connection.rollback();
@@ -2023,7 +2085,6 @@ const ownerController = {
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
-
   // Get all managers
   getManagers: async (req, res) => {
     try {
