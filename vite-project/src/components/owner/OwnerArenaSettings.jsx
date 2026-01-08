@@ -244,41 +244,70 @@ const OwnerArenaSettings = ({ dashboardData }) => {
     }
   };
 
+  // Replace the existing getAllCourtPhotos function with this:
   const getAllCourtPhotos = (court) => {
     const photos = [];
 
     // Check if court has images array (from API)
     if (court.images && court.images.length > 0) {
-      court.images.forEach((img) => {
-        photos.push({
-          id: img.image_id, // Database ID
-          public_id: img.cloudinary_id, // Cloudinary public ID
-          path: img.image_url,
-          is_primary: img.is_primary || false,
-        });
-      });
-      return photos; // Return immediately if we have proper images
-    }
-
-    // Fallback to old structure if exists
-    if (court.primary_image) {
-      photos.push({
-        path: court.primary_image,
-        is_primary: true,
-      });
-    }
-
-    if (court.additional_images && court.additional_images.length > 0) {
-      court.additional_images.forEach((img) => {
-        photos.push({
-          path: img,
-          is_primary: false,
-        });
-      });
+      return court.images.map(img => ({
+        id: img.image_id,
+        public_id: img.cloudinary_id,
+        path: img.image_url,
+        is_primary: img.is_primary || false,
+      }));
     }
 
     return photos;
   };
+
+  // Update the photo display section:
+  {
+    (() => {
+      const allPhotos = getAllCourtPhotos(court);
+
+      if (allPhotos.length > 0) {
+        return (
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            {allPhotos.map((photo, index) => (
+              <div key={index} className="relative group">
+                <img
+                  src={photo.path}
+                  alt={`Court ${court.court_name} - ${index + 1}`}
+                  className="w-full h-32 object-cover rounded-xl shadow-sm border border-gray-100"
+                />
+                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition rounded-xl flex items-center justify-center opacity-0 group-hover:opacity-100">
+                  {photo.is_primary && (
+                    <span className="absolute top-2 left-2 px-2 py-1 bg-blue-600 text-white text-xs rounded">
+                      Primary
+                    </span>
+                  )}
+                  <button
+                    onClick={() => handleDeletePhoto(court.court_id, photo)}
+                    className="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      } else {
+        return (
+          <div className="bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl p-8 text-center">
+            <div className="text-gray-400 mb-4">📷</div>
+            <p className="text-sm text-gray-400 mb-2">
+              No photos available yet.
+            </p>
+            <p className="text-xs text-gray-500">
+              Click "ADD PHOTOS" to upload court images
+            </p>
+          </div>
+        );
+      }
+    })()
+  }
 
   return (
     <div className="max-w-6xl mx-auto">

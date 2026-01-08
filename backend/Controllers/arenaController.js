@@ -393,24 +393,40 @@ const arenaController = {
   },
 
   // Get court details for an arena
+  // In arenaController.js - Update getCourtDetails function
   getCourtDetails: async (req, res) => {
     try {
       const { arena_id } = req.params;
 
       const [courts] = await pool.execute(
-        `SELECT cd.*, 
-                GROUP_CONCAT(DISTINCT st.name) as sports,
-                (SELECT image_url FROM court_images WHERE court_id = cd.court_id AND is_primary = TRUE LIMIT 1) as primary_image
-         FROM court_details cd
-         LEFT JOIN court_sports cs ON cd.court_id = cs.court_id
-         LEFT JOIN sports_types st ON cs.sport_id = st.sport_id
-         WHERE cd.arena_id = ?
-         GROUP BY cd.court_id
-         ORDER BY cd.court_number`,
+        `SELECT 
+        cd.*,
+        GROUP_CONCAT(DISTINCT st.name) as sports,
+        JSON_ARRAYAGG(
+          JSON_OBJECT(
+            'image_id', ci.image_id,
+            'image_url', ci.image_url,
+            'is_primary', ci.is_primary
+          )
+        ) as images
+      FROM court_details cd
+      LEFT JOIN court_sports cs ON cd.court_id = cs.court_id
+      LEFT JOIN sports_types st ON cs.sport_id = st.sport_id
+      LEFT JOIN court_images ci ON cd.court_id = ci.court_id
+      WHERE cd.arena_id = ?
+      GROUP BY cd.court_id
+      ORDER BY cd.court_number`,
         [arena_id]
       );
 
-      res.json(courts);
+      // Parse JSON arrays
+      const formattedCourts = courts.map(court => ({
+        ...court,
+        sports: court.sports ? court.sports.split(',') : [],
+        images: court.images ? JSON.parse(court.images) : []
+      }));
+
+      res.json(formattedCourts);
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Server error", error: error.message });

@@ -578,6 +578,8 @@ const ownerController = {
     }
   },
 
+
+
   // Delete court photo
   deleteCourtPhoto: async (req, res) => {
     try {
@@ -1101,7 +1103,7 @@ const ownerController = {
     }
   },
 
-  // Get courts for an arena
+
   getCourts: async (req, res) => {
     try {
       const { arena_id } = req.params;
@@ -1121,18 +1123,24 @@ const ownerController = {
       // Get all courts with their sports and images
       const [courts] = await pool.execute(
         `SELECT 
-          cd.*,
-          GROUP_CONCAT(DISTINCT cs.sport_id) as sports,
-          GROUP_CONCAT(DISTINCT st.name) as sports_names,
-          (SELECT image_url FROM court_images WHERE court_id = cd.court_id AND is_primary = TRUE LIMIT 1) as primary_image,
-          GROUP_CONCAT(DISTINCT ci.image_url) as additional_images
-        FROM court_details cd
-        LEFT JOIN court_sports cs ON cd.court_id = cs.court_id
-        LEFT JOIN sports_types st ON cs.sport_id = st.sport_id
-        LEFT JOIN court_images ci ON cd.court_id = ci.court_id AND ci.is_primary = FALSE
-        WHERE cd.arena_id = ?
-        GROUP BY cd.court_id
-        ORDER BY cd.court_number`,
+        cd.*,
+        GROUP_CONCAT(DISTINCT cs.sport_id) as sports,
+        GROUP_CONCAT(DISTINCT st.name) as sports_names,
+        JSON_ARRAYAGG(
+          JSON_OBJECT(
+            'image_id', ci.image_id,
+            'image_url', ci.image_url,
+            'cloudinary_id', ci.cloudinary_id,
+            'is_primary', ci.is_primary
+          )
+        ) as images
+      FROM court_details cd
+      LEFT JOIN court_sports cs ON cd.court_id = cs.court_id
+      LEFT JOIN sports_types st ON cs.sport_id = st.sport_id
+      LEFT JOIN court_images ci ON cd.court_id = ci.court_id
+      WHERE cd.arena_id = ?
+      GROUP BY cd.court_id
+      ORDER BY cd.court_number`,
         [arena_id]
       );
 
@@ -1141,9 +1149,7 @@ const ownerController = {
         ...court,
         sports: court.sports ? court.sports.split(",").map(Number) : [],
         sports_names: court.sports_names ? court.sports_names.split(",") : [],
-        additional_images: court.additional_images
-          ? court.additional_images.split(",")
-          : [],
+        images: court.images ? JSON.parse(court.images) : [],
       }));
 
       res.json(formattedCourts);
@@ -1152,7 +1158,6 @@ const ownerController = {
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
-
   // Update court details
   updateCourt: async (req, res) => {
     try {
