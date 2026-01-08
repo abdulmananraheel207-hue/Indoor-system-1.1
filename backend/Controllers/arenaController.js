@@ -19,7 +19,7 @@ const arenaController = {
   getAvailableSlots: async (req, res) => {
     try {
       const arena_id = parseInt(req.params.arena_id);
-      let { date, sport_id } = req.query;
+      let { date, sport_id, court_id } = req.query;
 
       console.log(
         "Fetching slots for arena:",
@@ -27,7 +27,9 @@ const arenaController = {
         "date:",
         date,
         "sport:",
-        sport_id
+        sport_id,
+        "court:",
+        court_id
       );
 
       if (date && typeof date === "object") {
@@ -56,28 +58,35 @@ const arenaController = {
 
       // Get available slots for the specific date
       let query = `
-      SELECT 
-        ts.*, 
-        st.name as sport_name,
-        b.booking_id,
-        b.status as booking_status,
-        CASE
-          WHEN b.booking_id IS NOT NULL AND b.status IN ('pending', 'accepted', 'completed') THEN FALSE
-          WHEN ts.is_blocked_by_owner = TRUE THEN FALSE
-          WHEN ts.is_holiday = TRUE THEN FALSE
-          WHEN ts.locked_until > NOW() AND ts.locked_by_user_id IS NOT NULL THEN FALSE
-          ELSE TRUE
-        END as actually_available
-      FROM time_slots ts
-      LEFT JOIN sports_types st ON ts.sport_id = st.sport_id
-      LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
-        AND b.status IN ('pending', 'accepted', 'completed')
-      WHERE ts.arena_id = ?
-        AND ts.date = ?
+    SELECT 
+      ts.*, 
+      st.name as sport_name,
+      b.booking_id,
+      b.status as booking_status,
+      CASE
+        WHEN b.booking_id IS NOT NULL AND b.status IN ('pending', 'accepted', 'completed') THEN FALSE
+        WHEN ts.is_blocked_by_owner = TRUE THEN FALSE
+        WHEN ts.is_holiday = TRUE THEN FALSE
+        WHEN ts.locked_until > NOW() AND ts.locked_by_user_id IS NOT NULL THEN FALSE
+        ELSE TRUE
+      END as actually_available
+    FROM time_slots ts
+    LEFT JOIN sports_types st ON ts.sport_id = st.sport_id
+    LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
+      AND b.status IN ('pending', 'accepted', 'completed')
+    WHERE ts.arena_id = ?
+      AND ts.date = ?
     `;
 
       const params = [arena_id, date];
 
+      // Add court_id filter if provided
+      if (court_id) {
+        query += " AND ts.court_id = ?";
+        params.push(court_id);
+      }
+
+      // Keep existing sport_id filter
       if (sport_id) {
         query += " AND ts.sport_id = ?";
         params.push(sport_id);
@@ -125,8 +134,6 @@ const arenaController = {
       });
     }
   },
-
-  // Lock a time slot temporarily (10 minutes) - FIXED VERSION
   lockTimeSlot: async (req, res) => {
     const connection = await pool.getConnection();
     try {
@@ -135,19 +142,18 @@ const arenaController = {
 
       await connection.beginTransaction();
 
-      // Check if slot exists and is available for TODAY only
       const [slots] = await connection.execute(
         `SELECT ts.*, 
-                b.booking_id,
-                b.status as booking_status
-         FROM time_slots ts
-         LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
-           AND b.status IN ('pending', 'accepted', 'completed')
-         WHERE ts.slot_id = ?
-           AND ts.is_blocked_by_owner = FALSE
-           AND ts.is_holiday = FALSE
-           AND (b.booking_id IS NULL OR b.status NOT IN ('pending', 'accepted', 'completed'))
-           AND (ts.locked_until IS NULL OR ts.locked_until <= NOW())`,
+              b.booking_id,
+              b.status as booking_status
+       FROM time_slots ts
+       LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
+         AND b.status IN ('pending', 'accepted', 'completed')
+       WHERE ts.slot_id = ?
+         AND ts.is_blocked_by_owner = FALSE
+         AND ts.is_holiday = FALSE
+         AND (b.booking_id IS NULL OR b.status NOT IN ('pending', 'accepted', 'completed'))
+         AND (ts.locked_until IS NULL OR ts.locked_until <= NOW())`,
         [slot_id]
       );
 
@@ -159,16 +165,33 @@ const arenaController = {
       }
 
       const slot = slots[0];
-      const currentDate = new Date().toISOString().split("T")[0];
-      const slotDate = new Date(slot.date).toISOString().split("T")[0];
+      const now = new Date();
 
-      // Ensure we're only locking slots for today or future dates
-      if (slotDate < currentDate) {
+      // *** SIMPLE BULLETPROOF SOLUTION ***
+      // Combine date and time into a single datetime string
+      // Fix: Add seconds and ensure proper ISO format
+      const slotDateTimeStr = `${slot.date}T${slot.start_time}:00Z`;
+      const slotStart = new Date(slotDateTimeStr);
+      // Log for debugging
+      console.log("=== LOCK VALIDATION ===");
+      console.log("Slot date/time string:", slotDateTimeStr);
+      console.log("Parsed slot start:", slotStart);
+      console.log("Current time (now):", now);
+      console.log("Slot timestamp:", slotStart.getTime());
+      console.log("Now timestamp:", now.getTime());
+      console.log("Is slot in past?", slotStart.getTime() < now.getTime());
+
+      // SIMPLE CHECK: If slot start time is before current time, block it
+      if (slotStart.getTime() < now.getTime()) {
+        console.log("BLOCKING: Slot is in the past!");
         await connection.rollback();
         return res.status(400).json({
           message: "Cannot lock past time slots",
         });
       }
+
+      console.log("ALLOWING: Slot is in the future");
+      console.log("=== END VALIDATION ===");
 
       // Check if someone else locked it recently
       if (
@@ -186,9 +209,9 @@ const arenaController = {
       // Lock the slot for current user
       await connection.execute(
         `UPDATE time_slots 
-         SET locked_until = DATE_ADD(NOW(), INTERVAL 10 MINUTE),
-             locked_by_user_id = ?
-         WHERE slot_id = ?`,
+       SET locked_until = DATE_ADD(NOW(), INTERVAL 10 MINUTE),
+           locked_by_user_id = ?
+       WHERE slot_id = ?`,
         [req.user.id, slot_id]
       );
 
@@ -416,11 +439,13 @@ const arenaController = {
     }
   },
 
-  // Get arena details by ID
   getArenaDetails: async (req, res) => {
     try {
       const { arena_id } = req.params;
 
+      console.log("Fetching details for arena:", arena_id);
+
+      // Get basic arena info
       const [arenas] = await pool.execute(
         "SELECT * FROM arenas WHERE arena_id = ? AND is_active = 1 AND is_blocked = 0",
         [arena_id]
@@ -432,51 +457,208 @@ const arenaController = {
 
       const arena = arenas[0];
 
-      // Fetch courts with their sports and primary image
+      // 1. Get courts with their sports
       const [courts] = await pool.execute(
-        `SELECT cd.*, 
-                GROUP_CONCAT(DISTINCT st.sport_id) as sport_ids,
-                GROUP_CONCAT(DISTINCT st.name) as sports,
-                (SELECT image_url FROM court_images WHERE court_id = cd.court_id AND is_primary = TRUE LIMIT 1) as primary_image
-         FROM court_details cd
-         LEFT JOIN court_sports cs ON cd.court_id = cs.court_id
-         LEFT JOIN sports_types st ON cs.sport_id = st.sport_id
-         WHERE cd.arena_id = ?
-         GROUP BY cd.court_id
-         ORDER BY cd.court_number`,
+        `SELECT 
+        cd.*,
+        GROUP_CONCAT(DISTINCT st.sport_id) as sport_ids,
+        GROUP_CONCAT(DISTINCT st.name) as sports_names,
+        GROUP_CONCAT(DISTINCT st.name) as sports,
+        (SELECT image_url FROM court_images WHERE court_id = cd.court_id AND is_primary = TRUE LIMIT 1) as primary_image
+       FROM court_details cd
+       LEFT JOIN court_sports cs ON cd.court_id = cs.court_id
+       LEFT JOIN sports_types st ON cs.sport_id = st.sport_id
+       WHERE cd.arena_id = ?
+       GROUP BY cd.court_id
+       ORDER BY cd.court_number`,
         [arena_id]
       );
 
-      // Normalize sports list for arena: distinct sports from courts and time_slots
-      const [sportsFromCourts] = await pool.execute(
-        `SELECT DISTINCT st.sport_id, st.name
-         FROM sports_types st
-         JOIN court_sports cs ON st.sport_id = cs.sport_id
-         JOIN court_details cd ON cs.court_id = cd.court_id
-         WHERE cd.arena_id = ?`,
+      // Format courts data
+      const formattedCourts = courts.map((court) => ({
+        ...court,
+        sport_ids: court.sport_ids
+          ? court.sport_ids.split(",").map(Number)
+          : [],
+        sports: court.sports_names ? court.sports_names.split(",") : [],
+        sports_names: court.sports_names ? court.sports_names.split(",") : [],
+      }));
+
+      // 2. Get sports available at this arena (from arena_sports table)
+      const [arenaSports] = await pool.execute(
+        `SELECT DISTINCT st.* 
+       FROM sports_types st
+       JOIN arena_sports ars ON st.sport_id = ars.sport_id
+       WHERE ars.arena_id = ?
+       ORDER BY st.name`,
         [arena_id]
       );
 
-      // Fallback: if no court sports, look for sports in time_slots
-      let sports = sportsFromCourts;
-      if (!sports || sports.length === 0) {
-        const [sportsFromSlots] = await pool.execute(
-          `SELECT DISTINCT st.sport_id, st.name
-           FROM sports_types st
-           JOIN time_slots ts ON st.sport_id = ts.sport_id
-           WHERE ts.arena_id = ?`,
-          [arena_id]
-        );
-        sports = sportsFromSlots;
-      }
+      // 3. Get sports from all courts in this arena
+      const [courtSports] = await pool.execute(
+        `SELECT DISTINCT st.* 
+       FROM sports_types st
+       JOIN court_sports cs ON st.sport_id = cs.sport_id
+       JOIN court_details cd ON cs.court_id = cd.court_id
+       WHERE cd.arena_id = ?
+       ORDER BY st.name`,
+        [arena_id]
+      );
 
-      res.json({ ...arena, courts, sports });
+      // 4. Combine and deduplicate sports
+      const allSports = [...arenaSports, ...courtSports];
+      const sportsMap = new Map();
+
+      allSports.forEach((sport) => {
+        const key = sport.sport_id || sport.id;
+        if (!sportsMap.has(key)) {
+          sportsMap.set(key, {
+            sport_id: sport.sport_id || sport.id,
+            name: sport.name || sport.sport_name,
+            icon_url: sport.icon_url,
+          });
+        }
+      });
+
+      const uniqueSports = Array.from(sportsMap.values());
+      const sportsList = uniqueSports.map((sport) => sport.name);
+
+      // 5. Get arena images
+      const [images] = await pool.execute(
+        "SELECT * FROM arena_images WHERE arena_id = ? ORDER BY is_primary DESC",
+        [arena_id]
+      );
+
+      // 6. Get reviews count and average rating
+      const [reviewStats] = await pool.execute(
+        `SELECT 
+        COUNT(*) as total_reviews,
+        AVG(rating) as avg_rating
+       FROM arena_reviews 
+       WHERE arena_id = ?`,
+        [arena_id]
+      );
+
+      console.log("Arena details fetched:", {
+        arenaId: arena_id,
+        courtsCount: formattedCourts.length,
+        sportsCount: uniqueSports.length,
+        imagesCount: images.length,
+      });
+
+      res.json({
+        ...arena,
+        courts: formattedCourts,
+        sports: uniqueSports, // Array of sport objects with id and name
+        sports_list: sportsList, // Simple array of sport names for easy display
+        images: images,
+        total_reviews: reviewStats[0]?.total_reviews || 0,
+        avg_rating: reviewStats[0]?.avg_rating || 0,
+        rating: reviewStats[0]?.avg_rating || arena.rating || 0,
+      });
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Server error", error: error.message });
+      console.error("Error in getArenaDetails:", error);
+      res.status(500).json({
+        message: "Server error",
+        error: error.message,
+        stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
+      });
     }
   },
 
+  // Get sports for a specific arena
+  getArenaSports: async (req, res) => {
+    try {
+      const { arena_id } = req.params;
+
+      console.log("Fetching sports for arena:", arena_id);
+
+      // Query to get sports for this arena from arena_sports table
+      const [sports] = await pool.execute(
+        `
+      SELECT DISTINCT st.* 
+      FROM sports_types st
+      JOIN arena_sports ars ON st.sport_id = ars.sport_id
+      WHERE ars.arena_id = ?
+      ORDER BY st.name
+    `,
+        [arena_id]
+      );
+
+      console.log("Found sports:", sports.length);
+
+      // If no sports in arena_sports, check court_sports
+      if (sports.length === 0) {
+        const [courtSports] = await pool.execute(
+          `
+        SELECT DISTINCT st.* 
+        FROM sports_types st
+        JOIN court_sports cs ON st.sport_id = cs.sport_id
+        JOIN court_details cd ON cs.court_id = cd.court_id
+        WHERE cd.arena_id = ?
+        ORDER BY st.name
+      `,
+          [arena_id]
+        );
+
+        res.json({ sports: courtSports });
+      } else {
+        res.json({ sports });
+      }
+    } catch (error) {
+      console.error("Error fetching arena sports:", error);
+      res.status(500).json({
+        message: "Server error",
+        error: error.message,
+        stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
+      });
+    }
+  },
+
+  // Get sports available for a specific arena
+  getAvailableSportsForArena: async (req, res) => {
+    try {
+      const { arena_id } = req.params;
+
+      // Get sports from arena_sports
+      const [arenaSports] = await pool.execute(
+        `
+      SELECT st.* 
+      FROM sports_types st
+      JOIN arena_sports ars ON st.sport_id = ars.sport_id
+      WHERE ars.arena_id = ?
+    `,
+        [arena_id]
+      );
+
+      // Get sports from court_sports
+      const [courtSports] = await pool.execute(
+        `
+      SELECT DISTINCT st.* 
+      FROM sports_types st
+      JOIN court_sports cs ON st.sport_id = cs.sport_id
+      JOIN court_details cd ON cs.court_id = cd.court_id
+      WHERE cd.arena_id = ?
+    `,
+        [arena_id]
+      );
+
+      // Combine and deduplicate
+      const allSports = [...arenaSports, ...courtSports];
+      const uniqueSports = allSports.filter(
+        (sport, index, self) =>
+          index ===
+          self.findIndex(
+            (s) => s.sport_id === sport.sport_id || s.name === sport.name
+          )
+      );
+
+      res.json({ sports: uniqueSports });
+    } catch (error) {
+      console.error("Error fetching available sports:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
   // Search arenas
   searchArenas: async (req, res) => {
     try {

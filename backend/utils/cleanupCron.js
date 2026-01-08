@@ -1,4 +1,4 @@
-// File: utils/cleanupCron.js
+
 const cron = require('node-cron');
 const pool = require('../db');
 

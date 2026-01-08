@@ -58,15 +58,16 @@ export const userAPI = {
   getProfile: () => API.get("/user/profile"),
   updateProfile: (data) => API.put("/user/profile", data),
   getNearbyArenas: (params) => API.get("/user/arenas/nearby", { params }),
-  addFavorite: (arenaId) => API.post(`/user/arenas/${arenaId}/favorite`),
-  removeFavorite: (arenaId) => API.delete(`/user/arenas/${arenaId}/favorite`),
-  getFavorites: () => API.get("/user/arenas/favorites"), // NEW: Get all favorites
+  // FIX: Remove "api/" prefix - just start with "/"
+  getFavorites: () => API.get("/users/favorites"),
+  addToFavorites: (arenaId) => API.post(`/users/arenas/${arenaId}/favorite`),
+  removeFromFavorites: (arenaId) =>
+    API.delete(`/users/arenas/${arenaId}/favorite`),
   updateProfilePicture: (data) => API.put("/user/profile/picture", data),
   changePassword: (data) => API.put("/user/profile/password", data),
-  createTeam: (data) => API.post("/user/teams", data), // NEW: Create team
-  getTeams: () => API.get("/user/teams"), // NEW: Get user teams
+  createTeam: (data) => API.post("/user/teams", data),
+  getTeams: () => API.get("/user/teams"),
 };
-
 export const authAPI = {
   login: (data) => API.post("/auth/login", data),
   registerUser: (data) => API.post("/auth/register/user", data),

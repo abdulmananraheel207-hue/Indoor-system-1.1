@@ -1,4 +1,4 @@
-// File: OwnerDashboard.jsx - COMPLETE FIXED VERSION
+// File: OwnerDashboard.jsx - SIMPLIFIED VERSION
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import OwnerHome from "./OwnerHome";
@@ -12,18 +12,22 @@ const OwnerDashboard = () => {
   const navigate = useNavigate();
   const [currentTab, setCurrentTab] = useState("home");
   const [ownerData, setOwnerData] = useState(null);
-  const [upcomingBookings, setUpcomingBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  // Add this state for stats
+  const [dashboardStats, setDashboardStats] = useState(() => {
+    // Try to load stats from localStorage on initial render
+    const savedStats = localStorage.getItem('ownerDashboardStats');
+    return savedStats ? JSON.parse(savedStats) : null;
+  });
+
   useEffect(() => {
     fetchOwnerData();
-    fetchUpcomingBookings();
     // Refresh data every 30 seconds
     const interval = setInterval(() => {
       if (currentTab === "home") {
         fetchOwnerData();
-        fetchUpcomingBookings();
       }
     }, 30000);
     return () => clearInterval(interval);
@@ -45,21 +49,48 @@ const OwnerDashboard = () => {
       const data = await response.json();
       if (response.ok) {
         setOwnerData(data);
+
+        // Save stats to localStorage for persistence
+        if (data.dashboard) {
+          const statsToSave = {
+            ...data.dashboard,
+            lastUpdated: new Date().toISOString()
+          };
+          localStorage.setItem('ownerDashboardStats', JSON.stringify(statsToSave));
+          setDashboardStats(statsToSave);
+        }
       } else if (response.status === 401) {
         handleLogout();
       }
     } catch (error) {
       console.error("Error fetching owner data:", error);
+      // If fetch fails, use cached stats
+      if (dashboardStats) {
+        console.log("Using cached dashboard stats");
+        setOwnerData(prev => ({
+          ...prev,
+          dashboard: dashboardStats
+        }));
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchUpcomingBookings = async () => {
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("userRole");
+    localStorage.removeItem("ownerData");
+    localStorage.removeItem('ownerDashboardStats'); // Clear stats on logout
+    navigate("/");
+  };
+
+  // Add function to manually refresh stats
+  const refreshStats = async () => {
     try {
       const token = localStorage.getItem("token");
       const response = await fetch(
-        "http://localhost:5000/api/owners/bookings?type=upcoming",
+        "http://localhost:5000/api/owners/bookings/stats?period=month",
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -68,18 +99,24 @@ const OwnerDashboard = () => {
       );
       if (response.ok) {
         const data = await response.json();
-        setUpcomingBookings(Array.isArray(data) ? data : []);
+        if (data.period_stats) {
+          const updatedStats = {
+            ...data.period_stats,
+            lastUpdated: new Date().toISOString()
+          };
+          localStorage.setItem('ownerDashboardStats', JSON.stringify(updatedStats));
+          setDashboardStats(updatedStats);
+
+          // Update ownerData with new stats
+          setOwnerData(prev => ({
+            ...prev,
+            dashboard: updatedStats
+          }));
+        }
       }
     } catch (error) {
-      console.error("Error fetching upcoming bookings:", error);
+      console.error("Error refreshing stats:", error);
     }
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("userRole");
-    localStorage.removeItem("ownerData");
-    navigate("/");
   };
 
   if (loading || !ownerData) {
@@ -119,7 +156,6 @@ const OwnerDashboard = () => {
                 setCurrentTab("home");
                 setMobileMenuOpen(false);
                 fetchOwnerData();
-                fetchUpcomingBookings();
               }}
               className="text-lg font-bold text-gray-900 md:text-xl"
             >
@@ -129,6 +165,13 @@ const OwnerDashboard = () => {
             {/* Desktop navigation */}
             <div className="hidden md:flex items-center space-x-4">
               <span className="text-gray-600">{displayArenaName}</span>
+              <button
+                onClick={refreshStats}
+                className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 text-sm"
+                title="Refresh Stats"
+              >
+                🔄
+              </button>
               <button
                 onClick={handleLogout}
                 className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm md:text-base"
@@ -155,11 +198,10 @@ const OwnerDashboard = () => {
                     setCurrentTab("home");
                     setMobileMenuOpen(false);
                     fetchOwnerData();
-                    fetchUpcomingBookings();
                   }}
                   className={`px-3 py-2.5 rounded-lg text-left ${currentTab === "home"
-                      ? "bg-blue-100 text-blue-700"
-                      : "text-gray-700 hover:bg-gray-100"
+                    ? "bg-blue-100 text-blue-700"
+                    : "text-gray-700 hover:bg-gray-100"
                     }`}
                 >
                   Dashboard
@@ -170,8 +212,8 @@ const OwnerDashboard = () => {
                     setMobileMenuOpen(false);
                   }}
                   className={`px-3 py-2.5 rounded-lg text-left ${currentTab === "bookings"
-                      ? "bg-blue-100 text-blue-700"
-                      : "text-gray-700 hover:bg-gray-100"
+                    ? "bg-blue-100 text-blue-700"
+                    : "text-gray-700 hover:bg-gray-100"
                     }`}
                 >
                   Bookings
@@ -182,8 +224,8 @@ const OwnerDashboard = () => {
                     setMobileMenuOpen(false);
                   }}
                   className={`px-3 py-2.5 rounded-lg text-left ${currentTab === "calendar"
-                      ? "bg-blue-100 text-blue-700"
-                      : "text-gray-700 hover:bg-gray-100"
+                    ? "bg-blue-100 text-blue-700"
+                    : "text-gray-700 hover:bg-gray-100"
                     }`}
                 >
                   Calendar
@@ -194,8 +236,8 @@ const OwnerDashboard = () => {
                     setMobileMenuOpen(false);
                   }}
                   className={`px-3 py-2.5 rounded-lg text-left ${currentTab === "arenasettings"
-                      ? "bg-blue-100 text-blue-700"
-                      : "text-gray-700 hover:bg-gray-100"
+                    ? "bg-blue-100 text-blue-700"
+                    : "text-gray-700 hover:bg-gray-100"
                     }`}
                 >
                   Arena Settings
@@ -206,8 +248,8 @@ const OwnerDashboard = () => {
                     setMobileMenuOpen(false);
                   }}
                   className={`px-3 py-2.5 rounded-lg text-left ${currentTab === "managers"
-                      ? "bg-blue-100 text-blue-700"
-                      : "text-gray-700 hover:bg-gray-100"
+                    ? "bg-blue-100 text-blue-700"
+                    : "text-gray-700 hover:bg-gray-100"
                     }`}
                 >
                   Managers
@@ -218,8 +260,8 @@ const OwnerDashboard = () => {
                     setMobileMenuOpen(false);
                   }}
                   className={`px-3 py-2.5 rounded-lg text-left ${currentTab === "profile"
-                      ? "bg-blue-100 text-blue-700"
-                      : "text-gray-700 hover:bg-gray-100"
+                    ? "bg-blue-100 text-blue-700"
+                    : "text-gray-700 hover:bg-gray-100"
                     }`}
                 >
                   Profile
@@ -228,6 +270,15 @@ const OwnerDashboard = () => {
                   <div className="px-3 py-2 text-sm text-gray-600">
                     Signed in as: {displayArenaName}
                   </div>
+                  <button
+                    onClick={() => {
+                      refreshStats();
+                      setMobileMenuOpen(false);
+                    }}
+                    className="px-3 py-2 text-sm text-blue-600 hover:text-blue-800"
+                  >
+                    Refresh Stats
+                  </button>
                 </div>
               </div>
             </div>
@@ -239,11 +290,10 @@ const OwnerDashboard = () => {
               onClick={() => {
                 setCurrentTab("home");
                 fetchOwnerData();
-                fetchUpcomingBookings();
               }}
               className={`px-3 py-2 rounded-lg text-sm ${currentTab === "home"
-                  ? "bg-blue-100 text-blue-700"
-                  : "text-gray-700 hover:bg-gray-100"
+                ? "bg-blue-100 text-blue-700"
+                : "text-gray-700 hover:bg-gray-100"
                 }`}
             >
               Dashboard
@@ -251,8 +301,8 @@ const OwnerDashboard = () => {
             <button
               onClick={() => setCurrentTab("bookings")}
               className={`px-3 py-2 rounded-lg text-sm ${currentTab === "bookings"
-                  ? "bg-blue-100 text-blue-700"
-                  : "text-gray-700 hover:bg-gray-100"
+                ? "bg-blue-100 text-blue-700"
+                : "text-gray-700 hover:bg-gray-100"
                 }`}
             >
               Bookings
@@ -260,8 +310,8 @@ const OwnerDashboard = () => {
             <button
               onClick={() => setCurrentTab("calendar")}
               className={`px-3 py-2 rounded-lg text-sm ${currentTab === "calendar"
-                  ? "bg-blue-100 text-blue-700"
-                  : "text-gray-700 hover:bg-gray-100"
+                ? "bg-blue-100 text-blue-700"
+                : "text-gray-700 hover:bg-gray-100"
                 }`}
             >
               Calendar
@@ -269,8 +319,8 @@ const OwnerDashboard = () => {
             <button
               onClick={() => setCurrentTab("arenasettings")}
               className={`px-3 py-2 rounded-lg text-sm ${currentTab === "arenasettings"
-                  ? "bg-blue-100 text-blue-700"
-                  : "text-gray-700 hover:bg-gray-100"
+                ? "bg-blue-100 text-blue-700"
+                : "text-gray-700 hover:bg-gray-100"
                 }`}
             >
               Arena Settings
@@ -278,8 +328,8 @@ const OwnerDashboard = () => {
             <button
               onClick={() => setCurrentTab("managers")}
               className={`px-3 py-2 rounded-lg text-sm ${currentTab === "managers"
-                  ? "bg-blue-100 text-blue-700"
-                  : "text-gray-700 hover:bg-gray-100"
+                ? "bg-blue-100 text-blue-700"
+                : "text-gray-700 hover:bg-gray-100"
                 }`}
             >
               Managers
@@ -287,8 +337,8 @@ const OwnerDashboard = () => {
             <button
               onClick={() => setCurrentTab("profile")}
               className={`px-3 py-2 rounded-lg text-sm ${currentTab === "profile"
-                  ? "bg-blue-100 text-blue-700"
-                  : "text-gray-700 hover:bg-gray-100"
+                ? "bg-blue-100 text-blue-700"
+                : "text-gray-700 hover:bg-gray-100"
                 }`}
             >
               Profile
@@ -302,11 +352,10 @@ const OwnerDashboard = () => {
         {currentTab === "home" && (
           <OwnerHome
             ownerData={ownerData}
-            upcomingBookings={upcomingBookings}
             refreshData={() => {
               fetchOwnerData();
-              fetchUpcomingBookings();
             }}
+            refreshStats={refreshStats}
           />
         )}
         {currentTab === "bookings" && <OwnerBookings />}
