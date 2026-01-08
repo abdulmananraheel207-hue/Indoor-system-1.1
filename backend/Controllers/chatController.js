@@ -85,7 +85,6 @@ const chatController = {
         return res.status(403).json({ message: "Access denied to this chat" });
       }
 
-      // 4. Get all messages for this booking
       const [messages] = await pool.execute(
         `SELECT c.*, 
                 CASE 
