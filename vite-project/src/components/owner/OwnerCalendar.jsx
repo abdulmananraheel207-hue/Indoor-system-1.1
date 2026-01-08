@@ -6,6 +6,8 @@ import { ownerAPI } from "../../services/api";
 const OwnerCalendar = ({ arenas = [] }) => {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedArena, setSelectedArena] = useState("");
+  const [selectedCourt, setSelectedCourt] = useState(""); // ADD STATE FOR COURT
+  const [courts, setCourts] = useState([]); // ADD STATE FOR COURTS LIST
   const [timeSlots, setTimeSlots] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -32,19 +34,51 @@ const OwnerCalendar = ({ arenas = [] }) => {
     }
   }, [arenas]);
 
+  // Fetch courts when arena changes
+  useEffect(() => {
+    if (selectedArena) {
+      fetchCourts();
+    }
+  }, [selectedArena]);
+
+  // Fetch time slots when date or court changes
   useEffect(() => {
     if (selectedArena) {
       fetchTimeSlots();
     }
-  }, [selectedDate, selectedArena]);
+  }, [selectedDate, selectedArena, selectedCourt]);
+
+  const fetchCourts = async () => {
+    try {
+      const response = await ownerAPI.getCourts(selectedArena);
+      if (response.data && response.data.length > 0) {
+        setCourts(response.data);
+        // Auto-select first court
+        setSelectedCourt(response.data[0].court_id);
+      } else {
+        setCourts([]);
+        setSelectedCourt("");
+      }
+    } catch (error) {
+      console.error("Error fetching courts:", error);
+      setCourts([]);
+      setSelectedCourt("");
+    }
+  };
 
   const fetchTimeSlots = async () => {
     try {
+      setLoading(true);
       const dateStr = selectedDate.toISOString().split("T")[0];
-      const response = await ownerAPI.getTimeSlots(selectedArena, dateStr);
+
+      // Pass court_id to API if selected
+      const response = await ownerAPI.getTimeSlots(
+        selectedArena,
+        dateStr,
+        selectedCourt || undefined
+      );
 
       if (response.data && response.data.length > 0) {
-        // Use existing slots from database
         setTimeSlots(response.data);
       } else {
         // Generate auto slots based on arena registration settings
@@ -53,6 +87,8 @@ const OwnerCalendar = ({ arenas = [] }) => {
     } catch (error) {
       console.error("Error fetching time slots:", error);
       generateAutoSlots();
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -106,6 +142,7 @@ const OwnerCalendar = ({ arenas = [] }) => {
         is_blocked: false,
         is_auto: true, // Mark as auto-generated
         slot_id: `auto_${startTimeStr}_${endTimeStr}`,
+        court_id: selectedCourt, // Include court_id in auto-generated slots
       });
 
       currentHour = endHourCalc;
@@ -144,6 +181,7 @@ const OwnerCalendar = ({ arenas = [] }) => {
       is_blocked: false,
       is_auto: false, // Mark as manually added
       slot_id: `manual_${Date.now()}`,
+      court_id: selectedCourt, // Include court_id in manual slots
     };
 
     // Add to beginning or sort by time
@@ -220,12 +258,14 @@ const OwnerCalendar = ({ arenas = [] }) => {
 
       const payload = {
         date: dateStr,
+        court_id: selectedCourt || undefined, // Include court_id in payload
         slots: timeSlots.map((slot) => ({
           start_time: slot.start_time + ":00",
           end_time: slot.end_time + ":00",
           price: slot.price,
           is_blocked: slot.is_blocked,
           is_auto: slot.is_auto,
+          court_id: slot.court_id || selectedCourt, // Include court_id for each slot
         })),
       };
 
@@ -251,6 +291,10 @@ const OwnerCalendar = ({ arenas = [] }) => {
 
   const getArenaInfo = () => {
     return arenas.find((a) => a.arena_id == selectedArena);
+  };
+
+  const getCourtInfo = () => {
+    return courts.find((c) => c.court_id == selectedCourt);
   };
 
   return (
@@ -280,16 +324,19 @@ const OwnerCalendar = ({ arenas = [] }) => {
         </div>
       )}
 
-      {/* Arena Selection and Date Picker */}
+      {/* Arena, Court Selection and Date Picker */}
       <div className="bg-white p-4 rounded-xl shadow mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Select Arena
             </label>
             <select
               value={selectedArena}
-              onChange={(e) => setSelectedArena(e.target.value)}
+              onChange={(e) => {
+                setSelectedArena(e.target.value);
+                setSelectedCourt(""); // Reset court when arena changes
+              }}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
             >
               <option value="">Select an arena</option>
@@ -299,6 +346,33 @@ const OwnerCalendar = ({ arenas = [] }) => {
                 </option>
               ))}
             </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Select Court
+            </label>
+            <select
+              value={selectedCourt}
+              onChange={(e) => setSelectedCourt(e.target.value)}
+              disabled={!selectedArena || courts.length === 0}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+            >
+              {courts.length === 0 ? (
+                <option value="">No courts found</option>
+              ) : (
+                courts.map((court) => (
+                  <option key={court.court_id} value={court.court_id}>
+                    {court.court_name || `Court ${court.court_number}`}
+                  </option>
+                ))
+              )}
+            </select>
+            {courts.length === 1 && (
+              <p className="text-xs text-gray-500 mt-1">
+                Single-court arena - court selection not needed
+              </p>
+            )}
           </div>
 
           <div>
@@ -317,33 +391,55 @@ const OwnerCalendar = ({ arenas = [] }) => {
           <div className="flex items-end">
             <button
               onClick={fetchTimeSlots}
-              className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200"
+              disabled={loading}
+              className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400"
             >
-              Refresh Slots
+              {loading ? "Loading..." : "Refresh Slots"}
             </button>
           </div>
         </div>
 
-        {/* Arena Info */}
+        {/* Arena & Court Info */}
         {selectedArena && (
           <div className="mt-4 p-3 bg-blue-50 rounded-lg">
             <div className="flex justify-between items-center">
               <div>
                 <h3 className="font-medium text-blue-900">
                   {getArenaInfo()?.name}
+                  {selectedCourt && (
+                    <span className="ml-2 text-blue-700">
+                      •{" "}
+                      {getCourtInfo()?.court_name ||
+                        `Court ${getCourtInfo()?.court_number}`}
+                    </span>
+                  )}
                 </h3>
                 <p className="text-sm text-blue-700">
-                  Auto-generated slots:{" "}
-                  {getArenaInfo()?.opening_time || "06:00"} to{" "}
+                  Auto slots: {getArenaInfo()?.opening_time || "06:00"} to{" "}
                   {getArenaInfo()?.closing_time || "22:00"}
+                  {selectedCourt && (
+                    <span className="ml-2">
+                      • Price: ₹
+                      {getCourtInfo()?.price_per_hour ||
+                        getArenaInfo()?.base_price_per_hour ||
+                        500}
+                      /hr
+                    </span>
+                  )}
                 </p>
               </div>
               <div className="text-right">
                 <p className="text-sm text-gray-600">
-                  {formatDate(selectedDate)}
+                  {selectedDate.toLocaleDateString("en-US", {
+                    weekday: "long",
+                    year: "numeric",
+                    month: "long",
+                    day: "numeric",
+                  })}
                 </p>
                 <p className="text-xs text-gray-500">
                   {timeSlots.length} time slots
+                  {courts.length > 1 && ` • ${courts.length} courts`}
                 </p>
               </div>
             </div>
