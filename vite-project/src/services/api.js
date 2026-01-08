@@ -10,7 +10,8 @@ const API = axios.create({
 
 // Add token to all requests
 API.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
+  const token =
+    localStorage.getItem("token") || localStorage.getItem("adminToken");
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -22,20 +23,11 @@ export const arenaAPI = {
   getArenaDetails: (arenaId) => API.get(`/arenas/${arenaId}`),
   getArenaCourts: (arenaId) => API.get(`/arenas/${arenaId}/courts`),
   getAllArenas: (params) => API.get("/arenas/all", { params }),
-  getAvailableSlots: (arenaId, date, sportId) =>
-    API.get(`/arenas/${arenaId}/slots`, {
-      params: { date, sport_id: sportId },
-    }),
+  getAvailableSlots: (arenaId, params) =>
+    API.get(`/arenas/${arenaId}/slots`, { params }),
   searchArenas: (params) => API.get("/arenas/search", { params }),
-  lockTimeSlot: (slotId) => {
-    return axios.post(
-      `/api/arenas/slots/${slotId}/lock`,
-      {},
-      {
-        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
-      }
-    );
-  },
+  lockTimeSlot: (slotId) => API.post(`/arenas/slots/${slotId}/lock`, {}),
+  releaseTimeSlot: (slotId) => API.post(`/arenas/slots/${slotId}/release`, {}),
 
   releaseTimeSlot: (slotId) => {
     return axios.post(
@@ -66,15 +58,16 @@ export const userAPI = {
   getProfile: () => API.get("/user/profile"),
   updateProfile: (data) => API.put("/user/profile", data),
   getNearbyArenas: (params) => API.get("/user/arenas/nearby", { params }),
-  addFavorite: (arenaId) => API.post(`/user/arenas/${arenaId}/favorite`),
-  removeFavorite: (arenaId) => API.delete(`/user/arenas/${arenaId}/favorite`),
-  getFavorites: () => API.get("/user/arenas/favorites"), // NEW: Get all favorites
+  // FIX: Remove "api/" prefix - just start with "/"
+  getFavorites: () => API.get("/users/favorites"),
+  addToFavorites: (arenaId) => API.post(`/users/arenas/${arenaId}/favorite`),
+  removeFromFavorites: (arenaId) =>
+    API.delete(`/users/arenas/${arenaId}/favorite`),
   updateProfilePicture: (data) => API.put("/user/profile/picture", data),
   changePassword: (data) => API.put("/user/profile/password", data),
-  createTeam: (data) => API.post("/user/teams", data), // NEW: Create team
-  getTeams: () => API.get("/user/teams"), // NEW: Get user teams
+  createTeam: (data) => API.post("/user/teams", data),
+  getTeams: () => API.get("/user/teams"),
 };
-
 export const authAPI = {
   login: (data) => API.post("/auth/login", data),
   registerUser: (data) => API.post("/auth/register/user", data),
@@ -88,9 +81,9 @@ export const reviewAPI = {
 };
 
 export const chatAPI = {
-  getMessages: (bookingId) => API.get(`/bookings/${bookingId}/messages`),
+  getMessages: (bookingId) => API.get(`/chats/${bookingId}`),
   sendMessage: (bookingId, data) =>
-    API.post(`/bookings/${bookingId}/messages`, data),
+    API.post(`/chats/${bookingId}/message`, data),
 };
 
 export const ownerAPI = {
@@ -127,7 +120,12 @@ export const ownerAPI = {
 
   // Time Slots
   getTimeSlots: (arenaId, date) =>
-    API.get(`/arenas/${arenaId}/slots`, { params: { date } }),
+    API.get(`/arenas/${arenaId}/slots`, {
+      params: {
+        date: typeof date === "object" ? date.date : date,
+      },
+    }),
+
   updateTimeSlots: (arenaId, data) =>
     API.put(`/owners/arenas/${arenaId}/slots`, data),
 
@@ -135,6 +133,20 @@ export const ownerAPI = {
   getTournamentRequests: () => API.get("/owners/tournaments"),
   respondToTournament: (tournamentId, data) =>
     API.post(`/owners/tournaments/${tournamentId}/respond`, data),
+};
+export const adminAPI = {
+  getDashboard: () => API.get("/admin/dashboard"),
+  getArenas: (params) => API.get("/admin/arenas", { params }),
+  toggleArenaBlock: (arenaId, isBlocked, reason = "") =>
+    API.put(`/admin/arenas/${arenaId}/block`, {
+      is_blocked: isBlocked,
+      reason,
+    }),
+  markPaymentCompleted: (arenaId, payload) =>
+    API.post(`/admin/arenas/${arenaId}/payment`, payload),
+  getUsers: () => API.get("/admin/users"),
+  getOwners: () => API.get("/admin/owners"),
+  getFinancialReports: () => API.get("/admin/reports/financial"),
 };
 
 export const tournamentAPI = {

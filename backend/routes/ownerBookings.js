@@ -1,7 +1,10 @@
 // routes/ownerBookings.js
 const express = require("express");
 const router = express.Router();
-const bookingController = require("../Controllers/bookingController");
+const {
+  acceptBooking,
+  rejectBooking,
+} = require("../utils/bookingDecisionService");
 const auth = require("../middleware/auth");
 const validate = require("../middleware/validation");
 
@@ -60,38 +63,13 @@ router.get("/bookings", async (req, res) => {
 // Accept booking
 router.post("/bookings/:booking_id/accept", async (req, res) => {
   try {
-    const pool = require("../db");
     const { booking_id } = req.params;
-
-    // Check if booking exists and belongs to owner's arena
-    const [bookings] = await pool.execute(
-      `
-            SELECT b.* FROM bookings b
-            JOIN arenas a ON b.arena_id = a.arena_id
-            WHERE b.booking_id = ? AND a.owner_id = ?
-        `,
-      [booking_id, req.user.id]
-    );
-
-    if (bookings.length === 0) {
-      return res
-        .status(404)
-        .json({ message: "Booking not found or access denied" });
-    }
-
-    if (bookings[0].status !== "pending") {
-      return res
-        .status(400)
-        .json({ message: "Only pending bookings can be accepted" });
-    }
-
-    // Update booking status to 'accepted' (not 'approved')
-    await pool.execute(
-      'UPDATE bookings SET status = "accepted" WHERE booking_id = ?',
-      [booking_id]
-    );
-
-    res.json({ message: "Booking accepted successfully" });
+    const result = await acceptBooking({
+      bookingId: booking_id,
+      ownerId: req.user.id,
+      actorType: "owner",
+    });
+    return res.status(result.status).json({ message: result.message });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error", error: error.message });
@@ -101,45 +79,15 @@ router.post("/bookings/:booking_id/accept", async (req, res) => {
 // Reject booking
 router.post("/bookings/:booking_id/reject", async (req, res) => {
   try {
-    const pool = require("../db");
     const { booking_id } = req.params;
     const { reason } = req.body;
-
-    // Check if booking exists and belongs to owner's arena
-    const [bookings] = await pool.execute(
-      `
-            SELECT b.* FROM bookings b
-            JOIN arenas a ON b.arena_id = a.arena_id
-            WHERE b.booking_id = ? AND a.owner_id = ?
-        `,
-      [booking_id, req.user.id]
-    );
-
-    if (bookings.length === 0) {
-      return res
-        .status(404)
-        .json({ message: "Booking not found or access denied" });
-    }
-
-    if (bookings[0].status !== "pending") {
-      return res
-        .status(400)
-        .json({ message: "Only pending bookings can be rejected" });
-    }
 
     if (!reason || reason.trim() === "") {
       return res
         .status(400)
         .json({ message: "Reason is required for rejection" });
     }
-
-    // Update booking status to 'rejected'
-    await pool.execute(
-      'UPDATE bookings SET status = "rejected" WHERE booking_id = ?',
-      [booking_id]
-    );
-
-    res.json({ message: "Booking rejected successfully" });
+    return res.status(result.status).json({ message: result.message });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error", error: error.message });

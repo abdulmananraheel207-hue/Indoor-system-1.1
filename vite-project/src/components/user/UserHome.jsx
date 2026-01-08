@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import integrationService from "../../services/integrationService";
-
 const UserHome = () => {
   const navigate = useNavigate();
   const [location, setLocation] = useState(null);
@@ -11,7 +10,7 @@ const UserHome = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
-
+  const [skipLocation, setSkipLocation] = useState(false);
   useEffect(() => {
     fetchInitialData();
 
@@ -22,6 +21,11 @@ const UserHome = () => {
           setLocation({
             lat: position.coords.latitude,
             lng: position.coords.longitude,
+          });
+          fetchArenas({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            radius_km: 8,
           });
         },
         (error) => console.error("Error getting location:", error)
@@ -34,10 +38,8 @@ const UserHome = () => {
       setLoading(true);
       const sportsData = await integrationService.getSportsCategories();
       setSports(sportsData);
-      await fetchArenas();
     } catch (error) {
-      console.error("Error fetching initial data:", error);
-      setError(error.response?.data?.message || "Failed to load arenas");
+      setError("Failed to load sports");
     } finally {
       setLoading(false);
     }
@@ -46,11 +48,25 @@ const UserHome = () => {
   const fetchArenas = async (filters = {}) => {
     try {
       setLoading(true);
-      const arenasData = await integrationService.getAllArenas(filters);
-      setArenas(Array.isArray(arenasData) ? arenasData : arenasData.arenas || []);
-    } catch (error) {
-      console.error("Error fetching arenas:", error);
-      setError(error.response?.data?.message || "Failed to load arenas");
+
+      const params = { ...filters };
+
+      if (!filters.skip_location && location) {
+        params.lat = location.lat;
+        params.lng = location.lng;
+        params.radius_km = params.radius_km || 20; // increase radius
+      }
+
+      const arenasData = await integrationService.searchArenas(params);
+
+      const parsed =
+        arenasData?.arenas ||
+        arenasData?.data ||
+        (Array.isArray(arenasData) ? arenasData : []);
+
+      setArenas(parsed.filter((a) => !a.is_blocked));
+    } catch (err) {
+      setError("Failed to load arenas");
     } finally {
       setLoading(false);
     }
@@ -61,22 +77,34 @@ const UserHome = () => {
     try {
       const params = { query: searchQuery };
       if (selectedSport) params.sport_id = selectedSport.sport_id;
-
+      if (location && !skipLocation) {
+        params.lat = location.lat;
+        params.lng = location.lng;
+        params.radius_km = 8;
+      }
       const results = await integrationService.searchArenas(params);
-      setArenas(Array.isArray(results) ? results : results.arenas || []);
+      const parsed = Array.isArray(results) ? results : results.arenas || [];
+      setArenas(parsed.filter((arena) => !arena.is_blocked));
     } catch (error) {
       console.error("Error searching arenas:", error);
       alert("Search failed");
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleSportSelect = async (sport) => {
     setSelectedSport(sport);
     try {
-      const results = await integrationService.searchArenas({
-        sport_id: sport.sport_id,
-      });
-      setArenas(Array.isArray(results) ? results : results.arenas || []);
+      const params = { sport_id: sport.sport_id };
+      if (location && !skipLocation) {
+        params.lat = location.lat;
+        params.lng = location.lng;
+        params.radius_km = 8;
+      }
+      const results = await integrationService.searchArenas(params);
+      const parsed = Array.isArray(results) ? results : results.arenas || [];
+      setArenas(parsed.filter((arena) => !arena.is_blocked));
     } catch (error) {
       console.error("Error filtering arenas:", error);
     }
@@ -94,39 +122,77 @@ const UserHome = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Find Arena</h1>
-              {location ? (
-                <div className="flex items-center mt-1 text-gray-600">
-                  <svg
-                    className="h-4 w-4 mr-1"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
+              {location && !skipLocation ? (
+                <div className="flex items-center mt-1 text-gray-600 space-x-3">
+                  <div className="flex items-center">
+                    <svg
+                      className="h-4 w-4 mr-1"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                    <span className="text-sm">Using your location</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSkipLocation(true);
+                      setLocation(null);
+                      fetchArenas({ skip_location: true });
+                    }}
+                    className="text-xs text-primary-600 hover:text-primary-500 underline"
                   >
-                    <path
-                      fillRule="evenodd"
-                      d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  <span className="text-sm">Near your location</span>
+                    Skip location
+                  </button>
                 </div>
               ) : (
-                <button
-                  onClick={() => {
-                    if (navigator.geolocation) {
-                      navigator.geolocation.getCurrentPosition(
-                        (pos) =>
-                          setLocation({
-                            lat: pos.coords.latitude,
-                            lng: pos.coords.longitude,
-                          }),
-                        console.error
-                      );
-                    }
-                  }}
-                  className="mt-1 text-sm text-primary-600 hover:text-primary-500"
-                >
-                  Enable location to find nearby arenas
-                </button>
+                <div className="flex flex-col mt-1 space-y-1">
+                  <button
+                    onClick={() => {
+                      if (navigator.geolocation) {
+                        navigator.geolocation.getCurrentPosition(
+                          (pos) => {
+                            setLocation({
+                              lat: pos.coords.latitude,
+                              lng: pos.coords.longitude,
+                            });
+                            setSkipLocation(false);
+                            fetchArenas({
+                              lat: pos.coords.latitude,
+                              lng: pos.coords.longitude,
+                              radius_km: 8,
+                            });
+                          },
+                          () => {
+                            setSkipLocation(true);
+                            fetchArenas({});
+                          }
+                        );
+                      } else {
+                        setSkipLocation(true);
+                        fetchArenas({});
+                      }
+                    }}
+                    className="text-sm text-primary-600 hover:text-primary-500"
+                  >
+                    Enable location to find nearby arenas
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSkipLocation(true);
+                      fetchArenas({});
+                    }}
+                    className="text-xs text-primary-600 hover:text-primary-500 underline"
+                  >
+                    Continue without location
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -193,10 +259,11 @@ const UserHome = () => {
               <button
                 key={sport.sport_id}
                 onClick={() => handleSportSelect(sport)}
-                className={`flex flex-col items-center p-4 rounded-xl transition-all duration-200 ${selectedSport?.sport_id === sport.sport_id
-                  ? "bg-primary-50 border-2 border-primary-500"
-                  : "bg-white border border-gray-200 hover:border-primary-300"
-                  }`}
+                className={`flex flex-col items-center p-4 rounded-xl transition-all duration-200 ${
+                  selectedSport?.sport_id === sport.sport_id
+                    ? "bg-primary-50 border-2 border-primary-500"
+                    : "bg-white border border-gray-200 hover:border-primary-300"
+                }`}
               >
                 <span className="text-2xl mb-2">
                   {sport.icon_url ? "🏸" : "🎾"}
@@ -320,13 +387,15 @@ const UserHome = () => {
                     </div>
 
                     <div className="flex flex-wrap gap-2 mb-4">
-                      {arena.sports &&
-                        arena.sports.split(",").map((sport, index) => (
+                      {Array.isArray(arena.sports) &&
+                        arena.sports.map((sport, index) => (
                           <span
                             key={index}
-                            className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded"
+                            className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm"
                           >
-                            {sport.trim()}
+                            {typeof sport === "string"
+                              ? sport
+                              : sport.sport_name || sport.name || sport}
                           </span>
                         ))}
                     </div>

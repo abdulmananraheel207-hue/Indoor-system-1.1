@@ -96,26 +96,58 @@ const arenaValidation = {
 
 // Booking validation rules
 const bookingValidation = {
-  // Accept either legacy format (slot_id + sport_id) OR new format (court_id + date + start_time + end_time)
   createBooking: validate([
-    body("arena_id").isInt({ gt: 0 }).withMessage("Valid arena ID required"),
     body()
       .custom((_, { req }) => {
-        const hasLegacy = req.body.slot_id && req.body.sport_id;
-        const hasNew = req.body.court_id && req.body.date && req.body.start_time && req.body.end_time;
-        const hasMulti = Array.isArray(req.body.slot_ids) && req.body.slot_ids.length > 0;
+        const arena = req.body.arena_id || req.body.arenaId;
+        if (!arena || isNaN(Number(arena)) || Number(arena) <= 0) {
+          throw new Error("Valid arena ID required");
+        }
+        return true;
+      })
+      .withMessage("Valid arena ID required"),
+
+    body()
+      .custom((_, { req }) => {
+        const hasLegacy =
+          (req.body.slot_id || req.body.slotId) &&
+          (req.body.sport_id || req.body.sportId);
+        const hasNew =
+          (req.body.court_id || req.body.courtId) &&
+          (req.body.date || req.body.bookingDate) &&
+          (req.body.start_time || req.body.startTime) &&
+          (req.body.end_time || req.body.endTime);
+        const slotIds = req.body.slot_ids || req.body.slotIds;
+        const hasSlotIds = Array.isArray(slotIds) && slotIds.length > 0;
         if (hasLegacy) return true;
         if (hasNew) return true;
-        if (hasMulti) return true;
+        if (hasSlotIds) return true;
         throw new Error(
           "Provide either slot_id & sport_id (legacy) or court_id + date + start_time + end_time (new)"
         );
       })
       .withMessage(
-        "Provide either slot_id & sport_id (legacy) or court_id + date + start_time + end_time (new)"
+        "Provide either slot_id & sport_id (legacy), slot_ids[], or court_id + date + start_time + end_time (new)"
       ),
+
+    // Optional numeric checks for both naming styles
     body("court_id").optional().isInt({ gt: 0 }),
-    body("slot_ids").optional().isArray({ min: 1 }).withMessage("slot_ids must be a non-empty array"),
+    body("courtId").optional().isInt({ gt: 0 }),
+    body("slot_id").optional().isInt({ gt: 0 }),
+    body("slotId").optional().isInt({ gt: 0 }),
+    body("sport_id").optional().isInt({ gt: 0 }),
+    body("sportId").optional().isInt({ gt: 0 }),
+    body("arenaId").optional().isInt({ gt: 0 }),
+    body(["slot_ids", "slotIds"]) // Allow multi-slot bookings
+      .optional()
+      .isArray({ min: 1 })
+      .withMessage("slot_ids must be an array of slot IDs")
+      .custom(
+        (value) =>
+          Array.isArray(value) &&
+          value.every((id) => Number.isInteger(Number(id)) && Number(id) > 0)
+      )
+      .withMessage("slot_ids must contain valid numeric IDs"),
   ]),
 };
 

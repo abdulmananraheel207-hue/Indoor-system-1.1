@@ -17,9 +17,9 @@ const validateBookingStatus = async (req, res, next) => {
       return res.status(404).json({ message: "Booking not found" });
     }
 
-    if (!["pending", "approved"].includes(booking[0].status)) {
+    if (!["pending", "accepted"].includes(booking[0].status)) {
       return res.status(403).json({
-        message: "Chat is only available for pending or approved bookings",
+        message: "Chat is only available for pending or accepted bookings",
       });
     }
 
