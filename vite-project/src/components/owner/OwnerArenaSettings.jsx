@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { ownerAPI } from "../../services/api";
 import { integrationService } from "../../services/integrationService";
-import PhotoUpload from '../uploads/PhotoUpload';
 
 const OwnerArenaSettings = ({ dashboardData }) => {
   const [arenas, setArenas] = useState([]);
@@ -25,9 +24,6 @@ const OwnerArenaSettings = ({ dashboardData }) => {
     description: "",
     sports: [],
   });
-
-  // Refs for file inputs
-  const fileInputRefs = useRef({});
 
   const availableSports = [
     { id: 1, name: "Badminton", icon: "🏸" },
@@ -58,7 +54,7 @@ const OwnerArenaSettings = ({ dashboardData }) => {
   const fetchCourts = async () => {
     try {
       const response = await ownerAPI.getCourts(selectedArena);
-      console.log('Fetched courts:', response.data);
+      console.log("Fetched courts with images:", response.data);
       setCourts(response.data || []);
     } catch (error) {
       console.error("Error fetching courts:", error);
@@ -128,99 +124,78 @@ const OwnerArenaSettings = ({ dashboardData }) => {
     }
   };
 
-  const uploadPhotosToCourt = async (courtId, files) => {
-    console.log('=== UPLOAD FUNCTION CALLED ===');
-    console.log('Court ID:', courtId);
-    console.log('Number of files:', files.length);
+  const handlePhotoUpload = async (courtId, courtName, files) => {
+    console.log("Uploading photos for court:", courtId, courtName);
+    console.log("Files to upload:", files.length);
 
     setUploadingPhotos({ ...uploadingPhotos, [courtId]: true });
 
-    // Create FormData
     const formData = new FormData();
     for (let i = 0; i < files.length; i++) {
-      console.log(`Adding file ${i}: court_images <- ${files[i].name}`);
-      formData.append("court_images", files[i]); // MUST be "court_images"
-    }
-
-    // Debug FormData
-    console.log('FormData entries:');
-    for (let pair of formData.entries()) {
-      console.log(`Field: "${pair[0]}", File: ${pair[1].name}`);
+      formData.append("court_images", files[i]); // 🔥 Make sure fieldname matches
+      console.log(
+        `Added file ${i}:`,
+        files[i].name,
+        files[i].type,
+        files[i].size
+      );
     }
 
     try {
-      const token = localStorage.getItem('token');
-      console.log('Token exists:', !!token);
+      const token = localStorage.getItem("token");
+      if (!token) {
+        throw new Error("Please login again");
+      }
+
+      console.log(
+        "Uploading to:",
+        `http://localhost:5000/api/owners/courts/${courtId}/photos`
+      );
 
       const response = await fetch(
         `http://localhost:5000/api/owners/courts/${courtId}/photos`,
         {
-          method: 'POST',
+          method: "POST",
           headers: {
-            'Authorization': `Bearer ${token}`
+            Authorization: `Bearer ${token}`,
+            // 🔥 NO Content-Type header for FormData
           },
-          body: formData
+          body: formData,
         }
       );
 
-      console.log('Response status:', response.status);
-
-      // Get response as text first
-      const responseText = await response.text();
-      console.log('Response text:', responseText);
-
-      let data;
-      try {
-        data = JSON.parse(responseText);
-      } catch (e) {
-        console.error('Failed to parse JSON:', e);
-        data = { message: 'Invalid JSON response' };
-      }
-
-      console.log('Response data:', data);
+      const data = await response.json();
+      console.log("Upload response:", data);
+      console.log("Response status:", response.status);
 
       if (!response.ok) {
-        throw new Error(data.message || `Upload failed: ${response.status}`);
+        throw new Error(data.message || "Upload failed");
       }
 
-      alert(`✅ ${data.message || 'Photos uploaded successfully!'}`);
+      alert(`✅ ${data.count} photos uploaded successfully!`);
 
-      // Refresh courts list
+      // Refresh to show new photos immediately
       await fetchCourts();
-
     } catch (error) {
-      console.error('❌ Upload error:', error);
-      alert(`❌ Upload failed: ${error.message}`);
+      console.error("Upload error:", error);
+      alert(`❌ Error: ${error.message}`);
     } finally {
       setUploadingPhotos({ ...uploadingPhotos, [courtId]: false });
-
-      // Reset the file input
-      const fileInput = document.getElementById(`file-input-${courtId}`);
-      if (fileInput) fileInput.value = "";
     }
   };
 
-
-
   const handleDeletePhoto = async (courtId, photo) => {
-    if (!window.confirm("Are you sure you want to delete this photo?")) return;
+    if (!window.confirm("Delete this photo?")) return;
 
     try {
-      // If photo has an ID (from database), use it
-      if (photo.id) {
-        await integrationService.deleteCourtPhoto(courtId, photo.id);
-        alert("Photo deleted successfully");
-        fetchCourts();
-        return;
+      if (photo.image_id) {
+        await integrationService.deleteCourtPhoto(courtId, photo.image_id);
       }
-
-      // Fallback: Delete by URL if no ID
-      await integrationService.deleteCourtPhotoByUrl(courtId, photo.path);
       alert("Photo deleted successfully");
       fetchCourts();
     } catch (error) {
       console.error("Error deleting photo:", error);
-      alert("Failed to delete photo: " + error.message);
+      alert("Failed to delete photo");
     }
   };
 
@@ -244,21 +219,39 @@ const OwnerArenaSettings = ({ dashboardData }) => {
     }
   };
 
-  // Replace the existing getAllCourtPhotos function with this:
   const getAllCourtPhotos = (court) => {
     const photos = [];
 
     // Check if court has images array (from API)
     if (court.images && court.images.length > 0) {
-      return court.images.map(img => ({
-        id: img.image_id,
-        public_id: img.cloudinary_id,
-        path: img.image_url,
-        is_primary: img.is_primary || false,
-      }));
+      court.images.forEach((img) => {
+        photos.push({
+          id: img.image_id, // Database ID
+          public_id: img.cloudinary_id, // Cloudinary public ID
+          path: img.image_url,
+          is_primary: img.is_primary || false,
+        });
+      });
+      return photos; // Return immediately if we have proper images
     }
 
-    return photos;
+    // Fallback to old structure if exists
+    if (court.primary_image) {
+      photos.push({
+        path: court.primary_image,
+        is_primary: true,
+      });
+    }
+
+    if (court.additional_images && court.additional_images.length > 0) {
+      court.additional_images.forEach((img) => {
+        photos.push({
+          path: img,
+          is_primary: false,
+        });
+      });
+    }
+    return [];
   };
 
   // Update the photo display section:
@@ -371,133 +364,142 @@ const OwnerArenaSettings = ({ dashboardData }) => {
             </div>
           ) : (
             <div className="space-y-6">
-              {courts.map((court) => (
-                <div
-                  key={court.court_id}
-                  className="border border-gray-200 rounded-lg p-4 md:p-6 bg-white"
-                >
-                  <div className="flex flex-col md:flex-row md:justify-between md:items-start mb-6">
-                    <div className="flex-1">
-                      <h3 className="text-lg font-bold text-gray-900">
-                        {court.court_name}
-                      </h3>
-                      <div className="flex flex-wrap gap-3 mt-2">
-                        <span className="px-2 py-1 bg-blue-50 text-blue-700 text-xs font-semibold rounded">
-                          {court.size_sqft} SQ FT
-                        </span>
-                        <span className="px-2 py-1 bg-green-50 text-green-700 text-xs font-semibold rounded">
-                          ₹{court.price_per_hour}/HOUR
-                        </span>
-                        <span className="px-2 py-1 bg-purple-50 text-purple-700 text-xs font-semibold rounded">
-                          Court #{court.court_number}
-                        </span>
-                      </div>
-                      <p className="text-sm text-gray-600 mt-3">
-                        {court.description || "No description provided."}
-                      </p>
-                      {court.sports_names && court.sports_names.length > 0 && (
-                        <div className="mt-3">
-                          <span className="text-xs font-bold text-gray-400 uppercase">
-                            Sports:{" "}
+              {courts.map((court) => {
+                const courtPhotos = getCourtPhotos(court);
+                console.log(
+                  `Court ${court.court_id} has ${courtPhotos.length} photos`
+                );
+
+                return (
+                  <div
+                    key={court.court_id}
+                    className="border border-gray-200 rounded-lg p-4 md:p-6 bg-white"
+                  >
+                    <div className="flex flex-col md:flex-row md:justify-between md:items-start mb-6">
+                      <div className="flex-1">
+                        <h3 className="text-lg font-bold text-gray-900">
+                          {court.court_name}
+                        </h3>
+                        <div className="flex flex-wrap gap-3 mt-2">
+                          <span className="px-2 py-1 bg-blue-50 text-blue-700 text-xs font-semibold rounded">
+                            {court.size_sqft} SQ FT
                           </span>
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {court.sports_names.map((sport, index) => (
-                              <span
-                                key={index}
-                                className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded"
-                              >
-                                {sport}
+                          <span className="px-2 py-1 bg-green-50 text-green-700 text-xs font-semibold rounded">
+                            ₹{court.price_per_hour}/HOUR
+                          </span>
+                          <span className="px-2 py-1 bg-purple-50 text-purple-700 text-xs font-semibold rounded">
+                            Court #{court.court_number}
+                          </span>
+                        </div>
+                        <p className="text-sm text-gray-600 mt-3">
+                          {court.description || "No description provided."}
+                        </p>
+                        {court.sports_names &&
+                          court.sports_names.length > 0 && (
+                            <div className="mt-3">
+                              <span className="text-xs font-bold text-gray-400 uppercase">
+                                Sports:{" "}
                               </span>
-                            ))}
-                          </div>
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {court.sports_names.map((sport, index) => (
+                                  <span
+                                    key={index}
+                                    className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded"
+                                  >
+                                    {sport}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                      </div>
+                      <button
+                        onClick={() => handleCourtEdit(court)}
+                        className="mt-4 md:mt-0 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
+                      >
+                        Edit Details
+                      </button>
+                    </div>
+
+                    {/* PHOTO SECTION - FIXED */}
+                    <div className="pt-6 border-t border-gray-100">
+                      <div className="flex items-center justify-between mb-4">
+                        <h4 className="text-sm font-bold text-gray-900 uppercase tracking-tight">
+                          Photos ({courtPhotos.length})
+                        </h4>
+
+                        <label className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 cursor-pointer">
+                          {uploadingPhotos[court.court_id]
+                            ? "Uploading..."
+                            : "Upload Photos"}
+                          <input
+                            type="file"
+                            multiple
+                            accept="image/*"
+                            onChange={(e) => {
+                              const files = Array.from(e.target.files);
+                              if (files.length > 0) {
+                                handlePhotoUpload(
+                                  court.court_id,
+                                  court.court_name,
+                                  files
+                                );
+                              }
+                            }}
+                            className="hidden"
+                            disabled={uploadingPhotos[court.court_id]}
+                          />
+                        </label>
+                      </div>
+
+                      {/* PHOTO GALLERY */}
+                      {courtPhotos.length > 0 ? (
+                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                          {courtPhotos.map((photo, index) => (
+                            <div key={index} className="relative group">
+                              <img
+                                src={photo.path}
+                                alt={`Court ${court.court_name}`}
+                                className="w-full h-40 object-cover rounded-lg shadow-sm border border-gray-200"
+                                onError={(e) => {
+                                  e.target.onerror = null;
+                                  e.target.src =
+                                    "https://via.placeholder.com/300x200?text=Image";
+                                }}
+                              />
+                              <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100">
+                                {photo.is_primary && (
+                                  <span className="absolute top-2 left-2 px-2 py-1 bg-blue-600 text-white text-xs rounded">
+                                    Primary
+                                  </span>
+                                )}
+                                <button
+                                  onClick={() =>
+                                    handleDeletePhoto(court.court_id, photo)
+                                  }
+                                  className="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl p-8 text-center">
+                          <div className="text-gray-400 text-4xl mb-3">📷</div>
+                          <p className="text-gray-600 font-medium mb-2">
+                            No photos uploaded yet
+                          </p>
+                          <p className="text-sm text-gray-500">
+                            Click "Upload Photos" to add images
+                          </p>
                         </div>
                       )}
                     </div>
-                    <button
-                      onClick={() => handleCourtEdit(court)}
-                      className="mt-4 md:mt-0 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
-                    >
-                      Edit Details
-                    </button>
                   </div>
-
-                  <div className="pt-6 border-t border-gray-100">
-                    <div className="flex items-center justify-between mb-4">
-                      <h4 className="text-sm font-bold text-gray-900 uppercase tracking-tight">
-                        Gallery
-                      </h4>
-
-                      {/* UPDATED UPLOAD BUTTON WITH REF */}
-                      <PhotoUpload
-                        type="court"
-                        entityId={court.court_id}
-                        entityName={court.court_name}
-                        onUploadComplete={(data) => {
-                          console.log('Upload complete, refreshing courts...', data);
-                          fetchCourts(); // Refresh courts after upload
-                        }}
-                        maxFiles={10}
-                        accept="image/*"
-                      />
-                    </div>
-
-                    {(() => {
-                      const allPhotos = getAllCourtPhotos(court);
-                      console.log(`Photos for court ${court.court_id}:`, allPhotos);
-
-                      if (allPhotos.length > 0) {
-                        return (
-                          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                            {allPhotos.map((photo, index) => (
-                              <div key={index} className="relative group">
-                                <img
-                                  src={photo.path}
-                                  alt={`Court ${court.court_name} - ${index + 1}`}
-                                  className="w-full h-32 object-cover rounded-xl shadow-sm border border-gray-100"
-                                  onError={(e) => {
-                                    e.target.onerror = null;
-                                    e.target.src = "https://via.placeholder.com/300x200?text=Image+Not+Found";
-                                  }}
-                                />
-                                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition rounded-xl flex items-center justify-center opacity-0 group-hover:opacity-100">
-                                  {photo.is_primary && (
-                                    <span className="absolute top-2 left-2 px-2 py-1 bg-blue-600 text-white text-xs rounded">
-                                      Primary
-                                    </span>
-                                  )}
-                                  <button
-                                    onClick={() =>
-                                      handleDeletePhoto(
-                                        court.court_id,
-                                        photo
-                                      )
-                                    }
-                                    className="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
-                                  >
-                                    Delete
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        );
-                      } else {
-                        return (
-                          <div className="bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl p-8 text-center">
-                            <div className="text-gray-400 mb-4">📷</div>
-                            <p className="text-sm text-gray-400 mb-2">
-                              No photos available yet.
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              Click "ADD PHOTOS" to upload court images
-                            </p>
-                          </div>
-                        );
-                      }
-                    })()}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -593,8 +595,8 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                       type="button"
                       onClick={() => toggleSport(sport.id, "edit")}
                       className={`flex flex-col items-center p-3 border-2 rounded-lg transition ${courtForm.sports.includes(sport.id)
-                        ? "border-blue-500 bg-blue-50"
-                        : "border-gray-200 hover:border-gray-300"
+                          ? "border-blue-500 bg-blue-50"
+                          : "border-gray-200 hover:border-gray-300"
                         }`}
                     >
                       <span className="text-2xl">{sport.icon}</span>
@@ -749,8 +751,8 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                       type="button"
                       onClick={() => toggleSport(sport.id, "add")}
                       className={`flex flex-col items-center p-3 border-2 rounded-lg transition ${newCourtForm.sports.includes(sport.id)
-                        ? "border-blue-500 bg-blue-50"
-                        : "border-gray-200 hover:border-gray-300"
+                          ? "border-blue-500 bg-blue-50"
+                          : "border-gray-200 hover:border-gray-300"
                         }`}
                     >
                       <span className="text-2xl">{sport.icon}</span>
