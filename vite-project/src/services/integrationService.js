@@ -9,64 +9,79 @@ import { userAPI, ownerAPI, bookingAPI, arenaAPI, reviewAPI } from "./api";
 export const integrationService = {
   // ===== PHOTO UPLOAD SERVICES =====
 
-  /**
-   * Upload arena photos (Owner)
-   */
-  uploadArenaPhotos: async (arenaId, formData) => {
-    try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(
-        `http://localhost:5000/api/owners/arenas/${arenaId}/photos`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            // Note: Don't set Content-Type for FormData
-          },
-          body: formData,
-        }
-      );
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || "Failed to upload arena photos");
+  uploadCourtPhotos: async (courtId, files) => {
+    try {
+      console.log("📤 Starting photo upload for court:", courtId);
+      console.log("Files to upload:", files);
+
+      const formData = new FormData();
+
+      // Add each file to FormData
+      files.forEach((file, index) => {
+        formData.append("court_images", file);
+        console.log(`📎 Added file ${index}: ${file.name} (${file.type}, ${file.size} bytes)`);
+      });
+
+      const token = localStorage.getItem("token");
+      if (!token) {
+        throw new Error("No authentication token found. Please login again.");
       }
 
-      return await response.json();
-    } catch (error) {
-      console.error("Error uploading arena photos:", error);
-      throw error;
-    }
-  },
-
-  /**
-   * Upload court photos (Owner)
-   */
-  uploadCourtPhotos: async (courtId, formData) => {
-    try {
-      const token = localStorage.getItem("token");
       const response = await fetch(
         `http://localhost:5000/api/owners/courts/${courtId}/photos`,
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${token}`,
+            'Authorization': `Bearer ${token}`,
+            // DO NOT set Content-Type header for FormData - browser will set it automatically
           },
           body: formData,
         }
       );
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || "Failed to upload court photos");
+      console.log("📡 Response status:", response.status);
+      console.log("📡 Response headers:", response.headers);
+
+      const responseText = await response.text();
+      console.log("📡 Raw response:", responseText);
+
+      let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch (e) {
+        console.error("Failed to parse JSON response:", e);
+        throw new Error(`Server returned invalid JSON: ${responseText.substring(0, 100)}...`);
       }
 
-      return await response.json();
+      if (!response.ok) {
+        console.error("❌ Server error response:", result);
+        throw new Error(result.message || result.error || `Upload failed with status ${response.status}`);
+      }
+
+      console.log("✅ Upload successful:", result);
+      return result;
     } catch (error) {
-      console.error("Error uploading court photos:", error);
+      console.error("❌ Upload error details:", error);
       throw error;
     }
   },
+
+  /**
+   * Test upload connection - simple ping
+   */
+  testUploadConnection: async () => {
+    try {
+      const response = await fetch('http://localhost:5000/api/owners/debug/upload-test', {
+        method: 'GET'
+      });
+      return await response.json();
+    } catch (error) {
+      console.error("Connection test failed:", error);
+      throw error;
+    }
+  },
+
 
   /**
    * Upload profile picture (User)
@@ -462,8 +477,8 @@ export const integrationService = {
           sports_names: Array.isArray(court.sports_names)
             ? court.sports_names
             : court.sports_names
-            ? court.sports_names.split(",")
-            : [],
+              ? court.sports_names.split(",")
+              : [],
         })),
         reviews: reviewsResponse.data.reviews || [],
       };
