@@ -36,6 +36,42 @@ const OwnerArenaSettings = ({ dashboardData }) => {
     { id: 8, name: "Table Tennis", icon: "🏓" },
   ];
 
+  // ===== CREATE TEST IMAGE FUNCTION =====
+  const createTestImage = () => {
+    return new Promise((resolve) => {
+      // Create a canvas element (in memory)
+      const canvas = document.createElement('canvas');
+      canvas.width = 200;
+      canvas.height = 150;
+
+      // Draw a simple image
+      const ctx = canvas.getContext('2d');
+
+      // Draw background
+      ctx.fillStyle = '#3498db';
+      ctx.fillRect(0, 0, 200, 150);
+
+      // Draw text
+      ctx.fillStyle = 'white';
+      ctx.font = 'bold 20px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('TEST IMAGE', 100, 50);
+
+      // Draw rectangle
+      ctx.fillStyle = '#e74c3c';
+      ctx.fillRect(50, 70, 100, 50);
+
+      // Convert to blob
+      canvas.toBlob((blob) => {
+        const file = new File([blob], 'test-image.jpg', {
+          type: 'image/jpeg',
+          lastModified: Date.now()
+        });
+        resolve(file);
+      }, 'image/jpeg', 0.95);
+    });
+  };
+
   useEffect(() => {
     if (dashboardData?.arenas) {
       setArenas(dashboardData.arenas);
@@ -53,8 +89,27 @@ const OwnerArenaSettings = ({ dashboardData }) => {
 
   const fetchCourts = async () => {
     try {
+      console.log("🔄 Fetching courts for arena:", selectedArena);
       const response = await ownerAPI.getCourts(selectedArena);
-      console.log("Fetched courts with images:", response.data);
+      console.log("📥 Courts data received:", response.data);
+
+      // Check each court's images
+      if (response.data && Array.isArray(response.data)) {
+        response.data.forEach((court, i) => {
+          console.log(`Court ${i} (${court.court_id}):`, {
+            name: court.court_name,
+            hasImages: !!court.images,
+            imageCount: court.images ? court.images.length : 0,
+            primaryImage: court.primary_image
+          });
+
+          // Log all images if they exist
+          if (court.images && court.images.length > 0) {
+            console.log(`  Images for court ${court.court_id}:`, court.images);
+          }
+        });
+      }
+
       setCourts(response.data || []);
     } catch (error) {
       console.error("Error fetching courts:", error);
@@ -124,63 +179,83 @@ const OwnerArenaSettings = ({ dashboardData }) => {
     }
   };
 
+  // ===== FIXED PHOTO UPLOAD FUNCTION =====
   const handlePhotoUpload = async (courtId, courtName, files) => {
-    console.log("Uploading photos for court:", courtId, courtName);
+    console.log("=".repeat(50));
+    console.log("🚀 PHOTO UPLOAD STARTED");
+    console.log("Court ID:", courtId);
+    console.log("Court Name:", courtName);
     console.log("Files to upload:", files.length);
+
+    files.forEach((file, i) => {
+      console.log(`File ${i}:`, {
+        name: file.name,
+        type: file.type,
+        size: file.size + ' bytes',
+        lastModified: new Date(file.lastModified).toLocaleString()
+      });
+    });
 
     setUploadingPhotos({ ...uploadingPhotos, [courtId]: true });
 
     const formData = new FormData();
     for (let i = 0; i < files.length; i++) {
-      formData.append("court_images", files[i]); // 🔥 Make sure fieldname matches
-      console.log(
-        `Added file ${i}:`,
-        files[i].name,
-        files[i].type,
-        files[i].size
-      );
+      formData.append("court_images", files[i]);
+      console.log(`Added to FormData: ${files[i].name}`);
     }
 
     try {
       const token = localStorage.getItem("token");
+      console.log("Token exists:", !!token);
+
       if (!token) {
-        throw new Error("Please login again");
+        alert("⚠️ Your session has expired. Please login again.");
+        throw new Error("No authentication token found");
       }
 
-      console.log(
-        "Uploading to:",
-        `http://localhost:5000/api/owners/courts/${courtId}/photos`
-      );
+      console.log("📤 Making request to: http://localhost:5000/api/owners/courts/" + courtId + "/photos");
 
       const response = await fetch(
         `http://localhost:5000/api/owners/courts/${courtId}/photos`,
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${token}`,
-            // 🔥 NO Content-Type header for FormData
+            'Authorization': `Bearer ${token}`
           },
-          body: formData,
+          body: formData
         }
       );
 
-      const data = await response.json();
-      console.log("Upload response:", data);
-      console.log("Response status:", response.status);
+      console.log("📡 Response status:", response.status);
+      console.log("📡 Response headers:", Object.fromEntries(response.headers.entries()));
+
+      const result = await response.json();
+      console.log("📡 Response data:", result);
 
       if (!response.ok) {
-        throw new Error(data.message || "Upload failed");
+        console.error("❌ Upload failed:", result);
+        throw new Error(result.message || `Upload failed with status ${response.status}`);
       }
 
-      alert(`✅ ${data.count} photos uploaded successfully!`);
+      console.log("✅ Upload successful!");
+      console.log("Uploaded", result.count, "photos");
+      console.log("Images:", result.images);
 
-      // Refresh to show new photos immediately
-      await fetchCourts();
+      alert(`✅ ${result.count} photos uploaded successfully!`);
+
+      // Refresh courts data after 1 second
+      setTimeout(() => {
+        console.log("🔄 Refreshing courts data...");
+        fetchCourts();
+      }, 1000);
+
     } catch (error) {
-      console.error("Upload error:", error);
-      alert(`❌ Error: ${error.message}`);
+      console.error("❌ Upload error:", error);
+      console.error("Error stack:", error.stack);
+      alert(`❌ Upload failed: ${error.message}\n\nCheck browser console for details.`);
     } finally {
       setUploadingPhotos({ ...uploadingPhotos, [courtId]: false });
+      console.log("=".repeat(50));
     }
   };
 
@@ -219,17 +294,41 @@ const OwnerArenaSettings = ({ dashboardData }) => {
     }
   };
 
-  // SIMPLE function to get photos
   const getCourtPhotos = (court) => {
-    if (court.images && Array.isArray(court.images)) {
-      return court.images.map((img) => ({
-        image_id: img.image_id,
-        path: img.image_url,
-        is_primary: img.is_primary,
-        uploaded_at: img.uploaded_at,
-      }));
+    const photos = [];
+
+    // Check if court has images array (from API)
+    if (court.images && court.images.length > 0) {
+      court.images.forEach((img) => {
+        photos.push({
+          image_id: img.image_id,
+          image_url: img.image_url,
+          cloudinary_id: img.cloudinary_id,
+          is_primary: img.is_primary || false,
+          path: img.image_url, // For compatibility
+        });
+      });
+      return photos;
     }
-    return [];
+
+    // Fallback to old structure if exists
+    if (court.primary_image) {
+      photos.push({
+        path: court.primary_image,
+        is_primary: true,
+      });
+    }
+
+    if (court.additional_images && court.additional_images.length > 0) {
+      court.additional_images.forEach((img) => {
+        photos.push({
+          path: img,
+          is_primary: false,
+        });
+      });
+    }
+
+    return photos;
   };
 
   return (
@@ -237,6 +336,93 @@ const OwnerArenaSettings = ({ dashboardData }) => {
       <h1 className="text-xl font-bold text-gray-900 mb-4 md:text-2xl md:mb-6">
         Arena & Court Settings
       </h1>
+
+      {/* DEBUG SECTION - REMOVE IN PRODUCTION */}
+      <div style={{ margin: '20px 0', padding: '15px', background: '#f0f8ff', borderRadius: '8px' }}>
+        <h3 className="text-lg font-bold mb-2">🧪 Debug Tools</h3>
+        <button
+          onClick={async () => {
+            console.log("🧪 Manual upload test...");
+
+            // Create a REAL test image
+            const testImage = await createTestImage();
+            console.log("Created test image:", testImage.name, testImage.size, "bytes");
+
+            // Get the first court ID
+            const courtId = courts[0]?.court_id;
+
+            if (!courtId) {
+              alert("No courts found. Please add a court first.");
+              return;
+            }
+
+            console.log("Testing upload for court:", courtId);
+
+            // Create FormData
+            const formData = new FormData();
+            formData.append("court_images", testImage);
+
+            try {
+              const token = localStorage.getItem("token");
+              console.log("Token exists:", !!token);
+
+              // First, test without authentication
+              console.log("Testing debug endpoint...");
+              const debugResponse = await fetch("http://localhost:5000/api/owners/debug/upload-test", {
+                method: "POST",
+                body: formData
+              });
+
+              console.log("Debug response status:", debugResponse.status);
+              const debugData = await debugResponse.json();
+              console.log("Debug response:", debugData);
+
+              if (debugResponse.ok) {
+                console.log("✅ Debug endpoint works!");
+
+                // Now test with authentication
+                console.log("Testing authenticated endpoint...");
+                const authResponse = await fetch(
+                  `http://localhost:5000/api/owners/courts/${courtId}/photos`,
+                  {
+                    method: "POST",
+                    headers: {
+                      "Authorization": `Bearer ${token}`
+                    },
+                    body: formData
+                  }
+                );
+
+                console.log("Auth response status:", authResponse.status);
+                const authData = await authResponse.json();
+                console.log("Auth response:", authData);
+
+                if (authResponse.ok) {
+                  alert(`✅ Test successful! Uploaded to Cloudinary. Check console.`);
+                } else {
+                  alert(`⚠️ Auth upload failed: ${authData.message}`);
+                }
+              } else {
+                alert(`❌ Debug upload failed: ${debugData.message}`);
+              }
+            } catch (error) {
+              console.error("Test error:", error);
+              alert(`❌ Error: ${error.message}`);
+            }
+          }}
+          style={{
+            padding: "10px 20px",
+            background: "#ff6b6b",
+            color: "white",
+            border: "none",
+            borderRadius: "4px",
+            margin: "10px 0",
+            cursor: "pointer"
+          }}
+        >
+          🧪 Test Upload API
+        </button>
+      </div>
 
       <div className="bg-white p-4 rounded-xl shadow mb-4 md:p-6 md:mb-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between">
@@ -343,12 +529,48 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                             </div>
                           )}
                       </div>
-                      <button
-                        onClick={() => handleCourtEdit(court)}
-                        className="mt-4 md:mt-0 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
-                      >
-                        Edit Details
-                      </button>
+                      <div className="flex gap-2 mt-4 md:mt-0">
+                        <button
+                          onClick={() => handleCourtEdit(court)}
+                          className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
+                        >
+                          Edit Details
+                        </button>
+                        <button
+                          onClick={async () => {
+                            console.log("🧪 Testing upload for court:", court.court_id);
+
+                            // Create a test image
+                            const canvas = document.createElement('canvas');
+                            canvas.width = 200;
+                            canvas.height = 150;
+                            const ctx = canvas.getContext('2d');
+                            ctx.fillStyle = '#2ecc71';
+                            ctx.fillRect(0, 0, 200, 150);
+                            ctx.fillStyle = 'white';
+                            ctx.font = '16px Arial';
+                            ctx.fillText(`Court ${court.court_id} Test`, 50, 75);
+
+                            canvas.toBlob(async (blob) => {
+                              const testFile = new File([blob], `test-court-${court.court_id}.jpg`, {
+                                type: 'image/jpeg'
+                              });
+
+                              await handlePhotoUpload(court.court_id, court.court_name, [testFile]);
+                            }, 'image/jpeg');
+                          }}
+                          style={{
+                            padding: '4px 8px',
+                            background: '#9b59b6',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            fontSize: '12px'
+                          }}
+                        >
+                          Test Upload
+                        </button>
+                      </div>
                     </div>
 
                     {/* PHOTO SECTION - FIXED */}
@@ -368,33 +590,50 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                             accept="image/*"
                             onChange={(e) => {
                               const files = Array.from(e.target.files);
+                              console.log("📁 Files selected:", files.length, "files");
+
                               if (files.length > 0) {
-                                handlePhotoUpload(
-                                  court.court_id,
-                                  court.court_name,
-                                  files
-                                );
+                                console.log("Selected files:", files.map(f => f.name));
+
+                                // Validate file types
+                                const invalidFiles = files.filter(f => !f.type.startsWith('image/'));
+                                if (invalidFiles.length > 0) {
+                                  alert(`❌ Please select image files only. Found ${invalidFiles.length} non-image files.`);
+                                  e.target.value = ''; // Clear input
+                                  return;
+                                }
+
+                                // Start upload
+                                handlePhotoUpload(court.court_id, court.court_name, files);
+
+                                // Clear the input so same file can be uploaded again
+                                e.target.value = '';
                               }
                             }}
                             className="hidden"
                             disabled={uploadingPhotos[court.court_id]}
+                            onClick={(e) => {
+                              // Prevent click from bubbling up
+                              e.stopPropagation();
+                              console.log("📱 File input clicked");
+                            }}
                           />
                         </label>
                       </div>
 
-                      {/* PHOTO GALLERY */}
+                      {/* PHOTO GALLERY - FIXED */}
                       {courtPhotos.length > 0 ? (
                         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
                           {courtPhotos.map((photo, index) => (
-                            <div key={index} className="relative group">
+                            <div key={photo.image_id || index} className="relative group">
                               <img
-                                src={photo.path}
-                                alt={`Court ${court.court_name}`}
+                                src={photo.image_url || photo.path}
+                                alt={`Court ${court.court_name} - ${index + 1}`}
                                 className="w-full h-40 object-cover rounded-lg shadow-sm border border-gray-200"
+                                onLoad={() => console.log(`✅ Image loaded: ${photo.image_url}`)}
                                 onError={(e) => {
-                                  e.target.onerror = null;
-                                  e.target.src =
-                                    "https://via.placeholder.com/300x200?text=Image";
+                                  console.error(`❌ Image failed to load: ${photo.image_url}`);
+                                  e.target.src = "https://via.placeholder.com/300x200?text=Image+Error";
                                 }}
                               />
                               <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100">
@@ -404,9 +643,12 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                                   </span>
                                 )}
                                 <button
-                                  onClick={() =>
-                                    handleDeletePhoto(court.court_id, photo)
-                                  }
+                                  onClick={() => {
+                                    if (window.confirm("Delete this photo?")) {
+                                      console.log("Deleting photo:", photo);
+                                      handleDeletePhoto(court.court_id, photo);
+                                    }
+                                  }}
                                   className="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
                                 >
                                   Delete
@@ -424,6 +666,16 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                           <p className="text-sm text-gray-500">
                             Click "Upload Photos" to add images
                           </p>
+                          <button
+                            onClick={() => {
+                              // Trigger file input click
+                              const fileInput = document.querySelector(`input[type="file"][data-court="${court.court_id}"]`);
+                              if (fileInput) fileInput.click();
+                            }}
+                            className="mt-3 px-4 py-2 bg-blue-100 text-blue-700 text-sm rounded-lg hover:bg-blue-200"
+                          >
+                            Click to Upload
+                          </button>
                         </div>
                       )}
                     </div>
@@ -524,11 +776,10 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                       key={sport.id}
                       type="button"
                       onClick={() => toggleSport(sport.id, "edit")}
-                      className={`flex flex-col items-center p-3 border-2 rounded-lg transition ${
-                        courtForm.sports.includes(sport.id)
-                          ? "border-blue-500 bg-blue-50"
-                          : "border-gray-200 hover:border-gray-300"
-                      }`}
+                      className={`flex flex-col items-center p-3 border-2 rounded-lg transition ${courtForm.sports.includes(sport.id)
+                        ? "border-blue-500 bg-blue-50"
+                        : "border-gray-200 hover:border-gray-300"
+                        }`}
                     >
                       <span className="text-2xl">{sport.icon}</span>
                       <span className="text-xs mt-1">{sport.name}</span>
@@ -681,11 +932,10 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                       key={sport.id}
                       type="button"
                       onClick={() => toggleSport(sport.id, "add")}
-                      className={`flex flex-col items-center p-3 border-2 rounded-lg transition ${
-                        newCourtForm.sports.includes(sport.id)
-                          ? "border-blue-500 bg-blue-50"
-                          : "border-gray-200 hover:border-gray-300"
-                      }`}
+                      className={`flex flex-col items-center p-3 border-2 rounded-lg transition ${newCourtForm.sports.includes(sport.id)
+                        ? "border-blue-500 bg-blue-50"
+                        : "border-gray-200 hover:border-gray-300"
+                        }`}
                     >
                       <span className="text-2xl">{sport.icon}</span>
                       <span className="text-xs mt-1">{sport.name}</span>

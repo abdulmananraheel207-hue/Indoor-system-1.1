@@ -195,8 +195,8 @@ const ownerController = {
               court.court_name || `Court ${court.court_number || 1}`,
               parseFloat(court.size_sqft) || 2000,
               parseFloat(court.price_per_hour) ||
-                parseFloat(base_price_per_hour) ||
-                500,
+              parseFloat(base_price_per_hour) ||
+              500,
               court.description || "",
             ]
           );
@@ -470,142 +470,141 @@ const ownerController = {
   },
 
   uploadCourtPhotos: async (req, res) => {
+    console.log("🚀 UPLOAD COURT PHOTOS STARTED");
+
     try {
       const { court_id } = req.params;
-      const files = req.files;
 
-      console.log("=== COURT PHOTO UPLOAD DEBUG ===");
-      console.log("1. Request received for court_id:", court_id);
-      console.log("2. User ID from token:", req.user?.id);
-      console.log("3. Files received:", files ? files.length : 0);
-      console.log("4. Request params:", req.params);
-      console.log("5. Request body keys:", Object.keys(req.body || {}));
+      console.log("📋 Request details:", {
+        courtId: court_id,
+        userId: req.user?.id,
+        filesCount: req.files ? req.files.length : 0
+      });
 
-      if (!files || files.length === 0) {
-        console.log("❌ No files in req.files");
+      // Check if files were uploaded
+      if (!req.files || req.files.length === 0) {
+        console.log("❌ No files uploaded");
         return res.status(400).json({
           success: false,
-          message: "No files uploaded",
-          debug: {
-            filesCount: files ? files.length : 0,
-            user: req.user?.id,
-            courtId: court_id,
-          },
+          message: "No files uploaded. Please select at least one image.",
         });
       }
 
-      // Log each file
-      files.forEach((file, i) => {
+      // Log all files received from Cloudinary middleware
+      console.log("📸 Files from Cloudinary:");
+      req.files.forEach((file, i) => {
         console.log(`File ${i}:`, {
           fieldname: file.fieldname,
           originalname: file.originalname,
-          path: file.path,
-          filename: file.filename,
+          filename: file.filename,       // This is the Cloudinary public_id
+          path: file.path,               // This is the Cloudinary URL
           size: file.size,
+          mimetype: file.mimetype
         });
       });
 
       // Verify court belongs to owner
-      console.log("Checking court ownership...");
+      console.log("🔍 Verifying court ownership...");
       const [courtCheck] = await pool.execute(
-        `SELECT cd.court_id, cd.court_name 
+        `SELECT cd.court_id, cd.court_name, a.owner_id 
        FROM court_details cd
        JOIN arenas a ON cd.arena_id = a.arena_id
        WHERE cd.court_id = ? AND a.owner_id = ?`,
         [court_id, req.user.id]
       );
 
-      console.log(
-        "Court check result:",
-        courtCheck.length > 0 ? "Found" : "NOT FOUND"
-      );
-
       if (courtCheck.length === 0) {
-        console.log("❌ Court ownership check failed");
+        console.log("❌ Court ownership verification failed");
         return res.status(403).json({
           success: false,
-          message: "Court not found or access denied",
-          debug: {
-            courtId: court_id,
-            userId: req.user?.id,
-            ownershipCheck: false,
-          },
+          message: "Court not found or you don't have permission",
+          debug: { courtId: court_id, userId: req.user.id }
         });
       }
 
-      const court = courtCheck[0];
-      console.log("Court found:", court.court_name);
+      console.log("✅ Court verified:", courtCheck[0].court_name);
 
+      // Start database transaction
       const connection = await pool.getConnection();
+      await connection.beginTransaction();
 
       try {
-        await connection.beginTransaction();
-
         // Check existing primary image
         const [existingPrimary] = await connection.execute(
           "SELECT image_id FROM court_images WHERE court_id = ? AND is_primary = TRUE",
           [court_id]
         );
-        console.log("Existing primary images:", existingPrimary.length);
+
+        console.log(`📊 Existing primary images: ${existingPrimary.length}`);
 
         const uploadedImages = [];
 
         // Save each photo to database
-        for (let i = 0; i < files.length; i++) {
-          const file = files[i];
+        for (let i = 0; i < req.files.length; i++) {
+          const file = req.files[i];
 
-          const image_url = file.path;
-          const cloudinary_id = file.filename;
+          // Get Cloudinary URL and public_id
+          const image_url = file.path; // Cloudinary URL
+          const cloudinary_id = file.filename; // Cloudinary public_id
 
-          const is_primary = existingPrimary.length === 0 && i === 0;
-          console.log(`Saving file ${i} to DB:`, {
-            image_url,
-            cloudinary_id,
-            is_primary,
+          console.log(`💾 Saving to DB [${i + 1}/${req.files.length}]:`, {
+            image_url: image_url.substring(0, 50) + "...",
+            cloudinary_id: cloudinary_id
           });
 
+          // Set first image as primary if no primary exists
+          const is_primary = existingPrimary.length === 0 && i === 0;
+
+          // Insert into database
           const [result] = await connection.execute(
-            `INSERT INTO court_images (court_id, image_url, cloudinary_id, is_primary, uploaded_at)
+            `INSERT INTO court_images 
+           (court_id, image_url, cloudinary_id, is_primary, uploaded_at)
            VALUES (?, ?, ?, ?, NOW())`,
             [court_id, image_url, cloudinary_id, is_primary]
           );
 
+          const insertedId = result.insertId;
+          console.log(`✅ Saved to DB with ID: ${insertedId}`);
+
           uploadedImages.push({
-            image_id: result.insertId,
-            image_url,
-            cloudinary_id,
-            is_primary,
+            image_id: insertedId,
+            image_url: image_url,
+            cloudinary_id: cloudinary_id,
+            is_primary: is_primary,
             court_id: parseInt(court_id),
-            court_name: court.court_name,
+            court_name: courtCheck[0].court_name,
           });
         }
 
         await connection.commit();
+        console.log("💾 Database transaction committed");
 
-        console.log("=== UPLOAD SUCCESS ===");
-        console.log("Uploaded images count:", uploadedImages.length);
+        console.log("🎉 Upload completed successfully!");
+        console.log(`📊 Uploaded ${uploadedImages.length} images`);
 
         res.json({
           success: true,
-          message: "Photos uploaded successfully",
+          message: `${uploadedImages.length} photos uploaded successfully`,
           count: uploadedImages.length,
           images: uploadedImages,
         });
-      } catch (error) {
+
+      } catch (dbError) {
         await connection.rollback();
-        console.error("Database error:", error);
-        throw error;
+        console.error("❌ Database error:", dbError);
+        throw dbError;
       } finally {
         connection.release();
+        console.log("🔓 Database connection released");
       }
+
     } catch (error) {
-      console.error("Court photo upload error:", error);
-      console.error("Error stack:", error.stack);
+      console.error("💥 Upload error:", error);
+
       res.status(500).json({
         success: false,
-        message: "Server error",
-        error: error.message,
-        stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
+        message: "Failed to upload photos. Please try again.",
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
   },
@@ -2208,9 +2207,8 @@ const ownerController = {
       const [bookings] = await pool.execute(query, params);
 
       res.json({
-        filename: `bookings_export_${
-          new Date().toISOString().split("T")[0]
-        }.json`,
+        filename: `bookings_export_${new Date().toISOString().split("T")[0]
+          }.json`,
         data: bookings,
         total_records: bookings.length,
         total_revenue: bookings.reduce(
