@@ -305,7 +305,7 @@ const UserArenaDetails = () => {
         bookingResponse = await integrationService.createBooking({
           arenaId: parseInt(arenaId),
           slot_ids: slotIds,
-          sportId: sportToSend,
+          sportId: selectedSportId,
           totalPrice,
           courtId: selectedCourt.court_id, // ADD THIS
           notes: "",
@@ -314,7 +314,7 @@ const UserArenaDetails = () => {
         bookingResponse = await integrationService.createBooking({
           arenaId: parseInt(arenaId),
           slot_id: slotIds[0],
-          sport_id: sportToSend,
+          sport_id: selectedSportId,
           totalPrice,
           courtId: selectedCourt.court_id, // ADD THIS
           notes: "",

@@ -176,22 +176,48 @@ const bookingController = {
           const commission_amount =
             priceForSlot * (commission_percentage / 100);
 
+          // Add this validation BEFORE the INSERT statement
+          if (!sportIdNum && !slot.sport_id) {
+            await connection.rollback();
+            return res.status(400).json({
+              message: "Sport ID is required for booking",
+              slot_id: slot.slot_id,
+              date: slot.date,
+              start_time: slot.start_time,
+              court_id: slot.court_id,
+            });
+          }
+
+          // Ensure court_id is valid
+          const finalCourtId = courtIdNum || slot.court_id;
+          if (!finalCourtId) {
+            await connection.rollback();
+            return res.status(400).json({
+              message: "Court ID is required for booking",
+              slot_id: slot.slot_id,
+              date: slot.date,
+              start_time: slot.start_time,
+            });
+          }
+
+          // Ensure sport_id is valid
+          const finalSportId = sportIdNum || slot.sport_id;
+
           const [bookingResult] = await connection.execute(
             `INSERT INTO bookings 
- (user_id, arena_id, slot_id, sport_id, court_id, total_amount, 
-  commission_percentage, commission_amount, payment_method, status)
- VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+   (user_id, arena_id, slot_id, sport_id, court_id, total_amount, 
+    commission_percentage, commission_amount, payment_method, status, booking_date)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NOW())`,
             [
               req.user.id,
               arenaIdNum,
               slot.slot_id,
-              sportIdNum || slot.sport_id,
-              courtIdNum || slot.court_id,
+              finalSportId,
+              finalCourtId, // court_id value
               priceForSlot,
               commission_percentage,
               commission_amount,
               payment_method || "pay_after",
-              "pending",
             ]
           );
 
@@ -292,25 +318,50 @@ const bookingController = {
         const priceForSlot = slot.price || totalAmountNum || 500;
         const commission_amount = priceForSlot * (commission_percentage / 100);
 
+        // Add this validation BEFORE the INSERT statement
+        if (!sportIdNum && !slot.sport_id) {
+          await connection.rollback();
+          return res.status(400).json({
+            message: "Sport ID is required for booking",
+            slot_id: slot.slot_id,
+            date: slot.date,
+            start_time: slot.start_time,
+            court_id: slot.court_id,
+          });
+        }
+
+        // Ensure court_id is valid
+        const finalCourtId = courtIdNum || slot.court_id;
+        if (!finalCourtId) {
+          await connection.rollback();
+          return res.status(400).json({
+            message: "Court ID is required for booking",
+            slot_id: slot.slot_id,
+            date: slot.date,
+            start_time: slot.start_time,
+          });
+        }
+
+        // Ensure sport_id is valid
+        const finalSportId = sportIdNum || slot.sport_id;
+
         const [bookingResult] = await connection.execute(
           `INSERT INTO bookings 
- (user_id, arena_id, slot_id, sport_id, court_id, total_amount, 
-  commission_percentage, commission_amount, payment_method, status)
- VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+   (user_id, arena_id, slot_id, sport_id, court_id, total_amount, 
+    commission_percentage, commission_amount, payment_method, status, booking_date)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NOW())`,
           [
             req.user.id,
             arenaIdNum,
             slot.slot_id,
-            sportIdNum || slot.sport_id,
-            courtIdNum || slot.court_id,
+            finalSportId,
+            finalCourtId, // court_id value
             priceForSlot,
             commission_percentage,
             commission_amount,
             payment_method || "pay_after",
-            "pending",
           ]
         );
-
         const bookingId = bookingResult.insertId;
         bookingIds.push(bookingId);
         totalCommission = commission_amount;
@@ -352,9 +403,9 @@ const bookingController = {
         const placeholders = bookingIds.map(() => "?").join(",");
         const [bookings] = await pool.execute(
           `SELECT b.*, a.name as arena_name, st.name as sport_name,
-                  ts.date, ts.start_time, ts.end_time, ts.court_id, 
-                  ao.arena_name as owner_name,
-                  ao.owner_id, ao.email as owner_email
+        ts.date, ts.start_time, ts.end_time, ts.court_id, 
+        ao.arena_name as owner_name,
+        ao.owner_id, ao.email as owner_email, ao.phone_number as owner_phone
            FROM bookings b
            JOIN arenas a ON b.arena_id = a.arena_id
            JOIN arena_owners ao ON a.owner_id = ao.owner_id
