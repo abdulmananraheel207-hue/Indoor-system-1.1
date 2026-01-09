@@ -469,6 +469,8 @@ const ownerController = {
     }
   },
 
+  // In ownerController.js - Replace the uploadCourtPhotos function with this:
+
   uploadCourtPhotos: async (req, res) => {
     console.log("🚀 UPLOAD COURT PHOTOS STARTED");
 
@@ -478,10 +480,23 @@ const ownerController = {
       console.log("📋 Request details:", {
         courtId: court_id,
         userId: req.user?.id,
-        filesCount: req.files ? req.files.length : 0
+        userRole: req.user?.role,
+        filesCount: req.files ? req.files.length : 0,
+        hasAuth: !!req.user
       });
 
-      // Check if files were uploaded
+      // ✅ STEP 1: Check authentication
+      if (!req.user) {
+        console.log("❌ No user in request");
+        return res.status(401).json({
+          success: false,
+          message: "Authentication required. Please login.",
+        });
+      }
+
+      console.log("✅ User authenticated:", req.user.id);
+
+      // ✅ STEP 2: Check if files were uploaded
       if (!req.files || req.files.length === 0) {
         console.log("❌ No files uploaded");
         return res.status(400).json({
@@ -490,20 +505,20 @@ const ownerController = {
         });
       }
 
-      // Log all files received from Cloudinary middleware
+      console.log(`✅ Files received: ${req.files.length}`);
+
+      // ✅ STEP 3: Log all files from Cloudinary
       console.log("📸 Files from Cloudinary:");
       req.files.forEach((file, i) => {
         console.log(`File ${i}:`, {
-          fieldname: file.fieldname,
           originalname: file.originalname,
-          filename: file.filename,       // This is the Cloudinary public_id
-          path: file.path,               // This is the Cloudinary URL
+          filename: file.filename,
+          path: file.path,
           size: file.size,
-          mimetype: file.mimetype
         });
       });
 
-      // Verify court belongs to owner
+      // ✅ STEP 4: Verify court exists and belongs to owner
       console.log("🔍 Verifying court ownership...");
       const [courtCheck] = await pool.execute(
         `SELECT cd.court_id, cd.court_name, a.owner_id 
@@ -518,13 +533,34 @@ const ownerController = {
         return res.status(403).json({
           success: false,
           message: "Court not found or you don't have permission",
-          debug: { courtId: court_id, userId: req.user.id }
         });
       }
 
-      console.log("✅ Court verified:", courtCheck[0].court_name);
+      const court = courtCheck[0];
+      console.log("✅ Court verified:", court.court_name);
 
-      // Start database transaction
+      // ✅ STEP 5: Check if adding these photos exceeds the 3-photo limit
+      const [existingPhotos] = await pool.execute(
+        "SELECT COUNT(*) as count FROM court_images WHERE court_id = ?",
+        [court_id]
+      );
+
+      const currentCount = existingPhotos[0].count;
+      const newCount = currentCount + req.files.length;
+
+      console.log(`📊 Photo count check: Current=${currentCount}, Adding=${req.files.length}, Total will be=${newCount}`);
+
+      if (newCount > 3) {
+        console.log("❌ Photo limit exceeded");
+        return res.status(400).json({
+          success: false,
+          message: `Maximum 3 photos per court. You have ${currentCount}, trying to add ${req.files.length}.`,
+        });
+      }
+
+      console.log("✅ Photo limit check passed");
+
+      // ✅ STEP 6: Start database transaction
       const connection = await pool.getConnection();
       await connection.beginTransaction();
 
@@ -535,27 +571,26 @@ const ownerController = {
           [court_id]
         );
 
-        console.log(`📊 Existing primary images: ${existingPrimary.length}`);
+        console.log(`📌 Existing primary images: ${existingPrimary.length}`);
 
         const uploadedImages = [];
 
-        // Save each photo to database
+        // ✅ STEP 7: Save each photo to database
         for (let i = 0; i < req.files.length; i++) {
           const file = req.files[i];
 
-          // Get Cloudinary URL and public_id
           const image_url = file.path; // Cloudinary URL
           const cloudinary_id = file.filename; // Cloudinary public_id
 
           console.log(`💾 Saving to DB [${i + 1}/${req.files.length}]:`, {
             image_url: image_url.substring(0, 50) + "...",
-            cloudinary_id: cloudinary_id
+            cloudinary_id: cloudinary_id,
           });
 
           // Set first image as primary if no primary exists
           const is_primary = existingPrimary.length === 0 && i === 0;
 
-          // Insert into database
+          // INSERT into database
           const [result] = await connection.execute(
             `INSERT INTO court_images 
            (court_id, image_url, cloudinary_id, is_primary, uploaded_at)
@@ -572,19 +607,21 @@ const ownerController = {
             cloudinary_id: cloudinary_id,
             is_primary: is_primary,
             court_id: parseInt(court_id),
-            court_name: courtCheck[0].court_name,
+            court_name: court.court_name,
           });
         }
 
+        // ✅ STEP 8: Commit transaction
         await connection.commit();
         console.log("💾 Database transaction committed");
 
         console.log("🎉 Upload completed successfully!");
         console.log(`📊 Uploaded ${uploadedImages.length} images`);
 
+        // ✅ STEP 9: Return success response
         res.json({
           success: true,
-          message: `${uploadedImages.length} photos uploaded successfully`,
+          message: `${uploadedImages.length} photo(s) uploaded successfully`,
           count: uploadedImages.length,
           images: uploadedImages,
         });
@@ -604,7 +641,7 @@ const ownerController = {
       res.status(500).json({
         success: false,
         message: "Failed to upload photos. Please try again.",
-        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined,
       });
     }
   },

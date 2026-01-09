@@ -1,4 +1,4 @@
-// backend/middleware/upload.js - IMPROVED CLOUDINARY VERSION
+// backend/middleware/upload.js - FULLY FIXED VERSION
 const cloudinary = require("cloudinary").v2;
 const { CloudinaryStorage } = require("multer-storage-cloudinary");
 const multer = require("multer");
@@ -14,16 +14,27 @@ console.log("✓ Cloudinary configured:", process.env.CLOUDINARY_CLOUD_NAME);
 
 // Get folder name based on upload type
 const getFolderName = (req, file) => {
+  // Extract from URL path since params might not be set yet
+  const url = req.originalUrl;
+
   if (file.fieldname === "profile_picture") {
-    return `sports-arena/users/${req.user?.id}/profile`;
-  } else if (file.fieldname === "arena_images") {
-    const arenaId = req.params.arena_id;
+    const userId = req.user?.id;
+    return `sports-arena/users/${userId}/profile`;
+  }
+  else if (file.fieldname === "arena_images") {
+    // Extract arena_id from URL: /owners/arenas/:arena_id/photos
+    const arenaMatch = url.match(/\/arenas\/(\d+)\/photos/);
+    const arenaId = arenaMatch ? arenaMatch[1] : "unknown";
     return `sports-arena/arenas/${arenaId}`;
-  } else if (file.fieldname === "court_images") {
-    // 🔧 FIX: Get court_id from params for court images
-    const courtId = req.params.court_id;
+  }
+  else if (file.fieldname === "court_images") {
+    // Extract court_id from URL: /owners/courts/:court_id/photos
+    const courtMatch = url.match(/\/courts\/(\d+)\/photos/);
+    const courtId = courtMatch ? courtMatch[1] : "unknown";
+    console.log("📍 Court Image Upload - Extracted court_id from URL:", courtId);
     return `sports-arena/courts/${courtId}`;
   }
+
   return "sports-arena/others";
 };
 
@@ -42,12 +53,18 @@ const storage = new CloudinaryStorage({
     const folder = getFolderName(req, file);
     const public_id = getPublicId(req, file);
 
+    console.log("📦 Uploading to Cloudinary:", {
+      folder: folder,
+      public_id: public_id,
+      fieldname: file.fieldname,
+    });
+
     // Different transformations for different types
     let transformations = [];
 
     if (file.fieldname === "profile_picture") {
       transformations = [
-        { width: 400, height: 400, crop: "fill", gravity: "face" }, // Profile pic crop
+        { width: 400, height: 400, crop: "fill", gravity: "face" },
         { quality: "auto:good" },
       ];
     } else if (
@@ -55,7 +72,7 @@ const storage = new CloudinaryStorage({
       file.fieldname === "court_images"
     ) {
       transformations = [
-        { width: 1200, height: 800, crop: "limit" }, // Limit size for arena/court photos
+        { width: 1200, height: 800, crop: "limit" },
         { quality: "auto:good" },
       ];
     } else {
@@ -68,7 +85,7 @@ const storage = new CloudinaryStorage({
       resource_type: "image",
       format: "jpg",
       transformation: transformations,
-      tags: ["sports-arena", file.fieldname], // Add tags for organization
+      tags: ["sports-arena", file.fieldname],
     };
   },
 });
@@ -93,12 +110,12 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
-// Create upload instance
+// Create upload instance with proper error handling
 const upload = multer({
   storage: storage,
   limits: {
     fileSize: 10 * 1024 * 1024, // 10MB per file
-    files: 20, // Max 20 files per upload
+    files: 3, // Max 3 files per upload (per your requirement)
   },
   fileFilter: fileFilter,
 });
@@ -108,24 +125,36 @@ const handleUpload = (uploadMethod) => {
   return (req, res, next) => {
     uploadMethod(req, res, (err) => {
       if (err) {
+        console.error("❌ Upload error:", err);
+
         if (err instanceof multer.MulterError) {
-          // Multer-specific errors
           if (err.code === "LIMIT_FILE_SIZE") {
             return res.status(400).json({
-              message: "File too large. Maximum size is 10MB",
+              success: false,
+              message: "File too large. Maximum size is 10MB per file",
             });
           }
           if (err.code === "LIMIT_FILE_COUNT") {
             return res.status(400).json({
-              message: "Too many files. Maximum is 20 files per upload",
+              success: false,
+              message: "Too many files. Maximum is 3 files per upload",
             });
           }
         }
+
         return res.status(400).json({
-          message: "Upload error",
-          error: err.message,
+          success: false,
+          message: "Upload error: " + err.message,
         });
       }
+
+      // Log successful file reception
+      if (req.files && req.files.length > 0) {
+        console.log(
+          `✅ ${req.files.length} files received and processed by Cloudinary`
+        );
+      }
+
       next();
     });
   };
@@ -133,7 +162,7 @@ const handleUpload = (uploadMethod) => {
 
 module.exports = {
   uploadProfilePicture: handleUpload(upload.single("profile_picture")),
-  uploadArenaImages: handleUpload(upload.array("arena_images", 20)),
-  uploadCourtImages: handleUpload(upload.array("court_images", 20)),
-  cloudinary, // Export for potential use elsewhere
+  uploadArenaImages: handleUpload(upload.array("arena_images", 3)),
+  uploadCourtImages: handleUpload(upload.array("court_images", 3)),
+  cloudinary,
 };
