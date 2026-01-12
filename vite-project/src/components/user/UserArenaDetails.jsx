@@ -214,7 +214,7 @@ const UserArenaDetails = () => {
         console.error("Error locking slot", error);
         alert(
           error.response?.data?.message ||
-            "Slot is no longer available. Please choose another slot."
+          "Slot is no longer available. Please choose another slot."
         );
         fetchAvailableSlots();
       }
@@ -334,7 +334,7 @@ const UserArenaDetails = () => {
 
       setLastBookingId(
         bookingResponse?.bookings?.[0]?.booking_id ||
-          bookingResponse?.booking?.booking_id
+        bookingResponse?.booking?.booking_id
       );
       setShowSuccessModal(true);
 
@@ -347,7 +347,7 @@ const UserArenaDetails = () => {
       console.error("Error creating booking:", error);
       alert(
         error.response?.data?.message ||
-          "Failed to create booking. Please try again."
+        "Failed to create booking. Please try again."
       );
     } finally {
       setBookingInProgress(false);
@@ -452,9 +452,8 @@ const UserArenaDetails = () => {
             <button
               type="button"
               onClick={handleAddFavorite}
-              className={`${
-                isFavorited ? "text-red-700" : "text-red-500 hover:text-red-700"
-              }`}
+              className={`${isFavorited ? "text-red-700" : "text-red-500 hover:text-red-700"
+                }`}
               disabled={isFavorited}
               title={isFavorited ? "Already in favorites" : "Add to favorites"}
             >
@@ -509,11 +508,10 @@ const UserArenaDetails = () => {
                       {[...Array(5)].map((_, i) => (
                         <svg
                           key={i}
-                          className={`h-5 w-5 ${
-                            i < Math.floor(arena.rating || 0)
+                          className={`h-5 w-5 ${i < Math.floor(arena.rating || 0)
                               ? "text-yellow-400"
                               : "text-gray-300"
-                          }`}
+                            }`}
                           fill="currentColor"
                           viewBox="0 0 20 20"
                         >
@@ -712,11 +710,10 @@ const UserArenaDetails = () => {
                             {[...Array(5)].map((_, i) => (
                               <svg
                                 key={i}
-                                className={`h-4 w-4 ${
-                                  i < review.rating
+                                className={`h-4 w-4 ${i < review.rating
                                     ? "text-yellow-400"
                                     : "text-gray-300"
-                                }`}
+                                  }`}
                                 fill="currentColor"
                                 viewBox="0 0 20 20"
                               >
@@ -769,11 +766,10 @@ const UserArenaDetails = () => {
                         key={court.court_id}
                         type="button"
                         onClick={() => setSelectedCourt(court)}
-                        className={`w-full text-left p-3 rounded-lg border ${
-                          selectedCourt?.court_id === court.court_id
+                        className={`w-full text-left p-3 rounded-lg border ${selectedCourt?.court_id === court.court_id
                             ? "border-primary-500 bg-primary-50"
                             : "border-gray-300 hover:bg-gray-50"
-                        }`}
+                          }`}
                       >
                         <div className="flex justify-between items-center">
                           <div>
@@ -902,13 +898,12 @@ const UserArenaDetails = () => {
                         type="button"
                         onClick={() => handleSlotSelect(slot)}
                         disabled={!isAvailable || slot.is_blocked}
-                        className={`p-3 rounded-lg border text-center ${
-                          isSelected
+                        className={`p-3 rounded-lg border text-center ${isSelected
                             ? "border-primary-500 bg-primary-50 text-primary-700"
                             : isAvailable && !slot.is_blocked
-                            ? "border-gray-300 hover:bg-gray-50"
-                            : "border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed"
-                        }`}
+                              ? "border-gray-300 hover:bg-gray-50"
+                              : "border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed"
+                          }`}
                       >
                         <div className="font-medium">
                           {slot.start_time} - {slot.end_time}
@@ -948,9 +943,8 @@ const UserArenaDetails = () => {
                           const sorted = [...selectedSlots].sort((a, b) =>
                             a.start_time.localeCompare(b.start_time)
                           );
-                          return `${sorted[0].start_time} - ${
-                            sorted[sorted.length - 1].end_time
-                          }`;
+                          return `${sorted[0].start_time} - ${sorted[sorted.length - 1].end_time
+                            }`;
                         })()}
                       </span>
                     </div>
@@ -991,7 +985,7 @@ const UserArenaDetails = () => {
                       selectedSlots.forEach((s) =>
                         integrationService
                           .releaseSlot(s.slot_id)
-                          .catch(() => {})
+                          .catch(() => { })
                       );
                       setSelectedSlots([]);
                       setLockExpiry(null);
@@ -1022,14 +1016,13 @@ const UserArenaDetails = () => {
                   bookingInProgress ||
                   !selectedSportId
                 }
-                className={`w-full py-3 rounded-lg font-medium transition-all duration-200 ${
-                  selectedCourt &&
-                  selectedSlots.length > 0 &&
-                  selectedSportId &&
-                  !bookingInProgress
+                className={`w-full py-3 rounded-lg font-medium transition-all duration-200 ${selectedCourt &&
+                    selectedSlots.length > 0 &&
+                    selectedSportId &&
+                    !bookingInProgress
                     ? "bg-primary-600 text-white hover:bg-primary-700 shadow-md hover:shadow-lg"
                     : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                }`}
+                  }`}
               >
                 {bookingInProgress ? (
                   <>
