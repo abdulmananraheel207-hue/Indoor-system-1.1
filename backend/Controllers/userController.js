@@ -362,8 +362,7 @@ const userController = {
     }
   },
 
-  // Get arena details
-  // In userController.js - Update getArenaDetails function
+
   getArenaDetails: async (req, res) => {
     try {
       const { arena_id } = req.params;
@@ -395,7 +394,7 @@ const userController = {
         [arena_id]
       );
 
-      // Get all courts for this arena
+      // Get all courts for this arena WITH IMAGES
       const [courts] = await pool.execute(
         `SELECT cd.*, 
               GROUP_CONCAT(DISTINCT st.name) as sports_names
@@ -406,6 +405,25 @@ const userController = {
        GROUP BY cd.court_id
        ORDER BY cd.court_number`,
         [arena_id]
+      );
+
+      // For each court, fetch its images
+      const courtsWithImages = await Promise.all(
+        courts.map(async (court) => {
+          const [courtImages] = await pool.execute(
+            `SELECT image_id, image_url, cloudinary_id, is_primary, uploaded_at
+           FROM court_images 
+           WHERE court_id = ? 
+           ORDER BY is_primary DESC, uploaded_at DESC`,
+            [court.court_id]
+          );
+
+          return {
+            ...court,
+            sports: court.sports_names ? court.sports_names.split(',') : [],
+            images: courtImages || []  // Add images array to each court
+          };
+        })
       );
 
       // Get time slots for next 7 days (all courts)
@@ -458,10 +476,7 @@ const userController = {
       res.json({
         ...arenas[0],
         images,
-        courts: courts.map(court => ({
-          ...court,
-          sports: court.sports_names ? court.sports_names.split(',') : []
-        })),
+        courts: courtsWithImages,  // Now includes images
         slots: slotsByCourt,
         reviews,
         is_favorite,

@@ -153,7 +153,7 @@ const ManagerCalendar = ({ arenas = [], permissions = {} }) => {
                                     Time Slot
                                 </th>
                                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Price (₹)
+                                    Price (Rs)
                                 </th>
                                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Status
@@ -173,7 +173,7 @@ const ManagerCalendar = ({ arenas = [], permissions = {} }) => {
                                     </td>
                                     <td className="px-4 py-3">
                                         <div className="text-sm text-gray-900">
-                                            ₹{slot.price}/hour
+                                            Rs{slot.price}/hour
                                         </div>
                                     </td>
                                     <td className="px-4 py-3">
@@ -209,8 +209,8 @@ const ManagerCalendar = ({ arenas = [], permissions = {} }) => {
                                                         is_holiday: slot.is_holiday
                                                     })}
                                                     className={`px-3 py-1 text-xs rounded ${slot.is_blocked_by_owner
-                                                            ? "bg-green-100 text-green-700 hover:bg-green-200"
-                                                            : "bg-red-100 text-red-700 hover:bg-red-200"
+                                                        ? "bg-green-100 text-green-700 hover:bg-green-200"
+                                                        : "bg-red-100 text-red-700 hover:bg-red-200"
                                                         }`}
                                                 >
                                                     {slot.is_blocked_by_owner ? "Unblock" : "Block"}

@@ -1414,7 +1414,6 @@ const ownerController = {
         sports,
       } = req.body;
 
-      // Verify owner owns this arena
       const [arenaCheck] = await pool.execute(
         "SELECT arena_id FROM arenas WHERE arena_id = ? AND owner_id = ?",
         [arena_id, req.user.id]

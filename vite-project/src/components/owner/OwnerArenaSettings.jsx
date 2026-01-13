@@ -356,7 +356,7 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                             {court.size_sqft} SQ FT
                           </span>
                           <span className="px-2 py-1 bg-green-50 text-green-700 text-xs font-semibold rounded">
-                            ₹{court.price_per_hour}/HOUR
+                            Rs{court.price_per_hour}/HOUR
                           </span>
                           <span className="px-2 py-1 bg-purple-50 text-purple-700 text-xs font-semibold rounded">
                             Court #{court.court_number}
@@ -524,7 +524,7 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-500 uppercase mb-1">
-                    Price (₹/Hour)
+                    Price (Rs/Hour)
                   </label>
                   <input
                     type="number"
@@ -674,7 +674,7 @@ const OwnerArenaSettings = ({ dashboardData }) => {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-500 uppercase mb-1">
-                    Price (₹/Hour) *
+                    Price (Rs/Hour) *
                   </label>
                   <input
                     type="number"

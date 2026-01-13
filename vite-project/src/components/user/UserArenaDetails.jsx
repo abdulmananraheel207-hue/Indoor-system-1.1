@@ -22,9 +22,9 @@ const UserArenaDetails = () => {
   const [lockExpiry, setLockExpiry] = useState(null);
   const [timeLeft, setTimeLeft] = useState(null);
   const [isFavorited, setIsFavorited] = useState(false);
-  const [favorites, setFavorites] = useState([]);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [lastBookingId, setLastBookingId] = useState(null);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
   useEffect(() => {
     fetchArenaDetails();
@@ -104,6 +104,7 @@ const UserArenaDetails = () => {
         description: court.description,
         sports: court.sports || [],
         sports_names: court.sports_names || [],
+        images: court.images || [],
       }));
 
       setArena({
@@ -114,7 +115,9 @@ const UserArenaDetails = () => {
 
       if (transformedCourts.length > 0) {
         setSelectedCourt(transformedCourts[0]);
+        setCurrentImageIndex(0);
       }
+
       // fetch sports categories for sport selection
       try {
         const sports = await integrationService.getSportsCategories();
@@ -368,7 +371,6 @@ const UserArenaDetails = () => {
 
       // Update state to reflect it's now favorited
       setIsFavorited(true);
-      setFavorites((prev) => [...prev, { arenaId: parseInt(arenaId) }]);
       alert("Arena added to favorites!");
     } catch (error) {
       console.error("Error adding favorite:", error);
@@ -408,6 +410,39 @@ const UserArenaDetails = () => {
     }
   };
 
+  // Get current court images
+  const getCurrentCourtImages = () => {
+    if (!selectedCourt || !selectedCourt.images) return [];
+    return selectedCourt.images;
+  };
+
+  // Handle next/previous image
+  const nextImage = () => {
+    const images = getCurrentCourtImages();
+    if (images.length === 0) return;
+    setCurrentImageIndex((prevIndex) =>
+      prevIndex === images.length - 1 ? 0 : prevIndex + 1
+    );
+  };
+
+  const prevImage = () => {
+    const images = getCurrentCourtImages();
+    if (images.length === 0) return;
+    setCurrentImageIndex((prevIndex) =>
+      prevIndex === 0 ? images.length - 1 : prevIndex - 1
+    );
+  };
+
+  // Handle court change - reset image index
+  const handleCourtChange = (court) => {
+    setSelectedCourt(court);
+    setCurrentImageIndex(0);
+    // Clear selected slots when changing court
+    setSelectedSlots([]);
+    setLockExpiry(null);
+    setTimeLeft(null);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex justify-center items-center">
@@ -423,6 +458,9 @@ const UserArenaDetails = () => {
       </div>
     );
   }
+
+  const courtImages = getCurrentCourtImages();
+  const hasCourtImages = courtImages.length > 0;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -477,21 +515,83 @@ const UserArenaDetails = () => {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Arena Images Carousel */}
+        {/* Court Images Carousel */}
         <div className="mb-8">
-          <div className="h-96 bg-gray-200 rounded-2xl overflow-hidden">
-            {arena.images && arena.images.length > 0 ? (
-              <img
-                src={arena.images[0].image_url}
-                alt={arena.name}
-                className="w-full h-full object-cover"
-              />
+          <div className="relative h-96 bg-gray-200 rounded-2xl overflow-hidden">
+            {hasCourtImages ? (
+              <>
+                {/* Main Image */}
+                <img
+                  src={courtImages[currentImageIndex].image_url}
+                  alt={`${selectedCourt.court_name} - Photo ${currentImageIndex + 1}`}
+                  className="w-full h-full object-cover"
+                />
+
+                {/* Navigation Arrows */}
+                {courtImages.length > 1 && (
+                  <>
+                    <button
+                      onClick={prevImage}
+                      className="absolute left-4 top-1/2 transform -translate-y-1/2 bg-black bg-opacity-50 text-white p-2 rounded-full hover:bg-opacity-70 transition"
+                    >
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={nextImage}
+                      className="absolute right-4 top-1/2 transform -translate-y-1/2 bg-black bg-opacity-50 text-white p-2 rounded-full hover:bg-opacity-70 transition"
+                    >
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                    </button>
+                  </>
+                )}
+
+                {/* Image Counter */}
+                <div className="absolute top-4 right-4 bg-black bg-opacity-70 text-white px-3 py-1 rounded-full text-sm">
+                  {currentImageIndex + 1} / {courtImages.length}
+                </div>
+
+                {/* Court Info Overlay */}
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black to-transparent p-6">
+                  <div className="text-white">
+                    <h2 className="text-2xl font-bold">{selectedCourt.court_name}</h2>
+                    <p className="text-gray-200">Court {selectedCourt.court_number} • {selectedCourt.size_sqft} sqft</p>
+                  </div>
+                </div>
+              </>
             ) : (
-              <div className="w-full h-full flex items-center justify-center bg-gray-100">
-                <span className="text-gray-400">No images available</span>
+              <div className="w-full h-full flex flex-col items-center justify-center bg-gray-100">
+                <div className="text-gray-400 text-6xl mb-4">🏟️</div>
+                <span className="text-gray-400 text-lg mb-2">No images available</span>
+                <p className="text-gray-500 text-sm">Select a court to view its photos</p>
               </div>
             )}
           </div>
+
+          {/* Image Thumbnails */}
+          {hasCourtImages && courtImages.length > 1 && (
+            <div className="mt-4">
+              <div className="flex space-x-2 overflow-x-auto py-2 px-1">
+                {courtImages.map((image, index) => (
+                  <button
+                    key={image.image_id || index}
+                    onClick={() => setCurrentImageIndex(index)}
+                    className={`flex-shrink-0 focus:outline-none ${currentImageIndex === index ? 'ring-2 ring-blue-500' : ''
+                      }`}
+                  >
+                    <img
+                      src={image.image_url}
+                      alt={`Thumbnail ${index + 1}`}
+                      className="w-20 h-14 object-cover rounded-lg border border-gray-300"
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -579,8 +679,7 @@ const UserArenaDetails = () => {
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       strokeWidth={2}
-                      d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
-                    />
+                      d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                   </svg>
                   <div>
                     <p className="text-sm text-gray-600">Courts</p>
@@ -600,7 +699,6 @@ const UserArenaDetails = () => {
                 <h3 className="text-lg font-semibold text-gray-900 mb-3">
                   Available Sports
                 </h3>
-
                 <div className="flex flex-wrap gap-3">
                   {arena.sports_list && arena.sports_list.length > 0 ? (
                     arena.sports_list.map((sportName, index) => {
@@ -612,10 +710,7 @@ const UserArenaDetails = () => {
                         if (lower.includes("basketball")) return "🏀";
                         if (lower.includes("volleyball")) return "🏐";
                         if (lower.includes("cricket")) return "🏏";
-                        if (
-                          lower.includes("football") ||
-                          lower.includes("soccer")
-                        )
+                        if (lower.includes("football") || lower.includes("soccer"))
                           return "⚽";
                         if (lower.includes("table") || lower.includes("ping"))
                           return "🏓";
@@ -739,6 +834,7 @@ const UserArenaDetails = () => {
               <h3 className="text-xl font-semibold text-black-1000 mb-6">
                 Book Now
               </h3>
+
               {/* Date Picker */}
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -759,26 +855,29 @@ const UserArenaDetails = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Select Court
                   </label>
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     {arena.courts.map((court) => (
                       <button
                         key={court.court_id}
                         type="button"
-                        onClick={() => {
-                          setSelectedCourt(court);
-                          // Clear selected slots when changing court
-                          setSelectedSlots([]);
-                          setLockExpiry(null);
-                          setTimeLeft(null);
-                        }}
-                        className={`w-full text-left p-3 rounded-lg border ${selectedCourt?.court_id === court.court_id
-                          ? "border-primary-500 bg-primary-50"
-                          : "border-gray-300 hover:bg-gray-50"
+                        onClick={() => handleCourtChange(court)}
+                        className={`w-full text-left p-4 rounded-lg border transition-all ${selectedCourt?.court_id === court.court_id
+                            ? "border-primary-500 bg-primary-50 ring-1 ring-primary-500"
+                            : "border-gray-300 hover:bg-gray-50"
                           }`}
                       >
                         <div className="flex justify-between items-center">
                           <div>
-                            <p className="font-medium">{court.court_name || `Court ${court.court_number}`}</p>
+                            <div className="flex items-center gap-2 mb-1">
+                              <p className="font-medium text-gray-900">
+                                {court.court_name || `Court ${court.court_number}`}
+                              </p>
+                              {court.images && court.images.length > 0 && (
+                                <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                                  {court.images.length} photo{court.images.length !== 1 ? 's' : ''}
+                                </span>
+                              )}
+                            </div>
                             <p className="text-sm text-gray-600">
                               Rs {court.price_per_hour}/hour
                             </p>
@@ -799,9 +898,11 @@ const UserArenaDetails = () => {
                             <p className="text-sm text-gray-500">
                               Court {court.court_number}
                             </p>
-                            <p className="text-xs text-gray-400">
-                              {court.size_sqft ? `${court.size_sqft} sqft` : 'Standard size'}
-                            </p>
+                            {court.size_sqft && (
+                              <p className="text-xs text-gray-400">
+                                {court.size_sqft} sqft
+                              </p>
+                            )}
                           </div>
                         </div>
                       </button>
@@ -809,15 +910,14 @@ const UserArenaDetails = () => {
                   </div>
                 </div>
               )}
+
               {/* Sport Selection */}
               {sportsList && sportsList.length > 0 && (
                 <div className="mb-6">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Select Sport
                   </label>
-
                   {(() => {
-                    // Safely get sports arrays - ensure they are arrays
                     const getSafeArray = (data) => {
                       if (!data) return [];
                       if (Array.isArray(data)) return data;
@@ -831,61 +931,42 @@ const UserArenaDetails = () => {
                       return [];
                     };
 
-                    // Get sports available for selected court
                     const courtSports = getSafeArray(selectedCourt?.sports || selectedCourt?.sports_names);
-
-                    // Get sports available for arena
                     const arenaSports = getSafeArray(arena?.sports || arena?.sports_list);
 
-                    // Convert all to IDs for consistent comparison
                     const getSportId = (sport) => {
                       if (!sport) return null;
-
                       if (typeof sport === 'number') return sport;
-
                       if (typeof sport === 'object') {
                         return sport.sport_id || sport.id;
                       }
-
                       if (typeof sport === 'string') {
                         const parsed = parseInt(sport);
                         if (!isNaN(parsed)) return parsed;
-
                         const found = sportsList.find(s =>
                           (s.name && s.name.toLowerCase() === sport.toLowerCase()) ||
                           (s.sport_name && s.sport_name.toLowerCase() === sport.toLowerCase())
                         );
                         return found ? (found.sport_id || found.id) : null;
                       }
-
                       return null;
                     };
 
-                    // Get available sport IDs
                     const availableSportIds = new Set();
-
                     courtSports.forEach(sport => {
                       const id = getSportId(sport);
                       if (id) availableSportIds.add(id);
                     });
-
                     arenaSports.forEach(sport => {
                       const id = getSportId(sport);
                       if (id) availableSportIds.add(id);
                     });
 
-                    // Filter sportsList to only include available sports
                     const filteredSports = sportsList.filter((sport) => {
                       const sportId = sport.sport_id || sport.id;
                       return availableSportIds.has(sportId);
                     });
 
-                    // Get available sport names for display
-                    const availableSportNames = filteredSports.map(sport =>
-                      sport.name || sport.sport_name
-                    );
-
-                    // If no filtered sports, show all sports (fallback)
                     const sportsToShow = filteredSports.length > 0 ? filteredSports : sportsList;
 
                     return (
@@ -910,19 +991,12 @@ const UserArenaDetails = () => {
                             </option>
                           ))}
                         </select>
-
-                        {/* Show available sports info */}
-                        {availableSportNames.length > 0 && (
-                          <div className="mt-2 text-sm text-gray-600">
-                            <span className="font-medium">Available sports: </span>
-                            {availableSportNames.join(", ")}
-                          </div>
-                        )}
                       </>
                     );
                   })()}
                 </div>
               )}
+
               {/* Time Slots */}
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -994,8 +1068,7 @@ const UserArenaDetails = () => {
                           const sorted = [...selectedSlots].sort((a, b) =>
                             a.start_time.localeCompare(b.start_time)
                           );
-                          return `${sorted[0].start_time} - ${sorted[sorted.length - 1].end_time
-                            }`;
+                          return `${sorted[0].start_time} - ${sorted[sorted.length - 1].end_time}`;
                         })()}
                       </span>
                     </div>

@@ -478,7 +478,7 @@ const OwnerRegistration = () => {
 
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                                        Base Price per Hour (₹) *
+                                        Base Price per Hour (Rs) *
                                     </label>
                                     <input
                                         type="number"
@@ -538,7 +538,7 @@ const OwnerRegistration = () => {
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-1">
-                                                Price per Hour (₹)
+                                                Price per Hour (Rs)
                                             </label>
                                             <input
                                                 type="number"
@@ -745,7 +745,7 @@ const OwnerRegistration = () => {
                                     <h3 className="font-medium text-gray-900 mb-2">Arena Details</h3>
                                     <div className="grid grid-cols-2 gap-2 text-sm">
                                         <div><span className="text-gray-500">Courts:</span> {formData.number_of_courts}</div>
-                                        <div><span className="text-gray-500">Base Price:</span> ₹{formData.base_price_per_hour}/hour</div>
+                                        <div><span className="text-gray-500">Base Price:</span> Rs{formData.base_price_per_hour}/hour</div>
                                     </div>
                                     <p className="text-sm text-gray-600 mt-2">{formData.description}</p>
                                 </div>
@@ -769,7 +769,7 @@ const OwnerRegistration = () => {
                                     {formData.courts.map((court, index) => (
                                         <div key={index} className="text-sm mb-2">
                                             <span className="font-medium">Court {court.court_number}:</span> {court.court_name} -
-                                            {court.size_sqft} sq ft - ₹{court.price_per_hour}/hour
+                                            {court.size_sqft} sq ft - Rs{court.price_per_hour}/hour
                                         </div>
                                     ))}
                                 </div>
