@@ -1300,22 +1300,23 @@ const ownerController = {
   updateCourt: async (req, res) => {
     try {
       const { court_id } = req.params;
-      const { court_name, size_sqft, price_per_hour, description, sports } =
-        req.body;
+      const { court_name, size_sqft, price_per_hour, description, sports } = req.body;
 
       // Verify court belongs to owner's arena
       const [courtCheck] = await pool.execute(
-        `SELECT cd.court_id FROM court_details cd
-         JOIN arenas a ON cd.arena_id = a.arena_id
-         WHERE cd.court_id = ? AND a.owner_id = ?`,
+        `SELECT cd.court_id, cd.price_per_hour as old_price 
+       FROM court_details cd
+       JOIN arenas a ON cd.arena_id = a.arena_id
+       WHERE cd.court_id = ? AND a.owner_id = ?`,
         [court_id, req.user.id]
       );
 
       if (courtCheck.length === 0) {
-        return res
-          .status(404)
-          .json({ message: "Court not found or access denied" });
+        return res.status(404).json({ message: "Court not found or access denied" });
       }
+
+      const oldPrice = courtCheck[0].old_price;
+      const newPrice = parseFloat(price_per_hour);
 
       // Start transaction
       const connection = await pool.getConnection();
@@ -1336,7 +1337,7 @@ const ownerController = {
         }
         if (price_per_hour !== undefined) {
           updateFields.push("price_per_hour = ?");
-          values.push(parseFloat(price_per_hour));
+          values.push(newPrice);
         }
         if (description !== undefined) {
           updateFields.push("description = ?");
@@ -1346,10 +1347,20 @@ const ownerController = {
         if (updateFields.length > 0) {
           values.push(court_id);
           await connection.execute(
-            `UPDATE court_details SET ${updateFields.join(
-              ", "
-            )} WHERE court_id = ?`,
+            `UPDATE court_details SET ${updateFields.join(", ")} WHERE court_id = ?`,
             values
+          );
+        }
+
+        // ✅ Update future time slots price if price changed
+        if (price_per_hour !== undefined && newPrice !== oldPrice) {
+          await connection.execute(
+            `UPDATE time_slots 
+           SET price = ?
+           WHERE court_id = ? 
+             AND date >= CURDATE()
+             AND is_blocked_by_owner = FALSE`,
+            [newPrice, court_id]
           );
         }
 
@@ -1362,9 +1373,7 @@ const ownerController = {
           );
 
           // Add new sports
-          const sportsArray = Array.isArray(sports)
-            ? sports
-            : sports.split(",").map(Number);
+          const sportsArray = Array.isArray(sports) ? sports : sports.split(",").map(Number);
           for (const sport_id of sportsArray) {
             if (sport_id) {
               await connection.execute(
@@ -1376,7 +1385,11 @@ const ownerController = {
         }
 
         await connection.commit();
-        res.json({ message: "Court updated successfully" });
+
+        res.json({
+          message: "Court updated successfully",
+          price_updated: price_per_hour !== undefined ? newPrice !== oldPrice : false
+        });
       } catch (error) {
         await connection.rollback();
         throw error;
@@ -1384,12 +1397,11 @@ const ownerController = {
         connection.release();
       }
     } catch (error) {
-      console.error(error);
+      console.error("Error updating court:", error);
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
 
-  // Add new court to arena
   addCourt: async (req, res) => {
     try {
       const { arena_id } = req.params;
@@ -1414,6 +1426,38 @@ const ownerController = {
           .json({ message: "Arena not found or access denied" });
       }
 
+      // ✅ Get arena owner's time slot configuration
+      const [ownerSettings] = await pool.execute(
+        `SELECT ao.time_slots, a.base_price_per_hour
+       FROM arena_owners ao
+       JOIN arenas a ON ao.owner_id = a.owner_id
+       WHERE a.arena_id = ?`,
+        [arena_id]
+      );
+
+      const ownerSetting = ownerSettings[0] || {};
+
+      // Parse time slots configuration from JSON or use defaults
+      let timeSlotsConfig = {};
+      if (ownerSetting.time_slots) {
+        try {
+          timeSlotsConfig = JSON.parse(ownerSetting.time_slots);
+        } catch (e) {
+          // If JSON parsing fails, use defaults
+          timeSlotsConfig = {};
+        }
+      }
+
+      // Get time slot settings with defaults
+      const opening_time = timeSlotsConfig.opening_time || "06:00";
+      const closing_time = timeSlotsConfig.closing_time || "22:00";
+      const slot_duration = timeSlotsConfig.slot_duration || 60;
+      const days_available = timeSlotsConfig.days_available || {
+        monday: true, tuesday: true, wednesday: true, thursday: true,
+        friday: true, saturday: true, sunday: false
+      };
+      const base_price = price_per_hour || ownerSetting.base_price_per_hour || 500;
+
       // Start transaction
       const connection = await pool.getConnection();
       await connection.beginTransaction();
@@ -1432,14 +1476,14 @@ const ownerController = {
         // Insert new court
         const [courtResult] = await connection.execute(
           `INSERT INTO court_details 
-           (arena_id, court_number, court_name, size_sqft, price_per_hour, description)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+         (arena_id, court_number, court_name, size_sqft, price_per_hour, description)
+         VALUES (?, ?, ?, ?, ?, ?)`,
           [
             arena_id,
             nextCourtNumber,
             court_name || `Court ${nextCourtNumber}`,
             parseFloat(size_sqft) || 2000,
-            parseFloat(price_per_hour) || 500,
+            parseFloat(price_per_hour) || base_price,
             description || "",
           ]
         );
@@ -1461,12 +1505,61 @@ const ownerController = {
           }
         }
 
+        // ✅ GENERATE TIME SLOTS FOR THE NEW COURT USING EXISTING generateTimeSlots
+        const timeSlots = generateTimeSlots(
+          opening_time,
+          closing_time,
+          slot_duration
+        );
+
+        const today = new Date();
+        let slotsCreated = 0;
+
+        // Generate slots for next 30 days
+        for (let i = 0; i < 30; i++) {
+          const date = new Date(today);
+          date.setDate(today.getDate() + i);
+          const dateStr = date.toISOString().split("T")[0];
+
+          // Check if this day is available
+          const dayName = date.toLocaleDateString("en-US", { weekday: "long" }).toLowerCase();
+
+          if (days_available[dayName] !== false) {
+            // Create time slots for this day
+            for (const slot of timeSlots) {
+              await connection.execute(
+                `INSERT INTO time_slots 
+               (arena_id, court_id, date, start_time, end_time, price, is_available)
+               VALUES (?, ?, ?, ?, ?, ?, TRUE)`,
+                [
+                  arena_id,
+                  newCourtId,
+                  dateStr,
+                  slot.start_time,
+                  slot.end_time,
+                  parseFloat(price_per_hour) || base_price,
+                ]
+              );
+              slotsCreated++;
+            }
+          }
+        }
+
         await connection.commit();
 
         res.status(201).json({
-          message: "Court added successfully",
+          message: "Court added successfully with time slots",
           court_id: newCourtId,
           court_number: nextCourtNumber,
+          court_name: court_name || `Court ${nextCourtNumber}`,
+          slots_generated: slotsCreated,
+          time_slot_settings: {
+            opening_time,
+            closing_time,
+            slot_duration,
+            days_available,
+            price: parseFloat(price_per_hour) || base_price
+          }
         });
       } catch (error) {
         await connection.rollback();
@@ -1478,13 +1571,17 @@ const ownerController = {
           });
         }
 
+        console.error("Transaction error adding court:", error);
         throw error;
       } finally {
         connection.release();
       }
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Server error", error: error.message });
+      console.error("Error adding court:", error);
+      res.status(500).json({
+        message: "Server error adding court",
+        error: error.message
+      });
     }
   },
 
@@ -2288,5 +2385,113 @@ const ownerController = {
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
+
+  // Add this method to fix missing slots for existing courts
+  fixMissingCourtSlots: async (req, res) => {
+    try {
+      const { arena_id } = req.params;
+      const { court_id, start_date, end_date } = req.body;
+
+      // Verify owner owns this arena
+      const [arenaCheck] = await pool.execute(
+        "SELECT arena_id FROM arenas WHERE arena_id = ? AND owner_id = ?",
+        [arena_id, req.user.id]
+      );
+
+      if (arenaCheck.length === 0) {
+        return res.status(404).json({ message: "Arena not found or access denied" });
+      }
+
+      // Get arena settings
+      const [arenaSettings] = await pool.execute(
+        "SELECT opening_time, closing_time, slot_duration, base_price_per_hour FROM arenas WHERE arena_id = ?",
+        [arena_id]
+      );
+
+      const arenaSetting = arenaSettings[0] || {};
+      const opening_time = arenaSetting.opening_time || "06:00";
+      const closing_time = arenaSetting.closing_time || "22:00";
+      const slot_duration = arenaSetting.slot_duration || 60;
+      const base_price = arenaSetting.base_price_per_hour || 500;
+
+      // Get court details (price_per_hour)
+      const [courtDetails] = await pool.execute(
+        "SELECT court_id, price_per_hour FROM court_details WHERE arena_id = ? AND court_id = ?",
+        [arena_id, court_id]
+      );
+
+      if (courtDetails.length === 0) {
+        return res.status(404).json({ message: "Court not found" });
+      }
+
+      const court = courtDetails[0];
+      const courtPrice = court.price_per_hour || base_price;
+
+      const connection = await pool.getConnection();
+      await connection.beginTransaction();
+
+      try {
+        const timeSlots = generateTimeSlots(opening_time, closing_time, slot_duration);
+        const startDate = start_date ? new Date(start_date) : new Date();
+        const endDate = end_date ? new Date(end_date) : new Date();
+        endDate.setDate(endDate.getDate() + 30); // Default to 30 days if not specified
+
+        let createdCount = 0;
+        const currentDate = new Date(startDate);
+
+        while (currentDate <= endDate) {
+          const dateStr = currentDate.toISOString().split("T")[0];
+
+          for (const slot of timeSlots) {
+            // Check if slot already exists
+            const [existingSlot] = await connection.execute(
+              `SELECT slot_id FROM time_slots 
+             WHERE arena_id = ? AND court_id = ? AND date = ? 
+             AND start_time = ? AND end_time = ?`,
+              [arena_id, court_id, dateStr, slot.start_time, slot.end_time]
+            );
+
+            if (existingSlot.length === 0) {
+              // Create missing slot
+              await connection.execute(
+                `INSERT INTO time_slots 
+               (arena_id, court_id, date, start_time, end_time, price, is_available)
+               VALUES (?, ?, ?, ?, ?, ?, TRUE)`,
+                [
+                  arena_id,
+                  court_id,
+                  dateStr,
+                  slot.start_time,
+                  slot.end_time,
+                  courtPrice,
+                ]
+              );
+              createdCount++;
+            }
+          }
+
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+
+        await connection.commit();
+
+        res.json({
+          message: `Created ${createdCount} missing time slots for court ${court_id}`,
+          court_id: court_id,
+          slots_created: createdCount,
+          date_range: `${startDate.toISOString().split("T")[0]} to ${endDate.toISOString().split("T")[0]}`,
+        });
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      } finally {
+        connection.release();
+      }
+    } catch (error) {
+      console.error("Error fixing missing court slots:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+
 };
 module.exports = ownerController;

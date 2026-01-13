@@ -280,6 +280,35 @@ const OwnerCalendar = ({ arenas = [] }) => {
     }
   };
 
+  const handleFixMissingSlots = async () => {
+    if (!selectedArena || !selectedCourt) {
+      alert("Please select an arena and court first");
+      return;
+    }
+
+    if (!window.confirm(`This will generate missing time slots for Court ${selectedCourt} for the next 30 days. Continue?`)) {
+      return;
+    }
+
+    try {
+      setSaving(true);
+
+      const response = await ownerAPI.fixMissingCourtSlots(selectedArena, {
+        court_id: selectedCourt,
+        start_date: selectedDate.toISOString().split("T")[0]
+      });
+
+      alert(response.data.message || "Missing slots generated!");
+
+      // Refresh slots
+      fetchTimeSlots();
+    } catch (error) {
+      alert(error.response?.data?.message || "Failed to fix missing slots");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const formatDate = (date) => {
     return date.toLocaleDateString("en-US", {
       weekday: "long",
@@ -346,6 +375,14 @@ const OwnerCalendar = ({ arenas = [] }) => {
                 </option>
               ))}
             </select>
+
+            <button
+              onClick={handleFixMissingSlots}
+              disabled={!selectedArena || !selectedCourt}
+              className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:bg-yellow-300"
+            >
+              Fix Missing Slots
+            </button>
           </div>
 
           <div>

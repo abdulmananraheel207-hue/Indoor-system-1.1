@@ -124,7 +124,8 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/bookings", bookingRoutes);
 app.use("/api/chats", chatRoutes);
 app.use("/api/managers", managerRoutes);
-// app.use("/api/owners", ownerBookingsRoutes);
+
+
 
 // 404 handler
 app.use("/api/*", (req, res) => {
