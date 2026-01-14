@@ -1,6 +1,5 @@
 // File: arenaController.js - COMPLETE FIXED VERSION
 const pool = require("../db");
-
 const arenaController = {
   // Get all sports categories
   getSportsCategories: async (req, res) => {
@@ -661,71 +660,71 @@ const arenaController = {
     }
   },
   // Search arenas
-  searchArenas: async (req, res) => {
-    try {
-      const { query, lat, lng, radius_km, skip_location } = req.query;
+  // searchArenas: async (req, res) => {
+  //   try {
+  //     const { query, lat, lng, radius_km, skip_location } = req.query;
 
-      const baseRadius = parseFloat(radius_km) || 8;
-      const latitude = lat ? parseFloat(lat) : null;
-      const longitude = lng ? parseFloat(lng) : null;
-      const locationProvided =
-        !skip_location && !Number.isNaN(latitude) && !Number.isNaN(longitude);
+  //     const baseRadius = parseFloat(radius_km) || 8;
+  //     const latitude = lat ? parseFloat(lat) : null;
+  //     const longitude = lng ? parseFloat(lng) : null;
+  //     const locationProvided =
+  //       !skip_location && !Number.isNaN(latitude) && !Number.isNaN(longitude);
 
-      const runSearch = async (radius) => {
-        const distanceExpr = locationProvided
-          ? ` (6371 * ACOS(
-                COS(RADIANS(?)) * COS(RADIANS(a.location_lat)) *
-                COS(RADIANS(a.location_lng) - RADIANS(?)) +
-                SIN(RADIANS(?)) * SIN(RADIANS(a.location_lat))
-              ))`
-          : "NULL";
+  //     const runSearch = async (radius) => {
+  //       const distanceExpr = locationProvided
+  //         ? ` (6371 * ACOS(
+  //               COS(RADIANS(?)) * COS(RADIANS(a.location_lat)) *
+  //               COS(RADIANS(a.location_lng) - RADIANS(?)) +
+  //               SIN(RADIANS(?)) * SIN(RADIANS(a.location_lat))
+  //             ))`
+  //         : "NULL";
 
-        let sqlQuery = `
-          SELECT a.*, ${distanceExpr} AS distance_km
-          FROM arenas a
-        `;
-        const whereConditions = ["a.is_active = 1", "a.is_blocked = 0"];
-        const params = [];
+  //       let sqlQuery = `
+  //         SELECT a.*, ${distanceExpr} AS distance_km
+  //         FROM arenas a
+  //       `;
+  //       const whereConditions = ["a.is_active = 1", "a.is_blocked = 0"];
+  //       const params = [];
 
-        if (locationProvided) {
-          params.push(latitude, longitude, latitude);
-        }
+  //       if (locationProvided) {
+  //         params.push(latitude, longitude, latitude);
+  //       }
 
-        if (query) {
-          const searchTerm = `%${query}%`;
-          whereConditions.push(
-            "(a.name LIKE ? OR a.address LIKE ? OR a.description LIKE ?)"
-          );
-          params.push(searchTerm, searchTerm, searchTerm);
-        }
+  //       if (query) {
+  //         const searchTerm = `%${query}%`;
+  //         whereConditions.push(
+  //           "(a.name LIKE ? OR a.address LIKE ? OR a.description LIKE ?)"
+  //         );
+  //         params.push(searchTerm, searchTerm, searchTerm);
+  //       }
 
-        if (whereConditions.length > 0) {
-          sqlQuery += ` WHERE ${whereConditions.join(" AND ")}`;
-        }
+  //       if (whereConditions.length > 0) {
+  //         sqlQuery += ` WHERE ${whereConditions.join(" AND ")}`;
+  //       }
 
-        if (locationProvided) {
-          sqlQuery += " HAVING distance_km <= ?";
-          params.push(radius);
-        }
-        sqlQuery +=
-          " ORDER BY distance_km IS NULL, distance_km ASC, rating DESC, name ASC";
-        const [arenas] = await pool.execute(sqlQuery, params);
-        return arenas;
-      };
+  //       if (locationProvided) {
+  //         sqlQuery += " HAVING distance_km <= ?";
+  //         params.push(radius);
+  //       }
+  //       sqlQuery +=
+  //         " ORDER BY distance_km IS NULL, distance_km ASC, rating DESC, name ASC";
+  //       const [arenas] = await pool.execute(sqlQuery, params);
+  //       return arenas;
+  //     };
 
-      let arenas = await runSearch(baseRadius);
+  //     let arenas = await runSearch(baseRadius);
 
-      // Expand radius if none found and location provided
-      if (locationProvided && arenas.length === 0) {
-        arenas = await runSearch(baseRadius * 2);
-      }
+  //     // Expand radius if none found and location provided
+  //     if (locationProvided && arenas.length === 0) {
+  //       arenas = await runSearch(baseRadius * 2);
+  //     }
 
-      res.json(arenas);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Server error", error: error.message });
-    }
-  },
+  //     res.json(arenas);
+  //   } catch (error) {
+  //     console.error(error);
+  //     res.status(500).json({ message: "Server error", error: error.message });
+  //   }
+  // },
 };
 
 module.exports = arenaController;

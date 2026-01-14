@@ -280,6 +280,8 @@ const OwnerCalendar = ({ arenas = [] }) => {
     }
   };
 
+
+
   const formatDate = (date) => {
     return date.toLocaleDateString("en-US", {
       weekday: "long",
@@ -346,6 +348,35 @@ const OwnerCalendar = ({ arenas = [] }) => {
                 </option>
               ))}
             </select>
+
+
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Select Court
+            </label>
+            <select
+              value={selectedCourt}
+              onChange={(e) => setSelectedCourt(e.target.value)}
+              disabled={!selectedArena || courts.length === 0}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+            >
+              {courts.length === 0 ? (
+                <option value="">No courts found</option>
+              ) : (
+                courts.map((court) => (
+                  <option key={court.court_id} value={court.court_id}>
+                    {court.court_name || `Court ${court.court_number}`}
+                  </option>
+                ))
+              )}
+            </select>
+            {courts.length === 1 && (
+              <p className="text-xs text-gray-500 mt-1">
+                Single-court arena - court selection not needed
+              </p>
+            )}
           </div>
 
           <div>
@@ -417,15 +448,6 @@ const OwnerCalendar = ({ arenas = [] }) => {
                 <p className="text-sm text-blue-700">
                   Auto slots: {getArenaInfo()?.opening_time || "06:00"} to{" "}
                   {getArenaInfo()?.closing_time || "22:00"}
-                  {selectedCourt && (
-                    <span className="ml-2">
-                      • Price: ₹
-                      {getCourtInfo()?.price_per_hour ||
-                        getArenaInfo()?.base_price_per_hour ||
-                        500}
-                      /hr
-                    </span>
-                  )}
                 </p>
               </div>
               <div className="text-right">
@@ -507,7 +529,7 @@ const OwnerCalendar = ({ arenas = [] }) => {
               </div>
               <div>
                 <label className="block text-xs text-gray-600 mb-1">
-                  Price (₹)
+                  Price (Rs)
                 </label>
                 <input
                   type="number"
@@ -547,9 +569,8 @@ const OwnerCalendar = ({ arenas = [] }) => {
             timeSlots.map((slot) => (
               <div
                 key={slot.slot_id}
-                className={`p-4 flex justify-between items-center ${
-                  slot.is_blocked ? "bg-red-50" : ""
-                }`}
+                className={`p-4 flex justify-between items-center ${slot.is_blocked ? "bg-red-50" : ""
+                  }`}
               >
                 <div className="flex-1">
                   <div className="flex items-center space-x-3">
@@ -573,7 +594,7 @@ const OwnerCalendar = ({ arenas = [] }) => {
                     )}
                   </div>
                   <div className="mt-1 text-sm text-gray-600">
-                    ₹{slot.price} per hour
+                    Rs{slot.price} per hour
                   </div>
                 </div>
 
@@ -659,7 +680,7 @@ const OwnerCalendar = ({ arenas = [] }) => {
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Price (₹ per hour)
+                  Price (Rs per hour)
                 </label>
                 <input
                   type="number"

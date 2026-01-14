@@ -195,8 +195,8 @@ const ownerController = {
               court.court_name || `Court ${court.court_number || 1}`,
               parseFloat(court.size_sqft) || 2000,
               parseFloat(court.price_per_hour) ||
-                parseFloat(base_price_per_hour) ||
-                500,
+              parseFloat(base_price_per_hour) ||
+              500,
               court.description || "",
             ]
           );
@@ -469,143 +469,179 @@ const ownerController = {
     }
   },
 
+  // In ownerController.js - Replace the uploadCourtPhotos function with this:
+
   uploadCourtPhotos: async (req, res) => {
+    console.log("🚀 UPLOAD COURT PHOTOS STARTED");
+
     try {
       const { court_id } = req.params;
-      const files = req.files;
 
-      console.log("=== COURT PHOTO UPLOAD DEBUG ===");
-      console.log("1. Request received for court_id:", court_id);
-      console.log("2. User ID from token:", req.user?.id);
-      console.log("3. Files received:", files ? files.length : 0);
-      console.log("4. Request params:", req.params);
-      console.log("5. Request body keys:", Object.keys(req.body || {}));
+      console.log("📋 Request details:", {
+        courtId: court_id,
+        userId: req.user?.id,
+        userRole: req.user?.role,
+        filesCount: req.files ? req.files.length : 0,
+        hasAuth: !!req.user
+      });
 
-      if (!files || files.length === 0) {
-        console.log("❌ No files in req.files");
-        return res.status(400).json({
+      // ✅ STEP 1: Check authentication
+      if (!req.user) {
+        console.log("❌ No user in request");
+        return res.status(401).json({
           success: false,
-          message: "No files uploaded",
-          debug: {
-            filesCount: files ? files.length : 0,
-            user: req.user?.id,
-            courtId: court_id,
-          },
+          message: "Authentication required. Please login.",
         });
       }
 
-      // Log each file
-      files.forEach((file, i) => {
+      console.log("✅ User authenticated:", req.user.id);
+
+      // ✅ STEP 2: Check if files were uploaded
+      if (!req.files || req.files.length === 0) {
+        console.log("❌ No files uploaded");
+        return res.status(400).json({
+          success: false,
+          message: "No files uploaded. Please select at least one image.",
+        });
+      }
+
+      console.log(`✅ Files received: ${req.files.length}`);
+
+      // ✅ STEP 3: Log all files from Cloudinary
+      console.log("📸 Files from Cloudinary:");
+      req.files.forEach((file, i) => {
         console.log(`File ${i}:`, {
-          fieldname: file.fieldname,
           originalname: file.originalname,
-          path: file.path,
           filename: file.filename,
+          path: file.path,
           size: file.size,
         });
       });
 
-      // Verify court belongs to owner
-      console.log("Checking court ownership...");
+      // ✅ STEP 4: Verify court exists and belongs to owner
+      console.log("🔍 Verifying court ownership...");
       const [courtCheck] = await pool.execute(
-        `SELECT cd.court_id, cd.court_name 
+        `SELECT cd.court_id, cd.court_name, a.owner_id 
        FROM court_details cd
        JOIN arenas a ON cd.arena_id = a.arena_id
        WHERE cd.court_id = ? AND a.owner_id = ?`,
         [court_id, req.user.id]
       );
 
-      console.log(
-        "Court check result:",
-        courtCheck.length > 0 ? "Found" : "NOT FOUND"
-      );
-
       if (courtCheck.length === 0) {
-        console.log("❌ Court ownership check failed");
+        console.log("❌ Court ownership verification failed");
         return res.status(403).json({
           success: false,
-          message: "Court not found or access denied",
-          debug: {
-            courtId: court_id,
-            userId: req.user?.id,
-            ownershipCheck: false,
-          },
+          message: "Court not found or you don't have permission",
         });
       }
 
       const court = courtCheck[0];
-      console.log("Court found:", court.court_name);
+      console.log("✅ Court verified:", court.court_name);
 
+      // ✅ STEP 5: Check if adding these photos exceeds the 3-photo limit
+      const [existingPhotos] = await pool.execute(
+        "SELECT COUNT(*) as count FROM court_images WHERE court_id = ?",
+        [court_id]
+      );
+
+      const currentCount = existingPhotos[0].count;
+      const newCount = currentCount + req.files.length;
+
+      console.log(`📊 Photo count check: Current=${currentCount}, Adding=${req.files.length}, Total will be=${newCount}`);
+
+      if (newCount > 3) {
+        console.log("❌ Photo limit exceeded");
+        return res.status(400).json({
+          success: false,
+          message: `Maximum 3 photos per court. You have ${currentCount}, trying to add ${req.files.length}.`,
+        });
+      }
+
+      console.log("✅ Photo limit check passed");
+
+      // ✅ STEP 6: Start database transaction
       const connection = await pool.getConnection();
+      await connection.beginTransaction();
 
       try {
-        await connection.beginTransaction();
-
         // Check existing primary image
         const [existingPrimary] = await connection.execute(
           "SELECT image_id FROM court_images WHERE court_id = ? AND is_primary = TRUE",
           [court_id]
         );
-        console.log("Existing primary images:", existingPrimary.length);
+
+        console.log(`📌 Existing primary images: ${existingPrimary.length}`);
 
         const uploadedImages = [];
 
-        // Save each photo to database
-        for (let i = 0; i < files.length; i++) {
-          const file = files[i];
+        // ✅ STEP 7: Save each photo to database
+        for (let i = 0; i < req.files.length; i++) {
+          const file = req.files[i];
 
-          const image_url = file.path;
-          const cloudinary_id = file.filename;
+          const image_url = file.path; // Cloudinary URL
+          const cloudinary_id = file.filename; // Cloudinary public_id
 
-          const is_primary = existingPrimary.length === 0 && i === 0;
-          console.log(`Saving file ${i} to DB:`, {
-            image_url,
-            cloudinary_id,
-            is_primary,
+          console.log(`💾 Saving to DB [${i + 1}/${req.files.length}]:`, {
+            image_url: image_url.substring(0, 50) + "...",
+            cloudinary_id: cloudinary_id,
           });
 
+          // Set first image as primary if no primary exists
+          const is_primary = existingPrimary.length === 0 && i === 0;
+
+          // INSERT into database
           const [result] = await connection.execute(
-            `INSERT INTO court_images (court_id, image_url, cloudinary_id, is_primary, uploaded_at)
+            `INSERT INTO court_images 
+           (court_id, image_url, cloudinary_id, is_primary, uploaded_at)
            VALUES (?, ?, ?, ?, NOW())`,
             [court_id, image_url, cloudinary_id, is_primary]
           );
 
+          const insertedId = result.insertId;
+          console.log(`✅ Saved to DB with ID: ${insertedId}`);
+
           uploadedImages.push({
-            image_id: result.insertId,
-            image_url,
-            cloudinary_id,
-            is_primary,
+            image_id: insertedId,
+            image_url: image_url,
+            cloudinary_id: cloudinary_id,
+            is_primary: is_primary,
             court_id: parseInt(court_id),
             court_name: court.court_name,
           });
         }
 
+        // ✅ STEP 8: Commit transaction
         await connection.commit();
+        console.log("💾 Database transaction committed");
 
-        console.log("=== UPLOAD SUCCESS ===");
-        console.log("Uploaded images count:", uploadedImages.length);
+        console.log("🎉 Upload completed successfully!");
+        console.log(`📊 Uploaded ${uploadedImages.length} images`);
 
+        // ✅ STEP 9: Return success response
         res.json({
           success: true,
-          message: "Photos uploaded successfully",
+          message: `${uploadedImages.length} photo(s) uploaded successfully`,
           count: uploadedImages.length,
           images: uploadedImages,
         });
-      } catch (error) {
+
+      } catch (dbError) {
         await connection.rollback();
-        console.error("Database error:", error);
-        throw error;
+        console.error("❌ Database error:", dbError);
+        throw dbError;
       } finally {
         connection.release();
+        console.log("🔓 Database connection released");
       }
+
     } catch (error) {
-      console.error("Court photo upload error:", error);
-      console.error("Error stack:", error.stack);
+      console.error("💥 Upload error:", error);
+
       res.status(500).json({
         success: false,
-        message: "Server error",
-        error: error.message,
-        stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
+        message: "Failed to upload photos. Please try again.",
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined,
       });
     }
   },
@@ -1264,22 +1300,23 @@ const ownerController = {
   updateCourt: async (req, res) => {
     try {
       const { court_id } = req.params;
-      const { court_name, size_sqft, price_per_hour, description, sports } =
-        req.body;
+      const { court_name, size_sqft, price_per_hour, description, sports } = req.body;
 
       // Verify court belongs to owner's arena
       const [courtCheck] = await pool.execute(
-        `SELECT cd.court_id FROM court_details cd
-         JOIN arenas a ON cd.arena_id = a.arena_id
-         WHERE cd.court_id = ? AND a.owner_id = ?`,
+        `SELECT cd.court_id, cd.price_per_hour as old_price 
+       FROM court_details cd
+       JOIN arenas a ON cd.arena_id = a.arena_id
+       WHERE cd.court_id = ? AND a.owner_id = ?`,
         [court_id, req.user.id]
       );
 
       if (courtCheck.length === 0) {
-        return res
-          .status(404)
-          .json({ message: "Court not found or access denied" });
+        return res.status(404).json({ message: "Court not found or access denied" });
       }
+
+      const oldPrice = courtCheck[0].old_price;
+      const newPrice = parseFloat(price_per_hour);
 
       // Start transaction
       const connection = await pool.getConnection();
@@ -1300,7 +1337,7 @@ const ownerController = {
         }
         if (price_per_hour !== undefined) {
           updateFields.push("price_per_hour = ?");
-          values.push(parseFloat(price_per_hour));
+          values.push(newPrice);
         }
         if (description !== undefined) {
           updateFields.push("description = ?");
@@ -1310,10 +1347,20 @@ const ownerController = {
         if (updateFields.length > 0) {
           values.push(court_id);
           await connection.execute(
-            `UPDATE court_details SET ${updateFields.join(
-              ", "
-            )} WHERE court_id = ?`,
+            `UPDATE court_details SET ${updateFields.join(", ")} WHERE court_id = ?`,
             values
+          );
+        }
+
+        // ✅ Update future time slots price if price changed
+        if (price_per_hour !== undefined && newPrice !== oldPrice) {
+          await connection.execute(
+            `UPDATE time_slots 
+           SET price = ?
+           WHERE court_id = ? 
+             AND date >= CURDATE()
+             AND is_blocked_by_owner = FALSE`,
+            [newPrice, court_id]
           );
         }
 
@@ -1326,9 +1373,7 @@ const ownerController = {
           );
 
           // Add new sports
-          const sportsArray = Array.isArray(sports)
-            ? sports
-            : sports.split(",").map(Number);
+          const sportsArray = Array.isArray(sports) ? sports : sports.split(",").map(Number);
           for (const sport_id of sportsArray) {
             if (sport_id) {
               await connection.execute(
@@ -1340,7 +1385,11 @@ const ownerController = {
         }
 
         await connection.commit();
-        res.json({ message: "Court updated successfully" });
+
+        res.json({
+          message: "Court updated successfully",
+          price_updated: price_per_hour !== undefined ? newPrice !== oldPrice : false
+        });
       } catch (error) {
         await connection.rollback();
         throw error;
@@ -1348,12 +1397,11 @@ const ownerController = {
         connection.release();
       }
     } catch (error) {
-      console.error(error);
+      console.error("Error updating court:", error);
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
 
-  // Add new court to arena
   addCourt: async (req, res) => {
     try {
       const { arena_id } = req.params;
@@ -1366,7 +1414,6 @@ const ownerController = {
         sports,
       } = req.body;
 
-      // Verify owner owns this arena
       const [arenaCheck] = await pool.execute(
         "SELECT arena_id FROM arenas WHERE arena_id = ? AND owner_id = ?",
         [arena_id, req.user.id]
@@ -1377,6 +1424,38 @@ const ownerController = {
           .status(404)
           .json({ message: "Arena not found or access denied" });
       }
+
+      // ✅ Get arena owner's time slot configuration
+      const [ownerSettings] = await pool.execute(
+        `SELECT ao.time_slots, a.base_price_per_hour
+       FROM arena_owners ao
+       JOIN arenas a ON ao.owner_id = a.owner_id
+       WHERE a.arena_id = ?`,
+        [arena_id]
+      );
+
+      const ownerSetting = ownerSettings[0] || {};
+
+      // Parse time slots configuration from JSON or use defaults
+      let timeSlotsConfig = {};
+      if (ownerSetting.time_slots) {
+        try {
+          timeSlotsConfig = JSON.parse(ownerSetting.time_slots);
+        } catch (e) {
+          // If JSON parsing fails, use defaults
+          timeSlotsConfig = {};
+        }
+      }
+
+      // Get time slot settings with defaults
+      const opening_time = timeSlotsConfig.opening_time || "06:00";
+      const closing_time = timeSlotsConfig.closing_time || "22:00";
+      const slot_duration = timeSlotsConfig.slot_duration || 60;
+      const days_available = timeSlotsConfig.days_available || {
+        monday: true, tuesday: true, wednesday: true, thursday: true,
+        friday: true, saturday: true, sunday: false
+      };
+      const base_price = price_per_hour || ownerSetting.base_price_per_hour || 500;
 
       // Start transaction
       const connection = await pool.getConnection();
@@ -1396,14 +1475,14 @@ const ownerController = {
         // Insert new court
         const [courtResult] = await connection.execute(
           `INSERT INTO court_details 
-           (arena_id, court_number, court_name, size_sqft, price_per_hour, description)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+         (arena_id, court_number, court_name, size_sqft, price_per_hour, description)
+         VALUES (?, ?, ?, ?, ?, ?)`,
           [
             arena_id,
             nextCourtNumber,
             court_name || `Court ${nextCourtNumber}`,
             parseFloat(size_sqft) || 2000,
-            parseFloat(price_per_hour) || 500,
+            parseFloat(price_per_hour) || base_price,
             description || "",
           ]
         );
@@ -1425,12 +1504,61 @@ const ownerController = {
           }
         }
 
+        // ✅ GENERATE TIME SLOTS FOR THE NEW COURT USING EXISTING generateTimeSlots
+        const timeSlots = generateTimeSlots(
+          opening_time,
+          closing_time,
+          slot_duration
+        );
+
+        const today = new Date();
+        let slotsCreated = 0;
+
+        // Generate slots for next 30 days
+        for (let i = 0; i < 30; i++) {
+          const date = new Date(today);
+          date.setDate(today.getDate() + i);
+          const dateStr = date.toISOString().split("T")[0];
+
+          // Check if this day is available
+          const dayName = date.toLocaleDateString("en-US", { weekday: "long" }).toLowerCase();
+
+          if (days_available[dayName] !== false) {
+            // Create time slots for this day
+            for (const slot of timeSlots) {
+              await connection.execute(
+                `INSERT INTO time_slots 
+               (arena_id, court_id, date, start_time, end_time, price, is_available)
+               VALUES (?, ?, ?, ?, ?, ?, TRUE)`,
+                [
+                  arena_id,
+                  newCourtId,
+                  dateStr,
+                  slot.start_time,
+                  slot.end_time,
+                  parseFloat(price_per_hour) || base_price,
+                ]
+              );
+              slotsCreated++;
+            }
+          }
+        }
+
         await connection.commit();
 
         res.status(201).json({
-          message: "Court added successfully",
+          message: "Court added successfully with time slots",
           court_id: newCourtId,
           court_number: nextCourtNumber,
+          court_name: court_name || `Court ${nextCourtNumber}`,
+          slots_generated: slotsCreated,
+          time_slot_settings: {
+            opening_time,
+            closing_time,
+            slot_duration,
+            days_available,
+            price: parseFloat(price_per_hour) || base_price
+          }
         });
       } catch (error) {
         await connection.rollback();
@@ -1442,13 +1570,17 @@ const ownerController = {
           });
         }
 
+        console.error("Transaction error adding court:", error);
         throw error;
       } finally {
         connection.release();
       }
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Server error", error: error.message });
+      console.error("Error adding court:", error);
+      res.status(500).json({
+        message: "Server error adding court",
+        error: error.message
+      });
     }
   },
 
@@ -2269,9 +2401,8 @@ const ownerController = {
       const [bookings] = await pool.execute(query, params);
 
       res.json({
-        filename: `bookings_export_${
-          new Date().toISOString().split("T")[0]
-        }.json`,
+        filename: `bookings_export_${new Date().toISOString().split("T")[0]
+          }.json`,
         data: bookings,
         total_records: bookings.length,
         total_revenue: bookings.reduce(
@@ -2314,5 +2445,113 @@ const ownerController = {
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
+
+  // Add this method to fix missing slots for existing courts
+  fixMissingCourtSlots: async (req, res) => {
+    try {
+      const { arena_id } = req.params;
+      const { court_id, start_date, end_date } = req.body;
+
+      // Verify owner owns this arena
+      const [arenaCheck] = await pool.execute(
+        "SELECT arena_id FROM arenas WHERE arena_id = ? AND owner_id = ?",
+        [arena_id, req.user.id]
+      );
+
+      if (arenaCheck.length === 0) {
+        return res.status(404).json({ message: "Arena not found or access denied" });
+      }
+
+      // Get arena settings
+      const [arenaSettings] = await pool.execute(
+        "SELECT opening_time, closing_time, slot_duration, base_price_per_hour FROM arenas WHERE arena_id = ?",
+        [arena_id]
+      );
+
+      const arenaSetting = arenaSettings[0] || {};
+      const opening_time = arenaSetting.opening_time || "06:00";
+      const closing_time = arenaSetting.closing_time || "22:00";
+      const slot_duration = arenaSetting.slot_duration || 60;
+      const base_price = arenaSetting.base_price_per_hour || 500;
+
+      // Get court details (price_per_hour)
+      const [courtDetails] = await pool.execute(
+        "SELECT court_id, price_per_hour FROM court_details WHERE arena_id = ? AND court_id = ?",
+        [arena_id, court_id]
+      );
+
+      if (courtDetails.length === 0) {
+        return res.status(404).json({ message: "Court not found" });
+      }
+
+      const court = courtDetails[0];
+      const courtPrice = court.price_per_hour || base_price;
+
+      const connection = await pool.getConnection();
+      await connection.beginTransaction();
+
+      try {
+        const timeSlots = generateTimeSlots(opening_time, closing_time, slot_duration);
+        const startDate = start_date ? new Date(start_date) : new Date();
+        const endDate = end_date ? new Date(end_date) : new Date();
+        endDate.setDate(endDate.getDate() + 30); // Default to 30 days if not specified
+
+        let createdCount = 0;
+        const currentDate = new Date(startDate);
+
+        while (currentDate <= endDate) {
+          const dateStr = currentDate.toISOString().split("T")[0];
+
+          for (const slot of timeSlots) {
+            // Check if slot already exists
+            const [existingSlot] = await connection.execute(
+              `SELECT slot_id FROM time_slots 
+             WHERE arena_id = ? AND court_id = ? AND date = ? 
+             AND start_time = ? AND end_time = ?`,
+              [arena_id, court_id, dateStr, slot.start_time, slot.end_time]
+            );
+
+            if (existingSlot.length === 0) {
+              // Create missing slot
+              await connection.execute(
+                `INSERT INTO time_slots 
+               (arena_id, court_id, date, start_time, end_time, price, is_available)
+               VALUES (?, ?, ?, ?, ?, ?, TRUE)`,
+                [
+                  arena_id,
+                  court_id,
+                  dateStr,
+                  slot.start_time,
+                  slot.end_time,
+                  courtPrice,
+                ]
+              );
+              createdCount++;
+            }
+          }
+
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+
+        await connection.commit();
+
+        res.json({
+          message: `Created ${createdCount} missing time slots for court ${court_id}`,
+          court_id: court_id,
+          slots_created: createdCount,
+          date_range: `${startDate.toISOString().split("T")[0]} to ${endDate.toISOString().split("T")[0]}`,
+        });
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      } finally {
+        connection.release();
+      }
+    } catch (error) {
+      console.error("Error fixing missing court slots:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+
 };
 module.exports = ownerController;

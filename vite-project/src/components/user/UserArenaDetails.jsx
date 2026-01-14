@@ -22,9 +22,9 @@ const UserArenaDetails = () => {
   const [lockExpiry, setLockExpiry] = useState(null);
   const [timeLeft, setTimeLeft] = useState(null);
   const [isFavorited, setIsFavorited] = useState(false);
-  const [favorites, setFavorites] = useState([]);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [lastBookingId, setLastBookingId] = useState(null);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
   useEffect(() => {
     fetchArenaDetails();
@@ -33,7 +33,7 @@ const UserArenaDetails = () => {
   }, [arenaId]);
 
   useEffect(() => {
-    if (arena && selectedDate) {
+    if (arena && selectedDate && selectedCourt?.court_id) {
       fetchAvailableSlots();
       // clear any previously selected slots when date changes
       setSelectedSlots([]);
@@ -41,7 +41,7 @@ const UserArenaDetails = () => {
       setTimeLeft(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [arena, selectedDate]);
+  }, [arena, selectedDate, selectedCourt?.court_id]);
 
   useEffect(() => {
     if (!lockExpiry) return;
@@ -65,7 +65,7 @@ const UserArenaDetails = () => {
     }, 1000);
     return () => clearInterval(interval);
   }, [lockExpiry]);
-  // UPDATE THIS useEffect TO HANDLE 500 ERRORS
+
   useEffect(() => {
     const checkFavoriteStatus = async () => {
       try {
@@ -83,14 +83,12 @@ const UserArenaDetails = () => {
         setIsFavorited(isAlreadyFavorited);
       } catch (error) {
         console.error("Error checking favorite status:", error);
-        // Don't throw error here, just log it
-        // The 500 error is likely from the profile page, not this page
       }
     };
 
     checkFavoriteStatus();
-  }, [arenaId]); // Add this line
-  // In UserArenaDetails.jsx, replace the fetchArenaDetails function:
+  }, [arenaId]);
+
   const fetchArenaDetails = async () => {
     try {
       setLoading(true);
@@ -106,17 +104,20 @@ const UserArenaDetails = () => {
         description: court.description,
         sports: court.sports || [],
         sports_names: court.sports_names || [],
+        images: court.images || [],
       }));
 
       setArena({
-        ...details.arena,
+        ...details,
         courts: transformedCourts,
       });
-      setReviews(details.reviews);
+      setReviews(details.reviews || []);
 
       if (transformedCourts.length > 0) {
         setSelectedCourt(transformedCourts[0]);
+        setCurrentImageIndex(0);
       }
+
       // fetch sports categories for sport selection
       try {
         const sports = await integrationService.getSportsCategories();
@@ -135,18 +136,27 @@ const UserArenaDetails = () => {
     try {
       const dateStr = integrationService.formatDate(selectedDate);
 
-      // Send court_id with the request
-      const slots = await integrationService.getAvailableSlots(
+      if (!selectedCourt?.court_id) {
+        console.error("No court selected");
+        setAvailableSlots([]);
+        return;
+      }
+
+      // Use court-specific endpoint
+      const slots = await integrationService.getCourtSlots(
         arenaId,
+        selectedCourt.court_id,
         dateStr,
-        selectedSportId, // Send sport_id (not sport name)
-        selectedCourt?.court_id // Add court_id parameter
+        selectedSportId
       );
-      setAvailableSlots(slots);
+
+      setAvailableSlots(slots || []);
     } catch (error) {
-      console.error("Error fetching slots:", error);
+      console.error("Error fetching court slots:", error);
+      setAvailableSlots([]);
     }
   };
+
   const fetchReviews = async () => {
     try {
       const response = await fetch(
@@ -165,17 +175,15 @@ const UserArenaDetails = () => {
     const isSlotAvailable = slot.actually_available ?? slot.is_available;
     if (!isSlotAvailable || slot.is_blocked) return;
 
-    // *** FIXED BULLETPROOF VALIDATION ***
     const now = new Date();
 
     // FIX: Create date in LOCAL timezone, not UTC
     const slotDateObj = new Date(slot.date);
     const [hours, minutes] = slot.start_time.split(":").map(Number);
-    slotDateObj.setHours(hours, minutes, 0, 0); // This sets LOCAL time
+    slotDateObj.setHours(hours, minutes, 0, 0);
 
     // Simple check: if slot start time is before current time
     if (slotDateObj < now) {
-      // Give helpful error message
       const slotDateStr = slotDateObj.toLocaleDateString();
       const nowDateStr = now.toLocaleDateString();
 
@@ -214,7 +222,7 @@ const UserArenaDetails = () => {
         console.error("Error locking slot", error);
         alert(
           error.response?.data?.message ||
-            "Slot is no longer available. Please choose another slot."
+          "Slot is no longer available. Please choose another slot."
         );
         fetchAvailableSlots();
       }
@@ -222,12 +230,11 @@ const UserArenaDetails = () => {
 
     toggleSelection();
   };
+
   const handleBooking = async () => {
     // 1. Check if sport is selected
     if (!selectedSportId) {
       alert("Please select a sport before booking");
-
-      // Scroll to sport selection and highlight it
       const sportSelect = document.querySelector(
         'select[value*="selectedSportId"]'
       );
@@ -298,16 +305,13 @@ const UserArenaDetails = () => {
       const slotIds = selectedSlots.map((s) => s.slot_id).filter(Boolean);
       let bookingResponse;
 
-      // In handleBooking function, around line 252
-      // Update the booking payload to include court_id:
-
       if (slotIds.length > 1) {
         bookingResponse = await integrationService.createBooking({
           arenaId: parseInt(arenaId),
           slot_ids: slotIds,
           sportId: selectedSportId,
           totalPrice,
-          courtId: selectedCourt.court_id, // ADD THIS
+          courtId: selectedCourt.court_id,
           notes: "",
         });
       } else if (slotIds.length === 1) {
@@ -316,13 +320,13 @@ const UserArenaDetails = () => {
           slot_id: slotIds[0],
           sport_id: selectedSportId,
           totalPrice,
-          courtId: selectedCourt.court_id, // ADD THIS
+          courtId: selectedCourt.court_id,
           notes: "",
         });
       } else {
         bookingResponse = await integrationService.createBooking({
           arenaId: parseInt(arenaId),
-          courtId: selectedCourt.court_id, // Already has this
+          courtId: selectedCourt.court_id,
           date: integrationService.formatDate(selectedDate),
           startTime,
           endTime,
@@ -334,7 +338,7 @@ const UserArenaDetails = () => {
 
       setLastBookingId(
         bookingResponse?.bookings?.[0]?.booking_id ||
-          bookingResponse?.booking?.booking_id
+        bookingResponse?.booking?.booking_id
       );
       setShowSuccessModal(true);
 
@@ -347,12 +351,13 @@ const UserArenaDetails = () => {
       console.error("Error creating booking:", error);
       alert(
         error.response?.data?.message ||
-          "Failed to create booking. Please try again."
+        "Failed to create booking. Please try again."
       );
     } finally {
       setBookingInProgress(false);
     }
   };
+
   const handleAddFavorite = async () => {
     try {
       // Check if already favorited first
@@ -362,13 +367,10 @@ const UserArenaDetails = () => {
       }
 
       console.log("Adding favorite with arenaId:", arenaId);
-      console.log("Full URL would be:", `/users/arenas/${arenaId}/favorite`);
-
       await integrationService.addToFavorites(arenaId);
 
       // Update state to reflect it's now favorited
       setIsFavorited(true);
-      setFavorites((prev) => [...prev, { arenaId: parseInt(arenaId) }]);
       alert("Arena added to favorites!");
     } catch (error) {
       console.error("Error adding favorite:", error);
@@ -379,7 +381,7 @@ const UserArenaDetails = () => {
         error.response?.status === 400 &&
         error.response?.data?.message?.includes("already in favorites")
       ) {
-        setIsFavorited(true); // Update state
+        setIsFavorited(true);
         alert("This arena is already in your favorites!");
       } else {
         alert("Failed to add to favorites");
@@ -408,6 +410,39 @@ const UserArenaDetails = () => {
     }
   };
 
+  // Get current court images
+  const getCurrentCourtImages = () => {
+    if (!selectedCourt || !selectedCourt.images) return [];
+    return selectedCourt.images;
+  };
+
+  // Handle next/previous image
+  const nextImage = () => {
+    const images = getCurrentCourtImages();
+    if (images.length === 0) return;
+    setCurrentImageIndex((prevIndex) =>
+      prevIndex === images.length - 1 ? 0 : prevIndex + 1
+    );
+  };
+
+  const prevImage = () => {
+    const images = getCurrentCourtImages();
+    if (images.length === 0) return;
+    setCurrentImageIndex((prevIndex) =>
+      prevIndex === 0 ? images.length - 1 : prevIndex - 1
+    );
+  };
+
+  // Handle court change - reset image index
+  const handleCourtChange = (court) => {
+    setSelectedCourt(court);
+    setCurrentImageIndex(0);
+    // Clear selected slots when changing court
+    setSelectedSlots([]);
+    setLockExpiry(null);
+    setTimeLeft(null);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex justify-center items-center">
@@ -423,6 +458,9 @@ const UserArenaDetails = () => {
       </div>
     );
   }
+
+  const courtImages = getCurrentCourtImages();
+  const hasCourtImages = courtImages.length > 0;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -452,9 +490,8 @@ const UserArenaDetails = () => {
             <button
               type="button"
               onClick={handleAddFavorite}
-              className={`${
-                isFavorited ? "text-red-700" : "text-red-500 hover:text-red-700"
-              }`}
+              className={`${isFavorited ? "text-red-700" : "text-red-500 hover:text-red-700"
+                }`}
               disabled={isFavorited}
               title={isFavorited ? "Already in favorites" : "Add to favorites"}
             >
@@ -478,21 +515,83 @@ const UserArenaDetails = () => {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Arena Images Carousel */}
+        {/* Court Images Carousel */}
         <div className="mb-8">
-          <div className="h-96 bg-gray-200 rounded-2xl overflow-hidden">
-            {arena.images && arena.images.length > 0 ? (
-              <img
-                src={arena.images[0].image_url}
-                alt={arena.name}
-                className="w-full h-full object-cover"
-              />
+          <div className="relative h-96 bg-gray-200 rounded-2xl overflow-hidden">
+            {hasCourtImages ? (
+              <>
+                {/* Main Image */}
+                <img
+                  src={courtImages[currentImageIndex].image_url}
+                  alt={`${selectedCourt.court_name} - Photo ${currentImageIndex + 1}`}
+                  className="w-full h-full object-cover"
+                />
+
+                {/* Navigation Arrows */}
+                {courtImages.length > 1 && (
+                  <>
+                    <button
+                      onClick={prevImage}
+                      className="absolute left-4 top-1/2 transform -translate-y-1/2 bg-black bg-opacity-50 text-white p-2 rounded-full hover:bg-opacity-70 transition"
+                    >
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={nextImage}
+                      className="absolute right-4 top-1/2 transform -translate-y-1/2 bg-black bg-opacity-50 text-white p-2 rounded-full hover:bg-opacity-70 transition"
+                    >
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                    </button>
+                  </>
+                )}
+
+                {/* Image Counter */}
+                <div className="absolute top-4 right-4 bg-black bg-opacity-70 text-white px-3 py-1 rounded-full text-sm">
+                  {currentImageIndex + 1} / {courtImages.length}
+                </div>
+
+                {/* Court Info Overlay */}
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black to-transparent p-6">
+                  <div className="text-white">
+                    <h2 className="text-2xl font-bold">{selectedCourt.court_name}</h2>
+                    <p className="text-gray-200">Court {selectedCourt.court_number} • {selectedCourt.size_sqft} sqft</p>
+                  </div>
+                </div>
+              </>
             ) : (
-              <div className="w-full h-full flex items-center justify-center bg-gray-100">
-                <span className="text-gray-400">No images available</span>
+              <div className="w-full h-full flex flex-col items-center justify-center bg-gray-100">
+                <div className="text-gray-400 text-6xl mb-4">🏟️</div>
+                <span className="text-gray-400 text-lg mb-2">No images available</span>
+                <p className="text-gray-500 text-sm">Select a court to view its photos</p>
               </div>
             )}
           </div>
+
+          {/* Image Thumbnails */}
+          {hasCourtImages && courtImages.length > 1 && (
+            <div className="mt-4">
+              <div className="flex space-x-2 overflow-x-auto py-2 px-1">
+                {courtImages.map((image, index) => (
+                  <button
+                    key={image.image_id || index}
+                    onClick={() => setCurrentImageIndex(index)}
+                    className={`flex-shrink-0 focus:outline-none ${currentImageIndex === index ? 'ring-2 ring-blue-500' : ''
+                      }`}
+                  >
+                    <img
+                      src={image.image_url}
+                      alt={`Thumbnail ${index + 1}`}
+                      className="w-20 h-14 object-cover rounded-lg border border-gray-300"
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -509,11 +608,10 @@ const UserArenaDetails = () => {
                       {[...Array(5)].map((_, i) => (
                         <svg
                           key={i}
-                          className={`h-5 w-5 ${
-                            i < Math.floor(arena.rating || 0)
-                              ? "text-yellow-400"
-                              : "text-gray-300"
-                          }`}
+                          className={`h-5 w-5 ${i < Math.floor(arena.rating || 0)
+                            ? "text-yellow-400"
+                            : "text-gray-300"
+                            }`}
                           fill="currentColor"
                           viewBox="0 0 20 20"
                         >
@@ -581,8 +679,7 @@ const UserArenaDetails = () => {
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       strokeWidth={2}
-                      d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
-                    />
+                      d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                   </svg>
                   <div>
                     <p className="text-sm text-gray-600">Courts</p>
@@ -602,11 +699,9 @@ const UserArenaDetails = () => {
                 <h3 className="text-lg font-semibold text-gray-900 mb-3">
                   Available Sports
                 </h3>
-
                 <div className="flex flex-wrap gap-3">
                   {arena.sports_list && arena.sports_list.length > 0 ? (
                     arena.sports_list.map((sportName, index) => {
-                      // Simple emoji mapping
                       const getEmoji = (name) => {
                         const lower = name.toLowerCase();
                         if (lower.includes("badminton")) return "🏸";
@@ -615,10 +710,7 @@ const UserArenaDetails = () => {
                         if (lower.includes("basketball")) return "🏀";
                         if (lower.includes("volleyball")) return "🏐";
                         if (lower.includes("cricket")) return "🏏";
-                        if (
-                          lower.includes("football") ||
-                          lower.includes("soccer")
-                        )
+                        if (lower.includes("football") || lower.includes("soccer"))
                           return "⚽";
                         if (lower.includes("table") || lower.includes("ping"))
                           return "🏓";
@@ -712,11 +804,10 @@ const UserArenaDetails = () => {
                             {[...Array(5)].map((_, i) => (
                               <svg
                                 key={i}
-                                className={`h-4 w-4 ${
-                                  i < review.rating
-                                    ? "text-yellow-400"
-                                    : "text-gray-300"
-                                }`}
+                                className={`h-4 w-4 ${i < review.rating
+                                  ? "text-yellow-400"
+                                  : "text-gray-300"
+                                  }`}
                                 fill="currentColor"
                                 viewBox="0 0 20 20"
                               >
@@ -743,6 +834,7 @@ const UserArenaDetails = () => {
               <h3 className="text-xl font-semibold text-black-1000 mb-6">
                 Book Now
               </h3>
+
               {/* Date Picker */}
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -763,30 +855,55 @@ const UserArenaDetails = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Select Court
                   </label>
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     {arena.courts.map((court) => (
                       <button
                         key={court.court_id}
                         type="button"
-                        onClick={() => setSelectedCourt(court)}
-                        className={`w-full text-left p-3 rounded-lg border ${
-                          selectedCourt?.court_id === court.court_id
-                            ? "border-primary-500 bg-primary-50"
+                        onClick={() => handleCourtChange(court)}
+                        className={`w-full text-left p-4 rounded-lg border transition-all ${selectedCourt?.court_id === court.court_id
+                            ? "border-primary-500 bg-primary-50 ring-1 ring-primary-500"
                             : "border-gray-300 hover:bg-gray-50"
-                        }`}
+                          }`}
                       >
                         <div className="flex justify-between items-center">
                           <div>
-                            <p className="font-medium">{court.court_name}</p>
+                            <div className="flex items-center gap-2 mb-1">
+                              <p className="font-medium text-gray-900">
+                                {court.court_name || `Court ${court.court_number}`}
+                              </p>
+                              {court.images && court.images.length > 0 && (
+                                <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                                  {court.images.length} photo{court.images.length !== 1 ? 's' : ''}
+                                </span>
+                              )}
+                            </div>
                             <p className="text-sm text-gray-600">
                               Rs {court.price_per_hour}/hour
                             </p>
+                            {court.sports && court.sports.length > 0 && (
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {court.sports.map((sport, idx) => (
+                                  <span
+                                    key={idx}
+                                    className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded"
+                                  >
+                                    {sport}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                           </div>
-                          {court.sports && (
-                            <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded">
-                              {court.sports[0]}
-                            </span>
-                          )}
+                          <div className="text-right">
+                            <p className="text-sm text-gray-500">
+                              Court {court.court_number}
+                            </p>
+                            {court.size_sqft && (
+                              <p className="text-xs text-gray-400">
+                                {court.size_sqft} sqft
+                              </p>
+                            )}
+                          </div>
                         </div>
                       </button>
                     ))}
@@ -800,45 +917,57 @@ const UserArenaDetails = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Select Sport
                   </label>
-
-                  {/* Filter sports by what's available in this arena/court */}
                   {(() => {
-                    // Get sports available for selected court
-                    const courtSports =
-                      selectedCourt?.sports_names ||
-                      selectedCourt?.sports ||
-                      [];
+                    const getSafeArray = (data) => {
+                      if (!data) return [];
+                      if (Array.isArray(data)) return data;
+                      if (typeof data === 'string') {
+                        try {
+                          return data.split(',').map(item => item.trim());
+                        } catch (e) {
+                          return [data];
+                        }
+                      }
+                      return [];
+                    };
 
-                    // Get sports available for arena
-                    const arenaSports =
-                      arena?.sports_list || arena?.sports || [];
+                    const courtSports = getSafeArray(selectedCourt?.sports || selectedCourt?.sports_names);
+                    const arenaSports = getSafeArray(arena?.sports || arena?.sports_list);
 
-                    // Combine and deduplicate
-                    const availableSports = [
-                      ...new Set([...courtSports, ...arenaSports]),
-                    ];
+                    const getSportId = (sport) => {
+                      if (!sport) return null;
+                      if (typeof sport === 'number') return sport;
+                      if (typeof sport === 'object') {
+                        return sport.sport_id || sport.id;
+                      }
+                      if (typeof sport === 'string') {
+                        const parsed = parseInt(sport);
+                        if (!isNaN(parsed)) return parsed;
+                        const found = sportsList.find(s =>
+                          (s.name && s.name.toLowerCase() === sport.toLowerCase()) ||
+                          (s.sport_name && s.sport_name.toLowerCase() === sport.toLowerCase())
+                        );
+                        return found ? (found.sport_id || found.id) : null;
+                      }
+                      return null;
+                    };
 
-                    // Filter sportsList to only include available sports
-                    const filteredSports = sportsList.filter((sport) => {
-                      const sportName = sport.name || sport.sport_name;
-                      const sportId = sport.sport_id || sport.id;
-
-                      // Check if sport is in availableSports by name or ID
-                      return (
-                        availableSports.includes(sportName) ||
-                        availableSports.includes(sportId) ||
-                        availableSports.some(
-                          (avail) =>
-                            avail.sport_id === sportId ||
-                            avail.id === sportId ||
-                            avail.name === sportName
-                        )
-                      );
+                    const availableSportIds = new Set();
+                    courtSports.forEach(sport => {
+                      const id = getSportId(sport);
+                      if (id) availableSportIds.add(id);
+                    });
+                    arenaSports.forEach(sport => {
+                      const id = getSportId(sport);
+                      if (id) availableSportIds.add(id);
                     });
 
-                    // If no filtered sports, show all (fallback)
-                    const sportsToShow =
-                      filteredSports.length > 0 ? filteredSports : sportsList;
+                    const filteredSports = sportsList.filter((sport) => {
+                      const sportId = sport.sport_id || sport.id;
+                      return availableSportIds.has(sportId);
+                    });
+
+                    const sportsToShow = filteredSports.length > 0 ? filteredSports : sportsList;
 
                     return (
                       <>
@@ -862,67 +991,58 @@ const UserArenaDetails = () => {
                             </option>
                           ))}
                         </select>
-
-                        {/* Show available sports info */}
-                        {availableSports.length > 0 && (
-                          <div className="mt-2 text-sm text-gray-600">
-                            <span className="font-medium">Available: </span>
-                            {availableSports.join(", ")}
-                          </div>
-                        )}
-
-                        {/* Debug info */}
-                        <div className="mt-1 text-xs text-gray-500">
-                          Court: {courtSports.join(", ") || "none"} | Arena:{" "}
-                          {arenaSports.join(", ") || "none"} | Showing:{" "}
-                          {sportsToShow.length} sports
-                        </div>
                       </>
                     );
                   })()}
                 </div>
               )}
+
               {/* Time Slots */}
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Available Time Slots
+                  Available Time Slots for {selectedCourt?.court_name || "Selected Court"}
                 </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {availableSlots.map((slot) => {
-                    const isSelected = selectedSlots.some(
-                      (s) => s.slot_id === slot.slot_id
-                    );
-                    const isAvailable =
-                      slot.actually_available ?? slot.is_available;
-                    const lockedLabel =
-                      !isAvailable || slot.is_blocked ? "Locked" : null;
-                    return (
-                      <button
-                        key={slot.slot_id}
-                        type="button"
-                        onClick={() => handleSlotSelect(slot)}
-                        disabled={!isAvailable || slot.is_blocked}
-                        className={`p-3 rounded-lg border text-center ${
-                          isSelected
+                {availableSlots.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    No time slots available for {selectedDate.toLocaleDateString()}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    {availableSlots.map((slot) => {
+                      const isSelected = selectedSlots.some(
+                        (s) => s.slot_id === slot.slot_id
+                      );
+                      const isAvailable =
+                        slot.actually_available ?? slot.is_available;
+                      const lockedLabel =
+                        !isAvailable || slot.is_blocked ? "Locked" : null;
+                      return (
+                        <button
+                          key={slot.slot_id}
+                          type="button"
+                          onClick={() => handleSlotSelect(slot)}
+                          disabled={!isAvailable || slot.is_blocked}
+                          className={`p-3 rounded-lg border text-center ${isSelected
                             ? "border-primary-500 bg-primary-50 text-primary-700"
                             : isAvailable && !slot.is_blocked
-                            ? "border-gray-300 hover:bg-gray-50"
-                            : "border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed"
-                        }`}
-                      >
-                        <div className="font-medium">
-                          {slot.start_time} - {slot.end_time}
-                        </div>
-                        <div className="text-sm">Rs {slot.price}</div>
-                        {!isAvailable && (
-                          <div className="text-xs text-red-500">
-                            {lockedLabel || "Unavailable"}
+                              ? "border-gray-300 hover:bg-gray-50"
+                              : "border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed"
+                            }`}
+                        >
+                          <div className="font-medium">
+                            {slot.start_time} - {slot.end_time}
                           </div>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
+                          <div className="text-sm">Rs {slot.price}</div>
+                          {!isAvailable && (
+                            <div className="text-xs text-red-500">
+                              {lockedLabel || "Unavailable"}
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
               {timeLeft && (
                 <div className="mt-2 text-sm text-primary-700">
@@ -948,15 +1068,13 @@ const UserArenaDetails = () => {
                           const sorted = [...selectedSlots].sort((a, b) =>
                             a.start_time.localeCompare(b.start_time)
                           );
-                          return `${sorted[0].start_time} - ${
-                            sorted[sorted.length - 1].end_time
-                          }`;
+                          return `${sorted[0].start_time} - ${sorted[sorted.length - 1].end_time}`;
                         })()}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Court:</span>
-                      <span>{selectedCourt?.court_name}</span>
+                      <span>{selectedCourt?.court_name || `Court ${selectedCourt?.court_number}`}</span>
                     </div>
                     <div className="flex justify-between font-medium">
                       <span>Total:</span>
@@ -991,7 +1109,7 @@ const UserArenaDetails = () => {
                       selectedSlots.forEach((s) =>
                         integrationService
                           .releaseSlot(s.slot_id)
-                          .catch(() => {})
+                          .catch(() => { })
                       );
                       setSelectedSlots([]);
                       setLockExpiry(null);
@@ -1022,14 +1140,13 @@ const UserArenaDetails = () => {
                   bookingInProgress ||
                   !selectedSportId
                 }
-                className={`w-full py-3 rounded-lg font-medium transition-all duration-200 ${
-                  selectedCourt &&
+                className={`w-full py-3 rounded-lg font-medium transition-all duration-200 ${selectedCourt &&
                   selectedSlots.length > 0 &&
                   selectedSportId &&
                   !bookingInProgress
-                    ? "bg-primary-600 text-white hover:bg-primary-700 shadow-md hover:shadow-lg"
-                    : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                }`}
+                  ? "bg-primary-600 text-white hover:bg-primary-700 shadow-md hover:shadow-lg"
+                  : "bg-gray-300 text-gray-500 cursor-not-allowed"
+                  }`}
               >
                 {bookingInProgress ? (
                   <>
@@ -1105,7 +1222,7 @@ const UserArenaDetails = () => {
                   {selectedDate.toLocaleDateString()}
                 </p>
                 <p className="text-sm text-gray-600">
-                  {selectedSlots} Time slot{selectedSlots}
+                  {selectedSlots.length} Time slot{selectedSlots.length !== 1 ? 's' : ''}
                 </p>
               </div>
 
