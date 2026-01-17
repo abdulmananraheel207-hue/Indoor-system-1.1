@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from "react";
 
-// Receive dashboardData as a prop from OwnerDashboard
 const OwnerProfile = ({ dashboardData }) => {
-  const [ownerProfile, setOwnerProfile] = useState(null); // Separate state for profile details
+  const [ownerProfile, setOwnerProfile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [formData, setFormData] = useState({
@@ -11,6 +10,16 @@ const OwnerProfile = ({ dashboardData }) => {
     phone_number: "",
     business_address: "",
   });
+  
+  // Password change state
+  const [passwordData, setPasswordData] = useState({
+    current_password: "",
+    new_password: "",
+    confirm_password: "",
+  });
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [passwordError, setPasswordError] = useState("");
+  const [passwordSuccess, setPasswordSuccess] = useState("");
 
   useEffect(() => {
     fetchOwnerProfile();
@@ -20,7 +29,6 @@ const OwnerProfile = ({ dashboardData }) => {
     try {
       setLoading(true);
       const token = localStorage.getItem("token");
-      // --- FIX: Calling the correct dedicated profile endpoint ---
       const response = await fetch("http://localhost:5000/api/owners/profile", {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -28,9 +36,9 @@ const OwnerProfile = ({ dashboardData }) => {
       });
       const data = await response.json();
       if (response.ok) {
-        setOwnerProfile(data); // Set profile details
+        setOwnerProfile(data);
         setFormData({
-          arena_name: data.arena_name || "", // Corrected field access
+          arena_name: data.arena_name || "",
           email: data.email || "",
           phone_number: data.phone_number || "",
           business_address: data.business_address || "",
@@ -43,12 +51,89 @@ const OwnerProfile = ({ dashboardData }) => {
     }
   };
 
+  // Handle password change
+  const handlePasswordChange = async (e) => {
+    e.preventDefault();
+    
+    // Validation
+    if (!passwordData.current_password || !passwordData.new_password) {
+      setPasswordError("Current password and new password are required");
+      return;
+    }
+    
+    if (passwordData.new_password.length < 6) {
+      setPasswordError("New password must be at least 6 characters long");
+      return;
+    }
+    
+    if (passwordData.new_password !== passwordData.confirm_password) {
+      setPasswordError("New passwords do not match");
+      return;
+    }
+    
+    setPasswordLoading(true);
+    setPasswordError("");
+    setPasswordSuccess("");
+    
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        "http://localhost:5000/api/owners/profile/password",
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            current_password: passwordData.current_password,
+            new_password: passwordData.new_password,
+          }),
+        }
+      );
+      
+      const data = await response.json();
+      
+      if (response.ok) {
+        setPasswordSuccess("Password updated successfully!");
+        // Clear form
+        setPasswordData({
+          current_password: "",
+          new_password: "",
+          confirm_password: "",
+        });
+        
+        // Auto-clear success message after 5 seconds
+        setTimeout(() => {
+          setPasswordSuccess("");
+        }, 5000);
+      } else {
+        setPasswordError(data.message || "Failed to update password");
+      }
+    } catch (error) {
+      console.error("Error updating password:", error);
+      setPasswordError("An error occurred. Please try again.");
+    } finally {
+      setPasswordLoading(false);
+    }
+  };
+
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData({
       ...formData,
       [name]: value,
     });
+  };
+
+  const handlePasswordInputChange = (e) => {
+    const { name, value } = e.target;
+    setPasswordData({
+      ...passwordData,
+      [name]: value,
+    });
+    // Clear errors when user starts typing
+    if (passwordError) setPasswordError("");
   };
 
   const handleSaveProfile = async () => {
@@ -61,7 +146,6 @@ const OwnerProfile = ({ dashboardData }) => {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        // Only send fields that can be updated (email is not in validation)
         body: JSON.stringify({
           arena_name: formData.arena_name,
           phone_number: formData.phone_number,
@@ -72,7 +156,7 @@ const OwnerProfile = ({ dashboardData }) => {
       if (response.ok) {
         alert("Profile updated successfully");
         setEditMode(false);
-        fetchOwnerProfile(); // Refresh profile data
+        fetchOwnerProfile();
       } else {
         const data = await response.json();
         alert(data.message || "Failed to update profile");
@@ -93,7 +177,6 @@ const OwnerProfile = ({ dashboardData }) => {
     }).format(amount);
   };
 
-  // Use ownerProfile for profile details, dashboardData for stats
   if (!ownerProfile) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -105,7 +188,7 @@ const OwnerProfile = ({ dashboardData }) => {
   const dashboardStats = dashboardData?.dashboard || {};
   const managerCount = dashboardData?.managers?.length || 0;
 
-  return (
+ return (
     <div className="max-w-4xl mx-auto">
       <h1 className="text-xl font-bold text-gray-900 mb-4 md:text-2xl md:mb-6">
         Profile Settings
@@ -318,32 +401,113 @@ const OwnerProfile = ({ dashboardData }) => {
         </div>
       </div>
 
-      {/* Security Section */}
+      {/* Security Section - UPDATED */}
       <div className="mt-4 bg-white rounded-xl shadow p-4 md:mt-6 md:p-6">
         <h3 className="text-base font-medium text-gray-900 mb-3 md:text-lg md:mb-4">
           Security
         </h3>
-        <div className="space-y-3 md:space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Change Password
-            </label>
-            <div className="space-y-2 md:flex md:space-x-3 md:space-y-0">
+        
+        {/* Error Message */}
+        {passwordError && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+            <div className="flex items-center">
+              <svg className="h-5 w-5 text-red-400 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              </svg>
+              <p className="text-sm font-medium text-red-800">{passwordError}</p>
+            </div>
+          </div>
+        )}
+        
+        {/* Success Message */}
+        {passwordSuccess && (
+          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+            <div className="flex items-center">
+              <svg className="h-5 w-5 text-green-400 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+              <p className="text-sm font-medium text-green-800">{passwordSuccess}</p>
+            </div>
+          </div>
+        )}
+        
+        <form onSubmit={handlePasswordChange}>
+          <div className="space-y-3 md:space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Current Password
+              </label>
               <input
                 type="password"
-                placeholder="Current password"
+                name="current_password"
+                value={passwordData.current_password}
+                onChange={handlePasswordInputChange}
+                placeholder="Enter current password"
                 className="w-full px-3 py-2 text-sm md:text-base border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                required
               />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                New Password
+              </label>
               <input
                 type="password"
-                placeholder="New password"
+                name="new_password"
+                value={passwordData.new_password}
+                onChange={handlePasswordInputChange}
+                placeholder="Enter new password (min. 6 characters)"
                 className="w-full px-3 py-2 text-sm md:text-base border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                required
               />
-              <button className="w-full px-4 py-2 text-sm md:text-base bg-blue-600 text-white rounded-md hover:bg-blue-700 md:w-auto">
-                Update
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Confirm New Password
+              </label>
+              <input
+                type="password"
+                name="confirm_password"
+                value={passwordData.confirm_password}
+                onChange={handlePasswordInputChange}
+                placeholder="Confirm new password"
+                className="w-full px-3 py-2 text-sm md:text-base border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                required
+              />
+            </div>
+            
+            <div className="pt-2">
+              <button
+                type="submit"
+                disabled={passwordLoading}
+                className={`w-full px-4 py-2 text-sm md:text-base text-white rounded-md md:w-auto ${
+                  passwordLoading 
+                    ? "bg-blue-400 cursor-not-allowed" 
+                    : "bg-blue-600 hover:bg-blue-700"
+                }`}
+              >
+                {passwordLoading ? (
+                  <>
+                    <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></span>
+                    Updating...
+                  </>
+                ) : (
+                  "Update Password"
+                )}
               </button>
             </div>
           </div>
+        </form>
+        
+        {/* Password Requirements Note */}
+        <div className="mt-4 pt-4 border-t border-gray-200">
+          <p className="text-xs text-gray-500">
+            <strong>Note:</strong> Password must be at least 6 characters long.
+            Make sure to use a strong password that includes letters, numbers,
+            and special characters.
+          </p>
         </div>
       </div>
     </div>

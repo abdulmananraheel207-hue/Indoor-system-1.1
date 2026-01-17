@@ -246,39 +246,50 @@ const OwnerCalendar = ({ arenas = [] }) => {
     setTimeSlots(updatedSlots);
   };
 
-  const handleSaveChanges = async () => {
-    if (!selectedArena) {
-      alert("Please select an arena first");
-      return;
-    }
+const handleSaveChanges = async () => {
+  if (!selectedArena) {
+    alert("Please select an arena first");
+    return;
+  }
 
-    setSaving(true);
-    try {
-      const dateStr = selectedDate.toISOString().split("T")[0];
+  setSaving(true);
+  try {
+    const dateStr = selectedDate.toISOString().split("T")[0];
+    
+    // Ensure all slots have the correct court_id
+    const processedSlots = timeSlots.map((slot) => ({
+      start_time: slot.start_time.includes(":00") ? slot.start_time : slot.start_time + ":00",
+      end_time: slot.end_time.includes(":00") ? slot.end_time : slot.end_time + ":00",
+      price: parseInt(slot.price) || 500,
+      is_blocked: slot.is_blocked || false,
+      court_id: slot.court_id || selectedCourt, // Make sure court_id is included
+    }));
 
-      const payload = {
-        date: dateStr,
-        court_id: selectedCourt || undefined, // Include court_id in payload
-        slots: timeSlots.map((slot) => ({
-          start_time: slot.start_time + ":00",
-          end_time: slot.end_time + ":00",
-          price: slot.price,
-          is_blocked: slot.is_blocked,
-          is_auto: slot.is_auto,
-          court_id: slot.court_id || selectedCourt, // Include court_id for each slot
-        })),
-      };
+    const payload = {
+      date: dateStr,
+      action: "update_slots", // Explicitly specify the action
+      slots: processedSlots,
+      court_id: selectedCourt || undefined, // Include top-level court_id as fallback
+    };
 
-      await ownerAPI.updateTimeSlots(selectedArena, payload);
-      setSuccessMessage("Time slots saved successfully!");
-      setTimeout(() => setSuccessMessage(""), 3000);
-    } catch (error) {
-      console.error("Error saving time slots:", error);
-      alert(error.response?.data?.message || "Failed to save time slots");
-    } finally {
-      setSaving(false);
-    }
-  };
+    console.log("Saving payload:", payload); // For debugging
+    
+    await ownerAPI.updateTimeSlots(selectedArena, payload);
+    setSuccessMessage("Time slots saved successfully!");
+    setTimeout(() => setSuccessMessage(""), 3000);
+    
+    // Refresh the slots after saving
+    setTimeout(() => {
+      fetchTimeSlots();
+    }, 1000);
+    
+  } catch (error) {
+    console.error("Error saving time slots:", error);
+    alert(error.response?.data?.message || "Failed to save time slots");
+  } finally {
+    setSaving(false);
+  }
+};
 
 
 
@@ -350,33 +361,6 @@ const OwnerCalendar = ({ arenas = [] }) => {
             </select>
 
 
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Select Court
-            </label>
-            <select
-              value={selectedCourt}
-              onChange={(e) => setSelectedCourt(e.target.value)}
-              disabled={!selectedArena || courts.length === 0}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-            >
-              {courts.length === 0 ? (
-                <option value="">No courts found</option>
-              ) : (
-                courts.map((court) => (
-                  <option key={court.court_id} value={court.court_id}>
-                    {court.court_name || `Court ${court.court_number}`}
-                  </option>
-                ))
-              )}
-            </select>
-            {courts.length === 1 && (
-              <p className="text-xs text-gray-500 mt-1">
-                Single-court arena - court selection not needed
-              </p>
-            )}
           </div>
 
           <div>

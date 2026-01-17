@@ -9,10 +9,13 @@ const validate = (validations) => {
       return next();
     }
 
+    // ADD THIS LOGGING:
+    console.log("Validation errors:", errors.array());
+    console.log("Request body:", req.body);
+
     res.status(400).json({ errors: errors.array() });
   };
 };
-
 // User validation rules
 const userValidation = {
   register: validate([

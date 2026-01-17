@@ -778,20 +778,78 @@ export const integrationService = {
     }
   },
 
-  getArenaReviews: async (arenaId) => {
-    try {
-      const response = await fetch(
-        `http://localhost:5000/api/arenas/${arenaId}/reviews`,
-        {
-          headers: getAuthHeaders(),
-        }
-      );
-      return await response.json();
-    } catch (error) {
-      console.error("Error fetching reviews:", error);
-      throw error;
+
+getArenaReviews: async (arenaId) => {
+  try {
+    const response = await fetch(
+      `http://localhost:5000/api/arenas/${arenaId}/reviews`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
+
+    if (!response.ok) {
+      // If endpoint fails, return empty reviews
+      console.warn(`Failed to fetch reviews for arena ${arenaId}: ${response.status}`);
+      return { reviews: [], total: 0, avg_rating: 0, total_reviews: 0 };
     }
-  },
+
+    const data = await response.json();
+    
+    // Handle different response formats
+    if (Array.isArray(data)) {
+      return { reviews: data, total: data.length };
+    } else if (data.reviews) {
+      return data;
+    } else {
+      return { reviews: [], total: 0, avg_rating: 0, total_reviews: 0 };
+    }
+  } catch (error) {
+    console.error("Error fetching arena reviews:", error);
+    return { reviews: [], total: 0, avg_rating: 0, total_reviews: 0 };
+  }
+},
+
+// In integrationService.js - UPDATED submitReview function
+submitReview: async (arenaId, rating, comment) => {
+  try {
+    const response = await fetch(
+      `http://localhost:5000/api/arenas/${arenaId}/reviews`,
+      {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ rating, comment }),
+      }
+    );
+
+    const responseData = await response.json();
+    
+    if (!response.ok) {
+      // Check if it's a validation error
+      if (response.status === 400) {
+        throw new Error(responseData.message || "Validation failed");
+      }
+      throw new Error(responseData.message || `Failed to submit review (${response.status})`);
+    }
+    
+    return responseData;
+  } catch (error) {
+    console.error("Error submitting review:", error);
+    
+    // Provide more specific error messages
+    if (error.message.includes("already reviewed")) {
+      throw new Error("You have already reviewed this arena");
+    }
+    if (error.message.includes("Validation failed")) {
+      throw new Error("Please provide both a rating and comment");
+    }
+    if (error.message.includes("completed booking")) {
+      throw new Error("You need to complete a booking before reviewing");
+    }
+    
+    throw error;
+  }
+},
 
   // ===== FAVORITES =====
   addToFavorites: async (arenaId) => {

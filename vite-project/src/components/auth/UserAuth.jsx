@@ -40,7 +40,8 @@ const UserAuth = ({ onLogin }) => {
             name: formData.name,
             email: formData.email,
             password: formData.password,
-            phone_number: formData.phone,
+            phone: formData.phone || "",
+            
           };
 
       const response = await fetch(endpoint, {

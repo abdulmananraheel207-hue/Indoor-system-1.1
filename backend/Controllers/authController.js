@@ -5,48 +5,77 @@ const crypto = require("crypto");
 
 const authController = {
   // User Registration
-  registerUser: async (req, res) => {
-    try {
-      const { name, email, password, phone_number } = req.body;
-
-      // Check if user exists
-      const [existingUser] = await pool.execute(
-        "SELECT user_id FROM users WHERE email = ?",
-        [email]
-      );
-
-      if (existingUser.length > 0) {
-        return res.status(400).json({ message: "User already exists" });
+// User Registration
+registerUser: async (req, res) => {
+  try {
+    // Accept both phone and phone_number from frontend
+    const { name, email, password, phone, phone_number, location } = req.body;
+    
+    // Use phone if provided, otherwise phone_number, otherwise null
+    const userPhone = phone || phone_number || null;
+    
+    // Handle location if provided (you might want to parse lat/lng from string)
+    let location_lat = null;
+    let location_lng = null;
+    
+    if (location) {
+      // If location is a string like "lat,lng", parse it
+      if (typeof location === 'string' && location.includes(',')) {
+        const [lat, lng] = location.split(',').map(coord => parseFloat(coord.trim()));
+        location_lat = lat;
+        location_lng = lng;
       }
-
-      // Hash password
-      const hashedPassword = await bcrypt.hash(password, 10);
-
-      // Insert user
-      const [result] = await pool.execute(
-        `INSERT INTO users (name, email, password_hash, phone_number, is_logged_in, last_login) 
-         VALUES (?, ?, ?, ?, TRUE, NOW())`,
-        [name, email, hashedPassword, phone_number]
-      );
-
-      // Generate token
-      const token = jwt.sign(
-        { id: result.insertId, email, role: "user" },
-        process.env.JWT_SECRET || "your-secret-key",
-        { expiresIn: "7d" }
-      );
-
-      res.status(201).json({
-        message: "User registered successfully",
-        token,
-        user: { id: result.insertId, name, email, phone_number, role: "user" },
-      });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Server error", error: error.message });
+      // If location is an object with lat/lng
+      else if (typeof location === 'object') {
+        location_lat = location.lat || location.latitude || null;
+        location_lng = location.lng || location.longitude || null;
+      }
     }
-  },
 
+    // Check if user exists
+    const [existingUser] = await pool.execute(
+      "SELECT user_id FROM users WHERE email = ?",
+      [email]
+    );
+
+    if (existingUser.length > 0) {
+      return res.status(400).json({ message: "User already exists" });
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Insert user - include all fields from your table
+    const [result] = await pool.execute(
+      `INSERT INTO users 
+       (name, email, password_hash, phone_number, location_lat, location_lng, is_logged_in, last_login) 
+       VALUES (?, ?, ?, ?, ?, ?, TRUE, NOW())`,
+      [name, email, hashedPassword, userPhone, location_lat, location_lng]
+    );
+
+    // Generate token
+    const token = jwt.sign(
+      { id: result.insertId, email, role: "user" },
+      process.env.JWT_SECRET || "your-secret-key",
+      { expiresIn: "7d" }
+    );
+
+    res.status(201).json({
+      message: "User registered successfully",
+      token,
+      user: { 
+        id: result.insertId, 
+        name, 
+        email, 
+        phone_number: userPhone, 
+        role: "user" 
+      },
+    });
+  } catch (error) {
+    console.error("Registration error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+},
   // Arena Owner Registration
   registerOwner: async (req, res) => {
     try {

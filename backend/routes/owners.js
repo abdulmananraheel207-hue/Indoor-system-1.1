@@ -111,6 +111,7 @@ router.get("/reports/export", ownerController.exportBookingData);
 // Profile
 router.get("/profile", ownerController.getOwnerProfile);
 router.put("/profile", ownerController.updateOwnerProfile);
+router.put("/profile/password", ownerController.updateOwnerPassword);
 
 // Cleanup
 router.post("/cleanup/expired-locks", ownerController.cleanupExpiredLocks);

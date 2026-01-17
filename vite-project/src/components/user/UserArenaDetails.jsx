@@ -17,8 +17,10 @@ const UserArenaDetails = () => {
   const [loading, setLoading] = useState(true);
   const [bookingInProgress, setBookingInProgress] = useState(false);
   const [reviews, setReviews] = useState([]);
-  const [showReviews, setShowReviews] = useState(false);
+  const [loadingReviews, setLoadingReviews] = useState(false);
+  const [showReviewForm, setShowReviewForm] = useState(false);
   const [newReview, setNewReview] = useState({ rating: 5, comment: "" });
+  const [submittingReview, setSubmittingReview] = useState(false);
   const [lockExpiry, setLockExpiry] = useState(null);
   const [timeLeft, setTimeLeft] = useState(null);
   const [isFavorited, setIsFavorited] = useState(false);
@@ -28,7 +30,7 @@ const UserArenaDetails = () => {
 
   useEffect(() => {
     fetchArenaDetails();
-    fetchReviews();
+    fetchArenaReviews();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [arenaId]);
 
@@ -70,7 +72,6 @@ const UserArenaDetails = () => {
     const checkFavoriteStatus = async () => {
       try {
         const favorites = await integrationService.getFavoriteArenas();
-        setFavorites(favorites || []);
 
         // Check if current arena is already in favorites
         const isAlreadyFavorited = favorites.some(
@@ -111,7 +112,6 @@ const UserArenaDetails = () => {
         ...details,
         courts: transformedCourts,
       });
-      setReviews(details.reviews || []);
 
       if (transformedCourts.length > 0) {
         setSelectedCourt(transformedCourts[0]);
@@ -129,6 +129,27 @@ const UserArenaDetails = () => {
       console.error("Error fetching arena details:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchArenaReviews = async () => {
+    try {
+      setLoadingReviews(true);
+      const response = await integrationService.getArenaReviews(arenaId);
+      
+      // Handle different response formats
+      if (response.reviews) {
+        setReviews(response.reviews);
+      } else if (Array.isArray(response)) {
+        setReviews(response);
+      } else {
+        setReviews([]);
+      }
+    } catch (error) {
+      console.error("Error fetching arena reviews:", error);
+      setReviews([]);
+    } finally {
+      setLoadingReviews(false);
     }
   };
 
@@ -157,21 +178,8 @@ const UserArenaDetails = () => {
     }
   };
 
-  const fetchReviews = async () => {
-    try {
-      const response = await fetch(
-        `http://localhost:5000/api/arenas/${arenaId}/reviews`
-      );
-      const data = await response.json();
-      if (response.ok) {
-        setReviews(data.reviews || []);
-      }
-    } catch (error) {
-      console.error("Error fetching reviews:", error);
-    }
-  };
-
   const handleSlotSelect = (slot) => {
+    // ... (keep existing slot selection logic)
     const isSlotAvailable = slot.actually_available ?? slot.is_available;
     if (!isSlotAvailable || slot.is_blocked) return;
 
@@ -232,6 +240,7 @@ const UserArenaDetails = () => {
   };
 
   const handleBooking = async () => {
+    // ... (keep existing booking logic)
     // 1. Check if sport is selected
     if (!selectedSportId) {
       alert("Please select a sport before booking");
@@ -395,18 +404,31 @@ const UserArenaDetails = () => {
       return;
     }
 
+    if (newReview.rating < 1 || newReview.rating > 5) {
+      alert("Please select a rating between 1 and 5 stars");
+      return;
+    }
+
     try {
+      setSubmittingReview(true);
       await integrationService.submitReview(
         arenaId,
         newReview.rating,
         newReview.comment
       );
+      
       alert("Review submitted successfully!");
       setNewReview({ rating: 5, comment: "" });
-      fetchReviews();
+      setShowReviewForm(false);
+      
+      // Refresh reviews
+      await fetchArenaReviews();
+      
     } catch (error) {
       console.error("Error submitting review:", error);
-      alert("Failed to submit review");
+      alert(error.response?.data?.message || "Failed to submit review. You may need to complete a booking first.");
+    } finally {
+      setSubmittingReview(false);
     }
   };
 
@@ -461,6 +483,11 @@ const UserArenaDetails = () => {
 
   const courtImages = getCurrentCourtImages();
   const hasCourtImages = courtImages.length > 0;
+
+  // Calculate average rating
+  const averageRating = reviews.length > 0 
+    ? (reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length).toFixed(1)
+    : "No ratings yet";
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -603,12 +630,12 @@ const UserArenaDetails = () => {
                   <h1 className="text-3xl font-bold text-gray-900 mb-2">
                     {arena.name}
                   </h1>
-                  <div className="flex items-center space-x-4">
+                  <div className="flex items-center space-x-4 mb-6">
                     <div className="flex items-center">
                       {[...Array(5)].map((_, i) => (
                         <svg
                           key={i}
-                          className={`h-5 w-5 ${i < Math.floor(arena.rating || 0)
+                          className={`h-6 w-6 ${i < Math.floor(arena.rating || averageRating)
                             ? "text-yellow-400"
                             : "text-gray-300"
                             }`}
@@ -618,20 +645,13 @@ const UserArenaDetails = () => {
                           <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                         </svg>
                       ))}
-                      <span className="ml-2 font-semibold">
-                        {arena.rating || "New"}
+                      <span className="ml-2 font-semibold text-lg">
+                        {averageRating}
                       </span>
-                      <span className="ml-1 text-gray-600">
-                        ({reviews.length} reviews)
+                      <span className="ml-2 text-gray-600">
+                        ({reviews.length} {reviews.length === 1 ? 'review' : 'reviews'})
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowReviews(!showReviews)}
-                      className="text-primary-600 hover:text-primary-700"
-                    >
-                      {showReviews ? "Hide Reviews" : "Show Reviews"}
-                    </button>
                   </div>
                 </div>
                 <div className="text-right">
@@ -695,7 +715,7 @@ const UserArenaDetails = () => {
                 <p className="text-gray-600">{arena.description}</p>
               </div>
 
-              <div>
+              <div className="mb-8">
                 <h3 className="text-lg font-semibold text-gray-900 mb-3">
                   Available Sports
                 </h3>
@@ -739,96 +759,164 @@ const UserArenaDetails = () => {
                   )}
                 </div>
               </div>
-            </div>
 
-            {/* Reviews Section */}
-            {showReviews && (
-              <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                  Reviews
-                </h3>
-
-                {/* Add Review Form */}
-                <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-                  <h4 className="font-medium text-gray-900 mb-3">
-                    Add Your Review
-                  </h4>
-                  <div className="mb-3">
-                    <div className="flex items-center mb-2">
-                      <span className="text-sm text-gray-600 mr-3">
-                        Rating:
-                      </span>
-                      {[...Array(5)].map((_, i) => (
-                        <button
-                          type="button"
-                          key={i}
-                          onClick={() =>
-                            setNewReview({ ...newReview, rating: i + 1 })
-                          }
-                          className="text-2xl mr-1"
-                        >
-                          {i < newReview.rating ? "★" : "☆"}
-                        </button>
-                      ))}
-                    </div>
-                    <textarea
-                      value={newReview.comment}
-                      onChange={(e) =>
-                        setNewReview({ ...newReview, comment: e.target.value })
-                      }
-                      rows="3"
-                      placeholder="Share your experience..."
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    />
-                  </div>
+              {/* Reviews Section - ALWAYS VISIBLE */}
+              <div className="border-t pt-6">
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-xl font-semibold text-gray-900">
+                    Customer Reviews
+                  </h3>
                   <button
                     type="button"
-                    onClick={handleSubmitReview}
-                    className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+                    onClick={() => setShowReviewForm(!showReviewForm)}
+                    className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
                   >
-                    Submit Review
+                    {showReviewForm ? "Cancel Review" : "Write a Review"}
                   </button>
                 </div>
 
-                {/* Reviews List */}
-                <div className="space-y-4">
-                  {reviews.map((review) => (
-                    <div
-                      key={review.review_id}
-                      className="border-b pb-4 last:border-0"
-                    >
-                      <div className="flex items-start justify-between mb-2">
-                        <div>
-                          <p className="font-medium">{review.user_name}</p>
-                          <div className="flex items-center">
-                            {[...Array(5)].map((_, i) => (
-                              <svg
-                                key={i}
-                                className={`h-4 w-4 ${i < review.rating
-                                  ? "text-yellow-400"
-                                  : "text-gray-300"
-                                  }`}
-                                fill="currentColor"
-                                viewBox="0 0 20 20"
-                              >
-                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                              </svg>
-                            ))}
-                          </div>
-                        </div>
-                        <span className="text-sm text-gray-500">
-                          {new Date(review.created_at).toLocaleDateString()}
+                {/* Add Review Form */}
+                {showReviewForm && (
+                  <div className="mb-8 p-6 bg-gray-50 rounded-lg border border-gray-200">
+                    <h4 className="font-semibold text-gray-900 mb-4 text-lg">
+                      Share Your Experience
+                    </h4>
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Your Rating
+                      </label>
+                      <div className="flex items-center space-x-1">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <button
+                            key={star}
+                            type="button"
+                            onClick={() => setNewReview({ ...newReview, rating: star })}
+                            className="text-3xl focus:outline-none transition-transform hover:scale-110"
+                          >
+                            <span className={star <= newReview.rating ? "text-yellow-400" : "text-gray-300"}>
+                              {star <= newReview.rating ? "★" : "☆"}
+                            </span>
+                          </button>
+                        ))}
+                        <span className="ml-2 text-sm text-gray-600">
+                          {newReview.rating} out of 5
                         </span>
                       </div>
-                      <p className="text-gray-600">{review.comment}</p>
                     </div>
-                  ))}
-                </div>
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Your Review
+                      </label>
+                      <textarea
+                        value={newReview.comment}
+                        onChange={(e) =>
+                          setNewReview({ ...newReview, comment: e.target.value })
+                        }
+                        rows="4"
+                        placeholder="Tell others about your experience at this arena..."
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div className="flex justify-end space-x-3">
+                      <button
+                        type="button"
+                        onClick={() => setShowReviewForm(false)}
+                        className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSubmitReview}
+                        disabled={submittingReview}
+                        className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {submittingReview ? "Submitting..." : "Submit Review"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Reviews List */}
+                {loadingReviews ? (
+                  <div className="flex justify-center py-8">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+                  </div>
+                ) : reviews.length > 0 ? (
+                  <div className="space-y-6">
+                    {reviews.map((review) => (
+                      <div
+                        key={review.review_id || review.id}
+                        className="border border-gray-200 rounded-lg p-6 hover:shadow-sm transition-shadow"
+                      >
+                        <div className="flex items-start justify-between mb-4">
+                          <div className="flex items-center">
+                            {review.profile_picture_url ? (
+                              <img
+                                src={review.profile_picture_url}
+                                alt={review.user_name}
+                                className="w-10 h-10 rounded-full object-cover mr-3"
+                              />
+                            ) : (
+                              <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center mr-3">
+                                <span className="text-gray-500 font-medium">
+                                  {review.user_name?.charAt(0).toUpperCase()}
+                                </span>
+                              </div>
+                            )}
+                            <div>
+                              <p className="font-medium text-gray-900">{review.user_name}</p>
+                              <div className="flex items-center">
+                                {[...Array(5)].map((_, i) => (
+                                  <svg
+                                    key={i}
+                                    className={`h-4 w-4 ${i < review.rating
+                                        ? "text-yellow-400"
+                                        : "text-gray-300"
+                                      }`}
+                                    fill="currentColor"
+                                    viewBox="0 0 20 20"
+                                  >
+                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                                  </svg>
+                                ))}
+                                <span className="ml-2 text-sm text-gray-600">
+                                  {review.rating}.0
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          <span className="text-sm text-gray-500">
+                            {new Date(review.created_at).toLocaleDateString('en-US', {
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric'
+                            })}
+                          </span>
+                        </div>
+                        <p className="text-gray-700 leading-relaxed">{review.comment}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 border border-gray-200 rounded-lg">
+                    <div className="text-gray-400 text-4xl mb-3">📝</div>
+                    <p className="text-gray-600 font-medium">No reviews yet</p>
+                    <p className="text-gray-500 text-sm mt-1">Be the first to share your experience!</p>
+                    <button
+                      type="button"
+                      onClick={() => setShowReviewForm(true)}
+                      className="mt-4 px-4 py-2 text-primary-600 hover:text-primary-700 font-medium"
+                    >
+                      Write the first review
+                    </button>
+                  </div>
+                )}
               </div>
-            )}
+            </div>
           </div>
 
-          {/* Right Column - Booking Section */}
+          {/* Right Column - Booking Section (Keep existing) */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-xl shadow-sm p-6 sticky top-6">
               <h3 className="text-xl font-semibold text-black-1000 mb-6">
@@ -849,7 +937,7 @@ const UserArenaDetails = () => {
                 />
               </div>
 
-              {/* Court Selection */}
+              {/* Court Selection (Keep existing) */}
               {arena.courts && arena.courts.length > 0 && (
                 <div className="mb-6">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -911,7 +999,7 @@ const UserArenaDetails = () => {
                 </div>
               )}
 
-              {/* Sport Selection */}
+              {/* Sport Selection (Keep existing) */}
               {sportsList && sportsList.length > 0 && (
                 <div className="mb-6">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -997,7 +1085,7 @@ const UserArenaDetails = () => {
                 </div>
               )}
 
-              {/* Time Slots */}
+              {/* Time Slots (Keep existing) */}
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Available Time Slots for {selectedCourt?.court_name || "Selected Court"}
@@ -1050,7 +1138,7 @@ const UserArenaDetails = () => {
                 </div>
               )}
 
-              {/* Booking Summary */}
+              {/* Booking Summary (Keep existing) */}
               {selectedSlots && selectedSlots.length > 0 && (
                 <div className="mb-6 p-4 bg-gray-50 rounded-lg">
                   <h4 className="font-medium text-gray-900 mb-3">
@@ -1100,7 +1188,7 @@ const UserArenaDetails = () => {
                 </div>
               )}
 
-              {/* Book Button */}
+              {/* Book Button (Keep existing) */}
               {selectedSlots.length > 0 && (
                 <div className="flex items-center justify-between mb-3">
                   <button
