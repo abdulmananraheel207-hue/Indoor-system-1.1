@@ -1,124 +1,320 @@
+// controllers/adminController.js - SIMPLIFIED WORKING VERSION
 const pool = require('../db');
 
 const adminController = {
-    // Get admin dashboard data
+    // Admin Login - Hardcoded (single admin)
+    // In adminController.js
+    loginAdmin: async (req, res) => {
+        try {
+            console.log("🔐 Admin login attempt received");
+            console.log("Request body:", req.body);
+
+            const { username, password } = req.body;
+
+            // Debug: Log exactly what we received
+            console.log("Received - Username:", username, "Type:", typeof username);
+            console.log("Received - Password:", password, "Type:", typeof password);
+
+            // Simple string comparison - no trimming, no case conversion
+            if (username === 'admin' && password === 'admin123') {
+                console.log("✅ Credentials are CORRECT!");
+
+                const jwt = require('jsonwebtoken');
+                const token = jwt.sign(
+                    {
+                        id: 1,
+                        username: 'admin',
+                        role: 'admin'
+                    },
+                    process.env.JWT_SECRET || 'admin_secret_key',
+                    { expiresIn: '24h' }
+                );
+
+                console.log("✅ Token generated:", token.substring(0, 20) + "...");
+
+                res.json({
+                    success: true,
+                    message: "Admin login successful",
+                    token: token,
+                    user: {
+                        id: 1,
+                        name: 'System Administrator',
+                        email: 'admin@arenafinder.com',
+                        role: 'admin',
+                        username: 'admin'
+                    }
+                });
+            } else {
+                console.log("❌ Credentials are WRONG!");
+                console.log("Expected: admin / admin123");
+                console.log("Got:", username, "/", password);
+
+                res.status(401).json({
+                    success: false,
+                    message: "Invalid admin credentials. Use: admin / admin123"
+                });
+            }
+        } catch (error) {
+            console.error("❌ Login error:", error);
+            res.status(500).json({
+                success: false,
+                message: "Server error during login",
+                error: error.message
+            });
+        }
+    },
+
+    // Get Admin Dashboard
     getDashboard: async (req, res) => {
         try {
-            // Total commission earned this month
-            const [monthlyCommission] = await pool.execute(
-                `SELECT COALESCE(SUM(commission_amount), 0) as total_commission
-         FROM bookings 
-         WHERE MONTH(booking_date) = MONTH(CURRENT_DATE())
-           AND YEAR(booking_date) = YEAR(CURRENT_DATE())
-           AND status = 'completed'`
-            );
+            console.log("📊 Fetching admin dashboard data...");
 
-            // Number of active arenas
-            const [activeArenas] = await pool.execute(
-                'SELECT COUNT(*) as count FROM arenas WHERE is_active = TRUE AND is_blocked = FALSE'
-            );
+            // 1. Overall statistics
+            const [overallStats] = await pool.execute(`
+                SELECT 
+                    (SELECT COUNT(*) FROM users) as total_users,
+                    (SELECT COUNT(*) FROM arena_owners) as total_owners,
+                    (SELECT COUNT(*) FROM arenas WHERE is_active = TRUE AND is_blocked = FALSE) as total_arenas,
+                    (SELECT COUNT(*) FROM bookings WHERE status = 'completed') as completed_bookings,
+                    (SELECT COALESCE(SUM(total_amount), 0) FROM bookings WHERE status = 'completed') as total_revenue,
+                    (SELECT COALESCE(SUM(commission_amount), 0) FROM bookings WHERE status = 'completed') as total_commission,
+                    (SELECT COALESCE(SUM(total_commission_due), 0) FROM arenas) as pending_commission
+            `);
 
-            // Pending commissions (arenas that need to pay)
-            const [pendingCommissions] = await pool.execute(
-                `SELECT a.*, ao.arena_name as owner_arena_name, ao.email as owner_email,
-                ao.phone_number as owner_phone,
-                a.total_commission_due as amount_due,
-                DATEDIFF(CURDATE(), COALESCE(a.last_payment_date, a.created_at)) as days_overdue
-         FROM arenas a
-         JOIN arena_owners ao ON a.owner_id = ao.owner_id
-         WHERE a.total_commission_due > 0
-         ORDER BY days_overdue DESC`
-            );
+            // 2. Monthly commission
+            const [monthlyCommission] = await pool.execute(`
+                SELECT COALESCE(SUM(commission_amount), 0) as monthly_commission
+                FROM bookings 
+                WHERE MONTH(booking_date) = MONTH(CURRENT_DATE())
+                AND YEAR(booking_date) = YEAR(CURRENT_DATE())
+                AND status = 'completed'
+            `);
 
-            // Recent bookings across all arenas
-            const [recentBookings] = await pool.execute(
-                `SELECT b.*, u.name as user_name, a.name as arena_name,
-                ao.arena_name as owner_name, st.name as sport_name
-         FROM bookings b
-         JOIN users u ON b.user_id = u.user_id
-         JOIN arenas a ON b.arena_id = a.arena_id
-         JOIN arena_owners ao ON a.owner_id = ao.owner_id
-         JOIN sports_types st ON b.sport_id = st.sport_id
-         ORDER BY b.booking_date DESC
-         LIMIT 10`
-            );
+            // 3. Pending commissions
+            const [pendingCommissions] = await pool.execute(`
+                SELECT a.*, 
+                       ao.arena_name as owner_name, 
+                       ao.email as owner_email,
+                       ao.phone_number as owner_phone,
+                       a.total_commission_due as amount_due,
+                       COALESCE(DATEDIFF(CURDATE(), a.last_payment_date), 30) as days_overdue
+                FROM arenas a
+                LEFT JOIN arena_owners ao ON a.owner_id = ao.owner_id
+                WHERE a.total_commission_due > 0
+                ORDER BY days_overdue DESC
+                LIMIT 10
+            `);
 
-            // Overall statistics
-            const [overallStats] = await pool.execute(
-                `SELECT 
-           COUNT(DISTINCT u.user_id) as total_users,
-           COUNT(DISTINCT ao.owner_id) as total_owners,
-           COUNT(DISTINCT a.arena_id) as total_arenas,
-           COUNT(DISTINCT b.booking_id) as total_bookings,
-           COALESCE(SUM(b.total_amount), 0) as total_revenue,
-           COALESCE(SUM(b.commission_amount), 0) as total_platform_commission
-         FROM users u
-         CROSS JOIN arena_owners ao
-         CROSS JOIN arenas a
-         CROSS JOIN bookings b
-         WHERE b.status = 'completed'`
-            );
+            // 4. Recent bookings
+            const [recentBookings] = await pool.execute(`
+                SELECT b.*, 
+                       u.name as user_name, 
+                       a.name as arena_name,
+                       st.name as sport_name
+                FROM bookings b
+                LEFT JOIN users u ON b.user_id = u.user_id
+                LEFT JOIN arenas a ON b.arena_id = a.arena_id
+                LEFT JOIN sports_types st ON b.sport_id = st.sport_id
+                WHERE b.status IN ('completed', 'accepted')
+                ORDER BY b.booking_date DESC
+                LIMIT 10
+            `);
+
+            console.log("✅ Dashboard data fetched successfully");
 
             res.json({
+                success: true,
                 dashboard: {
-                    monthly_commission: monthlyCommission[0].total_commission,
-                    active_arenas: activeArenas[0].count,
+                    monthly_commission: monthlyCommission[0]?.monthly_commission || 0,
+                    active_arenas: overallStats[0]?.total_arenas || 0,
                     pending_commissions_count: pendingCommissions.length
                 },
-                pending_commissions: pendingCommissions,
-                recent_bookings: recentBookings,
-                overall_stats: overallStats[0]
+                pending_commissions: pendingCommissions || [],
+                recent_bookings: recentBookings || [],
+                overall_stats: overallStats[0] || {
+                    total_users: 0,
+                    total_owners: 0,
+                    total_arenas: 0,
+                    completed_bookings: 0,
+                    total_revenue: 0,
+                    total_commission: 0,
+                    pending_commission: 0
+                }
             });
         } catch (error) {
-            console.error(error);
-            res.status(500).json({ message: 'Server error', error: error.message });
+            console.error("❌ Error fetching admin dashboard:", error);
+            res.status(500).json({
+                success: false,
+                message: "Server error",
+                error: error.message
+            });
         }
     },
 
     // Get all arenas
     getAllArenas: async (req, res) => {
         try {
-            const { status, is_active, is_blocked } = req.query;
+            const { search, page = 1, limit = 20 } = req.query;
+            const offset = (page - 1) * limit;
 
             let query = `
-        SELECT a.*, ao.arena_name as owner_name, ao.email as owner_email,
-               ao.phone_number as owner_phone,
-               COUNT(DISTINCT b.booking_id) as total_bookings,
-               COALESCE(SUM(CASE WHEN b.status = 'completed' THEN b.total_amount ELSE 0 END), 0) as total_revenue
-        FROM arenas a
-        JOIN arena_owners ao ON a.owner_id = ao.owner_id
-        LEFT JOIN bookings b ON a.arena_id = b.arena_id
-      `;
+                SELECT a.*, 
+                       ao.arena_name as owner_name, 
+                       ao.email as owner_email,
+                       ao.phone_number as owner_phone,
+                       (SELECT COUNT(*) FROM bookings WHERE arena_id = a.arena_id AND status = 'completed') as total_bookings,
+                       (SELECT COALESCE(SUM(total_amount), 0) FROM bookings WHERE arena_id = a.arena_id AND status = 'completed') as total_revenue
+                FROM arenas a
+                LEFT JOIN arena_owners ao ON a.owner_id = ao.owner_id
+            `;
 
-            const whereConditions = [];
             const params = [];
 
-            if (status) {
-                whereConditions.push('a.is_active = ?');
-                params.push(status === 'active' ? 1 : 0);
+            if (search) {
+                query += ' WHERE a.name LIKE ? OR ao.arena_name LIKE ? OR ao.email LIKE ?';
+                params.push(`%${search}%`, `%${search}%`, `%${search}%`);
             }
 
-            if (is_active !== undefined) {
-                whereConditions.push('a.is_active = ?');
-                params.push(is_active);
-            }
-
-            if (is_blocked !== undefined) {
-                whereConditions.push('a.is_blocked = ?');
-                params.push(is_blocked);
-            }
-
-            if (whereConditions.length > 0) {
-                query += ' WHERE ' + whereConditions.join(' AND ');
-            }
-
-            query += ' GROUP BY a.arena_id ORDER BY a.created_at DESC';
+            query += ' ORDER BY a.created_at DESC LIMIT ? OFFSET ?';
+            params.push(parseInt(limit), parseInt(offset));
 
             const [arenas] = await pool.execute(query, params);
-            res.json(arenas);
+
+            // Get total count
+            let countQuery = `SELECT COUNT(*) as total FROM arenas a LEFT JOIN arena_owners ao ON a.owner_id = ao.owner_id`;
+            if (search) {
+                countQuery += ' WHERE a.name LIKE ? OR ao.arena_name LIKE ? OR ao.email LIKE ?';
+            }
+            const [countResult] = await pool.execute(countQuery, search ? [`%${search}%`, `%${search}%`, `%${search}%`] : []);
+
+            res.json({
+                success: true,
+                arenas,
+                pagination: {
+                    page: parseInt(page),
+                    limit: parseInt(limit),
+                    total: countResult[0]?.total || 0,
+                    totalPages: Math.ceil((countResult[0]?.total || 0) / limit)
+                }
+            });
         } catch (error) {
-            console.error(error);
-            res.status(500).json({ message: 'Server error', error: error.message });
+            console.error("❌ Error fetching arenas:", error);
+            res.status(500).json({
+                success: false,
+                message: "Server error",
+                error: error.message
+            });
+        }
+    },
+
+    // Get all users
+    getAllUsers: async (req, res) => {
+        try {
+            const { search, page = 1, limit = 20 } = req.query;
+            const offset = (page - 1) * limit;
+
+            let query = `
+                SELECT u.*,
+                       (SELECT COUNT(*) FROM bookings WHERE user_id = u.user_id AND status = 'completed') as total_bookings,
+                       (SELECT COUNT(*) FROM favorite_arenas WHERE user_id = u.user_id) as favorite_arenas_count
+                FROM users u
+            `;
+
+            const params = [];
+
+            if (search) {
+                query += ' WHERE u.name LIKE ? OR u.email LIKE ?';
+                params.push(`%${search}%`, `%${search}%`);
+            }
+
+            query += ' ORDER BY u.created_at DESC LIMIT ? OFFSET ?';
+            params.push(parseInt(limit), parseInt(offset));
+
+            const [users] = await pool.execute(query, params);
+
+            // Get total count
+            let countQuery = `SELECT COUNT(*) as total FROM users u`;
+            if (search) {
+                countQuery += ' WHERE u.name LIKE ? OR u.email LIKE ?';
+            }
+            const [countResult] = await pool.execute(countQuery, search ? [`%${search}%`, `%${search}%`] : []);
+
+            res.json({
+                success: true,
+                users,
+                pagination: {
+                    page: parseInt(page),
+                    limit: parseInt(limit),
+                    total: countResult[0]?.total || 0,
+                    totalPages: Math.ceil((countResult[0]?.total || 0) / limit)
+                }
+            });
+        } catch (error) {
+            console.error("❌ Error fetching users:", error);
+            res.status(500).json({
+                success: false,
+                message: "Server error",
+                error: error.message
+            });
+        }
+    },
+
+    // Get all owners
+    getAllOwners: async (req, res) => {
+        try {
+            const { search, page = 1, limit = 20 } = req.query;
+            const offset = (page - 1) * limit;
+
+            let query = `
+                SELECT ao.*,
+                       (SELECT COUNT(*) FROM arenas WHERE owner_id = ao.owner_id) as total_arenas,
+                       (SELECT COUNT(*) FROM bookings b 
+                        JOIN arenas a ON b.arena_id = a.arena_id 
+                        WHERE a.owner_id = ao.owner_id AND b.status = 'completed') as total_bookings,
+                       (SELECT COALESCE(SUM(b.total_amount), 0) FROM bookings b 
+                        JOIN arenas a ON b.arena_id = a.arena_id 
+                        WHERE a.owner_id = ao.owner_id AND b.status = 'completed') as total_revenue,
+                       (SELECT COALESCE(SUM(a.total_commission_due), 0) FROM arenas a 
+                        WHERE a.owner_id = ao.owner_id) as total_commission_due
+                FROM arena_owners ao
+            `;
+
+            const params = [];
+
+            if (search) {
+                query += ' WHERE ao.arena_name LIKE ? OR ao.email LIKE ? OR ao.phone_number LIKE ?';
+                params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+            }
+
+            query += ' ORDER BY ao.created_at DESC LIMIT ? OFFSET ?';
+            params.push(parseInt(limit), parseInt(offset));
+
+            const [owners] = await pool.execute(query, params);
+
+            // Get total count
+            let countQuery = `SELECT COUNT(*) as total FROM arena_owners ao`;
+            if (search) {
+                countQuery += ' WHERE ao.arena_name LIKE ? OR ao.email LIKE ? OR ao.phone_number LIKE ?';
+            }
+            const [countResult] = await pool.execute(countQuery, search ? [`%${search}%`, `%${search}%`, `%${search}%`] : []);
+
+            res.json({
+                success: true,
+                owners,
+                pagination: {
+                    page: parseInt(page),
+                    limit: parseInt(limit),
+                    total: countResult[0]?.total || 0,
+                    totalPages: Math.ceil((countResult[0]?.total || 0) / limit)
+                }
+            });
+        } catch (error) {
+            console.error("❌ Error fetching owners:", error);
+            res.status(500).json({
+                success: false,
+                message: "Server error",
+                error: error.message
+            });
         }
     },
 
@@ -126,17 +322,9 @@ const adminController = {
     toggleArenaBlock: async (req, res) => {
         try {
             const { arena_id } = req.params;
-            const { is_blocked, reason } = req.body;
+            const { is_blocked } = req.body;
 
-            // Get arena details
-            const [arenas] = await pool.execute(
-                'SELECT * FROM arenas WHERE arena_id = ?',
-                [arena_id]
-            );
-
-            if (arenas.length === 0) {
-                return res.status(404).json({ message: 'Arena not found' });
-            }
+            console.log(`🔄 Toggling arena block: arena_id=${arena_id}, is_blocked=${is_blocked}`);
 
             // Update block status
             await pool.execute(
@@ -144,216 +332,24 @@ const adminController = {
                 [is_blocked, arena_id]
             );
 
-            // Log the action
-            await pool.execute(
-                `INSERT INTO admin_actions 
-         (admin_id, action_type, target_id, target_type, details)
-         VALUES (?, ?, ?, ?, ?)`,
-                [req.user.id, is_blocked ? 'block_arena' : 'unblock_arena',
-                    arena_id, 'arena', JSON.stringify({ reason })]
+            // Get updated arena info
+            const [arenas] = await pool.execute(
+                'SELECT a.*, ao.arena_name as owner_name FROM arenas a LEFT JOIN arena_owners ao ON a.owner_id = ao.owner_id WHERE a.arena_id = ?',
+                [arena_id]
             );
 
             res.json({
+                success: true,
                 message: `Arena ${is_blocked ? 'blocked' : 'unblocked'} successfully`,
-                is_blocked
+                arena: arenas[0]
             });
         } catch (error) {
-            console.error(error);
-            res.status(500).json({ message: 'Server error', error: error.message });
-        }
-    },
-
-    // Remove arena permanently
-    removeArena: async (req, res) => {
-        try {
-            const { arena_id } = req.params;
-            const { reason } = req.body;
-
-            // Get arena details
-            const [arenas] = await pool.execute(
-                'SELECT * FROM arenas WHERE arena_id = ?',
-                [arena_id]
-            );
-
-            if (arenas.length === 0) {
-                return res.status(404).json({ message: 'Arena not found' });
-            }
-
-            // Start transaction
-            const connection = await pool.getConnection();
-            await connection.beginTransaction();
-
-            try {
-                // Mark arena as inactive and blocked
-                await connection.execute(
-                    'UPDATE arenas SET is_active = FALSE, is_blocked = TRUE WHERE arena_id = ?',
-                    [arena_id]
-                );
-
-                // Cancel all pending bookings for this arena
-                await connection.execute(
-                    `UPDATE bookings 
-           SET status = 'cancelled', 
-               cancelled_by = 'system',
-               cancellation_time = NOW()
-           WHERE arena_id = ? AND status IN ('pending', 'accepted')`,
-                    [arena_id]
-                );
-
-                // Log the action
-                await connection.execute(
-                    `INSERT INTO admin_actions 
-           (admin_id, action_type, target_id, target_type, details)
-           VALUES (?, ?, ?, ?, ?)`,
-                    [req.user.id, 'remove_arena', arena_id, 'arena', JSON.stringify({ reason })]
-                );
-
-                await connection.commit();
-
-                res.json({ message: 'Arena removed successfully' });
-            } catch (error) {
-                await connection.rollback();
-                throw error;
-            } finally {
-                connection.release();
-            }
-        } catch (error) {
-            console.error(error);
-            res.status(500).json({ message: 'Server error', error: error.message });
-        }
-    },
-
-    // Get all users
-    getAllUsers: async (req, res) => {
-        try {
-            const { is_active } = req.query;
-
-            let query = `
-        SELECT u.*,
-               COUNT(DISTINCT b.booking_id) as total_bookings,
-               COUNT(DISTINCT fa.arena_id) as favorite_arenas_count
-        FROM users u
-        LEFT JOIN bookings b ON u.user_id = b.user_id
-        LEFT JOIN favorite_arenas fa ON u.user_id = fa.user_id
-      `;
-
-            const params = [];
-
-            if (is_active !== undefined) {
-                query += ' WHERE u.is_logged_in = ?';
-                params.push(is_active);
-            }
-
-            query += ' GROUP BY u.user_id ORDER BY u.created_at DESC';
-
-            const [users] = await pool.execute(query, params);
-            res.json(users);
-        } catch (error) {
-            console.error(error);
-            res.status(500).json({ message: 'Server error', error: error.message });
-        }
-    },
-
-    // Get all arena owners
-    getAllOwners: async (req, res) => {
-        try {
-            const { is_active } = req.query;
-
-            let query = `
-        SELECT ao.*,
-               COUNT(DISTINCT a.arena_id) as total_arenas,
-               COUNT(DISTINCT b.booking_id) as total_bookings,
-               COALESCE(SUM(CASE WHEN b.status = 'completed' THEN b.total_amount ELSE 0 END), 0) as total_revenue
-        FROM arena_owners ao
-        LEFT JOIN arenas a ON ao.owner_id = a.owner_id
-        LEFT JOIN bookings b ON a.arena_id = b.arena_id
-      `;
-
-            const params = [];
-
-            if (is_active !== undefined) {
-                query += ' WHERE ao.is_active = ?';
-                params.push(is_active);
-            }
-
-            query += ' GROUP BY ao.owner_id ORDER BY ao.created_at DESC';
-
-            const [owners] = await pool.execute(query, params);
-            res.json(owners);
-        } catch (error) {
-            console.error(error);
-            res.status(500).json({ message: 'Server error', error: error.message });
-        }
-    },
-
-    // Mark commission payment as completed
-    markPaymentCompleted: async (req, res) => {
-        try {
-            const { arena_id } = req.params;
-            const { amount_paid, payment_date } = req.body;
-
-            // Get arena details
-            const [arenas] = await pool.execute(
-                'SELECT * FROM arenas WHERE arena_id = ?',
-                [arena_id]
-            );
-
-            if (arenas.length === 0) {
-                return res.status(404).json({ message: 'Arena not found' });
-            }
-
-            const arena = arenas[0];
-
-            // Calculate remaining amount
-            const remaining_amount = Math.max(0, arena.total_commission_due - amount_paid);
-
-            // Start transaction
-            const connection = await pool.getConnection();
-            await connection.beginTransaction();
-
-            try {
-                // Update arena commission due
-                await connection.execute(
-                    `UPDATE arenas 
-           SET total_commission_due = ?,
-               last_payment_date = ?
-           WHERE arena_id = ?`,
-                    [remaining_amount, payment_date || new Date(), arena_id]
-                );
-
-                // Create commission payment record
-                await connection.execute(
-                    `INSERT INTO commission_payments 
-           (arena_id, owner_id, amount_due, amount_paid, due_date, payment_date, status, marked_by_admin_id)
-           VALUES (?, ?, ?, ?, ?, ?, 'paid', ?)`,
-                    [arena_id, arena.owner_id, arena.total_commission_due, amount_paid,
-                        arena.last_payment_date || arena.created_at, payment_date || new Date(), req.user.id]
-                );
-
-                // Log the action
-                await connection.execute(
-                    `INSERT INTO admin_actions 
-           (admin_id, action_type, target_id, target_type, details)
-           VALUES (?, ?, ?, ?, ?)`,
-                    [req.user.id, 'mark_payment_completed', arena_id, 'arena',
-                    JSON.stringify({ amount_paid, previous_due: arena.total_commission_due })]
-                );
-
-                await connection.commit();
-
-                res.json({
-                    message: 'Payment marked as completed',
-                    remaining_commission_due: remaining_amount
-                });
-            } catch (error) {
-                await connection.rollback();
-                throw error;
-            } finally {
-                connection.release();
-            }
-        } catch (error) {
-            console.error(error);
-            res.status(500).json({ message: 'Server error', error: error.message });
+            console.error("❌ Error toggling arena block:", error);
+            res.status(500).json({
+                success: false,
+                message: "Server error",
+                error: error.message
+            });
         }
     },
 
@@ -363,16 +359,14 @@ const adminController = {
             const { start_date, end_date } = req.query;
 
             let query = `
-        SELECT 
-          DATE(b.booking_date) as date,
-          COUNT(b.booking_id) as total_bookings,
-          COALESCE(SUM(b.total_amount), 0) as total_revenue,
-          COALESCE(SUM(b.commission_amount), 0) as total_commission,
-          COUNT(DISTINCT b.user_id) as unique_customers,
-          COUNT(DISTINCT b.arena_id) as active_arenas
-        FROM bookings b
-        WHERE b.status = 'completed'
-      `;
+                SELECT 
+                    DATE(b.booking_date) as date,
+                    COUNT(b.booking_id) as total_bookings,
+                    COALESCE(SUM(b.total_amount), 0) as total_revenue,
+                    COALESCE(SUM(b.commission_amount), 0) as total_commission
+                FROM bookings b
+                WHERE b.status = 'completed'
+            `;
 
             const params = [];
 
@@ -391,37 +385,131 @@ const adminController = {
             const [dailyReports] = await pool.execute(query, params);
 
             // Get arena-wise commission report
-            const [arenaCommissionReport] = await pool.execute(
-                `SELECT 
-           a.arena_id,
-           a.name as arena_name,
-           ao.arena_name as owner_name,
-           a.total_commission_due as pending_commission,
-           COUNT(b.booking_id) as total_bookings,
-           COALESCE(SUM(b.commission_amount), 0) as total_commission_paid,
-           MAX(cp.payment_date) as last_payment_date
-         FROM arenas a
-         JOIN arena_owners ao ON a.owner_id = ao.owner_id
-         LEFT JOIN bookings b ON a.arena_id = b.arena_id AND b.status = 'completed'
-         LEFT JOIN commission_payments cp ON a.arena_id = cp.arena_id AND cp.status = 'paid'
-         GROUP BY a.arena_id
-         ORDER BY a.total_commission_due DESC`
-            );
+            const [arenaCommissionReport] = await pool.execute(`
+                SELECT 
+                    a.arena_id,
+                    a.name as arena_name,
+                    ao.arena_name as owner_name,
+                    a.total_commission_due as pending_commission,
+                    (SELECT COUNT(*) FROM bookings WHERE arena_id = a.arena_id AND status = 'completed') as total_bookings,
+                    (SELECT COALESCE(SUM(commission_amount), 0) FROM bookings WHERE arena_id = a.arena_id AND status = 'completed') as total_commission_paid,
+                    a.last_payment_date
+                FROM arenas a
+                LEFT JOIN arena_owners ao ON a.owner_id = ao.owner_id
+                ORDER BY a.total_commission_due DESC
+            `);
 
             res.json({
+                success: true,
                 daily_reports: dailyReports,
                 arena_commission_report: arenaCommissionReport,
                 summary: {
                     total_days: dailyReports.length,
-                    total_bookings: dailyReports.reduce((sum, r) => sum + r.total_bookings, 0),
-                    total_revenue: dailyReports.reduce((sum, r) => sum + r.total_revenue, 0),
-                    total_commission: dailyReports.reduce((sum, r) => sum + r.total_commission, 0),
+                    total_bookings: dailyReports.reduce((sum, r) => sum + (r.total_bookings || 0), 0),
+                    total_revenue: dailyReports.reduce((sum, r) => sum + (r.total_revenue || 0), 0),
+                    total_commission: dailyReports.reduce((sum, r) => sum + (r.total_commission || 0), 0),
                     total_pending_commission: arenaCommissionReport.reduce((sum, a) => sum + (a.pending_commission || 0), 0)
                 }
             });
         } catch (error) {
-            console.error(error);
-            res.status(500).json({ message: 'Server error', error: error.message });
+            console.error("❌ Error fetching financial reports:", error);
+            res.status(500).json({
+                success: false,
+                message: "Server error",
+                error: error.message
+            });
+        }
+    },
+
+    // Mark arena commission as paid
+    markCommissionPaid: async (req, res) => {
+        try {
+            const { arena_id } = req.params;
+            const { amount_paid } = req.body;
+            const payment_date = new Date().toISOString().split('T')[0];
+
+            console.log(`💰 Marking commission paid: arena_id=${arena_id}, amount=${amount_paid}`);
+
+            // Update arena commission
+            await pool.execute(
+                `UPDATE arenas 
+                 SET total_commission_due = GREATEST(0, total_commission_due - ?),
+                     last_payment_date = ?
+                 WHERE arena_id = ?`,
+                [amount_paid, payment_date, arena_id]
+            );
+
+            // Get updated arena info
+            const [arenas] = await pool.execute(
+                'SELECT * FROM arenas WHERE arena_id = ?',
+                [arena_id]
+            );
+
+            res.json({
+                success: true,
+                message: "Commission marked as paid successfully",
+                arena: arenas[0]
+            });
+        } catch (error) {
+            console.error("❌ Error marking commission as paid:", error);
+            res.status(500).json({
+                success: false,
+                message: "Server error",
+                error: error.message
+            });
+        }
+    },
+
+    // Test endpoint
+    testEndpoint: async (req, res) => {
+        try {
+            const [testResult] = await pool.execute('SELECT 1 as connection_test');
+
+            res.json({
+                success: true,
+                message: "Admin API is working!",
+                database: {
+                    connection: "OK",
+                    test: testResult[0]
+                },
+                user: req.user,
+                timestamp: new Date()
+            });
+        } catch (error) {
+            console.error("❌ Test endpoint error:", error);
+            res.status(500).json({
+                success: false,
+                message: "Database connection error",
+                error: error.message
+            });
+        }
+    },
+
+    // Get system stats
+    getSystemStats: async (req, res) => {
+        try {
+            const [stats] = await pool.execute(`
+                SELECT 
+                    (SELECT COUNT(*) FROM users) as total_users,
+                    (SELECT COUNT(*) FROM arena_owners) as total_owners,
+                    (SELECT COUNT(*) FROM arenas WHERE is_active = TRUE AND is_blocked = FALSE) as total_arenas,
+                    (SELECT COUNT(*) FROM bookings WHERE status = 'completed') as completed_bookings,
+                    (SELECT COALESCE(SUM(total_amount), 0) FROM bookings WHERE status = 'completed') as total_revenue,
+                    (SELECT COALESCE(SUM(commission_amount), 0) FROM bookings WHERE status = 'completed') as total_commission,
+                    (SELECT COALESCE(SUM(total_commission_due), 0) FROM arenas) as pending_commission
+            `);
+
+            res.json({
+                success: true,
+                stats: stats[0]
+            });
+        } catch (error) {
+            console.error("❌ Error fetching system stats:", error);
+            res.status(500).json({
+                success: false,
+                message: "Server error",
+                error: error.message
+            });
         }
     }
 };

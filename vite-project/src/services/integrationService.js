@@ -779,77 +779,36 @@ export const integrationService = {
   },
 
 
-getArenaReviews: async (arenaId) => {
-  try {
-    const response = await fetch(
-      `http://localhost:5000/api/arenas/${arenaId}/reviews`,
-      {
-        headers: getAuthHeaders(),
-      }
-    );
+  getArenaReviews: async (arenaId) => {
+    try {
+      const response = await fetch(
+        `http://localhost:5000/api/arenas/${arenaId}/reviews`,
+        {
+          headers: getAuthHeaders(),
+        }
+      );
 
-    if (!response.ok) {
-      // If endpoint fails, return empty reviews
-      console.warn(`Failed to fetch reviews for arena ${arenaId}: ${response.status}`);
+      if (!response.ok) {
+        // If endpoint fails, return empty reviews
+        console.warn(`Failed to fetch reviews for arena ${arenaId}: ${response.status}`);
+        return { reviews: [], total: 0, avg_rating: 0, total_reviews: 0 };
+      }
+
+      const data = await response.json();
+
+      // Handle different response formats
+      if (Array.isArray(data)) {
+        return { reviews: data, total: data.length };
+      } else if (data.reviews) {
+        return data;
+      } else {
+        return { reviews: [], total: 0, avg_rating: 0, total_reviews: 0 };
+      }
+    } catch (error) {
+      console.error("Error fetching arena reviews:", error);
       return { reviews: [], total: 0, avg_rating: 0, total_reviews: 0 };
     }
-
-    const data = await response.json();
-    
-    // Handle different response formats
-    if (Array.isArray(data)) {
-      return { reviews: data, total: data.length };
-    } else if (data.reviews) {
-      return data;
-    } else {
-      return { reviews: [], total: 0, avg_rating: 0, total_reviews: 0 };
-    }
-  } catch (error) {
-    console.error("Error fetching arena reviews:", error);
-    return { reviews: [], total: 0, avg_rating: 0, total_reviews: 0 };
-  }
-},
-
-// In integrationService.js - UPDATED submitReview function
-submitReview: async (arenaId, rating, comment) => {
-  try {
-    const response = await fetch(
-      `http://localhost:5000/api/arenas/${arenaId}/reviews`,
-      {
-        method: "POST",
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ rating, comment }),
-      }
-    );
-
-    const responseData = await response.json();
-    
-    if (!response.ok) {
-      // Check if it's a validation error
-      if (response.status === 400) {
-        throw new Error(responseData.message || "Validation failed");
-      }
-      throw new Error(responseData.message || `Failed to submit review (${response.status})`);
-    }
-    
-    return responseData;
-  } catch (error) {
-    console.error("Error submitting review:", error);
-    
-    // Provide more specific error messages
-    if (error.message.includes("already reviewed")) {
-      throw new Error("You have already reviewed this arena");
-    }
-    if (error.message.includes("Validation failed")) {
-      throw new Error("Please provide both a rating and comment");
-    }
-    if (error.message.includes("completed booking")) {
-      throw new Error("You need to complete a booking before reviewing");
-    }
-    
-    throw error;
-  }
-},
+  },
 
   // ===== FAVORITES =====
   addToFavorites: async (arenaId) => {
@@ -989,6 +948,193 @@ submitReview: async (arenaId, rating, comment) => {
       throw error;
     }
   },
+
+  // integrationService.js - Update admin methods
+  adminLogin: async (credentials) => {
+    try {
+      console.log("🔐 Admin login attempt...");
+
+      const response = await fetch('http://localhost:5000/api/admin/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(credentials)
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        console.error("Login failed:", data.message);
+        throw new Error(data.message || 'Invalid credentials');
+      }
+
+      console.log("✅ Admin login successful");
+
+      // Store admin token and user data
+      localStorage.setItem('adminToken', data.token);
+      localStorage.setItem('adminUser', JSON.stringify(data.user));
+      localStorage.setItem('userRole', 'admin');
+
+      return data;
+    } catch (error) {
+      console.error("❌ Admin login error:", error);
+      throw error;
+    }
+  },
+
+  getAdminDashboard: async () => {
+    try {
+      const token = localStorage.getItem('adminToken');
+
+      const response = await fetch('http://localhost:5000/api/admin/dashboard', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        console.error("Dashboard fetch failed:", data.message);
+        throw new Error(data.message || 'Failed to fetch dashboard');
+      }
+
+      console.log("✅ Dashboard data received");
+      return data;
+    } catch (error) {
+      console.error("❌ Error fetching admin dashboard:", error);
+      throw error;
+    }
+  },
+
+  getAdminArenas: async (filters = {}) => {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const queryParams = new URLSearchParams(filters).toString();
+
+      const response = await fetch(`http://localhost:5000/api/admin/arenas?${queryParams}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || 'Failed to fetch arenas');
+      }
+
+      return data;
+    } catch (error) {
+      console.error("Error fetching admin arenas:", error);
+      throw error;
+    }
+  },
+
+  getAdminUsers: async (filters = {}) => {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const queryParams = new URLSearchParams(filters).toString();
+
+      const response = await fetch(`http://localhost:5000/api/admin/users?${queryParams}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || 'Failed to fetch users');
+      }
+
+      return data;
+    } catch (error) {
+      console.error("Error fetching admin users:", error);
+      throw error;
+    }
+  },
+
+  getAdminOwners: async (filters = {}) => {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const queryParams = new URLSearchParams(filters).toString();
+
+      const response = await fetch(`http://localhost:5000/api/admin/owners?${queryParams}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || 'Failed to fetch owners');
+      }
+
+      return data;
+    } catch (error) {
+      console.error("Error fetching admin owners:", error);
+      throw error;
+    }
+  },
+
+  getFinancialReports: async (dateRange = {}) => {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const queryParams = new URLSearchParams(dateRange).toString();
+
+      const response = await fetch(`http://localhost:5000/api/admin/financial-reports?${queryParams}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || 'Failed to fetch financial reports');
+      }
+
+      return data;
+    } catch (error) {
+      console.error("Error fetching financial reports:", error);
+      throw error;
+    }
+  },
+
+  markArenaPayment: async (arenaId, paymentData) => {
+    try {
+      const token = localStorage.getItem('adminToken');
+
+      const response = await fetch(`http://localhost:5000/api/admin/arenas/${arenaId}/mark-payment`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(paymentData)
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || 'Failed to mark payment');
+      }
+
+      return data;
+    } catch (error) {
+      console.error("Error marking payment:", error);
+      throw error;
+    }
+  },
+
 };
 
 export default integrationService;

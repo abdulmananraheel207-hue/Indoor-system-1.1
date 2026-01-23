@@ -1,25 +1,39 @@
-const express = require('express');
+// routes/admin.js - SIMPLIFIED
+const express = require("express");
 const router = express.Router();
-const adminController = require('../Controllers/adminController');
-const auth = require('../middleware/auth');
+const adminController = require("../controllers/adminController");
+const auth = require("../middleware/auth");
 
-// All routes require admin authentication
-router.use(auth.verifyToken, auth.isAdmin);
+// =================== PUBLIC ADMIN LOGIN ===================
+router.post("/login", adminController.loginAdmin);
+
+// =================== TEST ENDPOINT ===================
+router.get("/test", adminController.testEndpoint);
+
+// =================== PROTECTED ADMIN ROUTES ===================
+router.use(auth.verifyToken);
+router.use(auth.isAdmin); // Only admin can access routes below
 
 // Dashboard
-router.get('/dashboard', adminController.getDashboard);
+router.get("/dashboard", adminController.getDashboard);
 
-// Arena management
-router.get('/arenas', adminController.getAllArenas);
-router.put('/arenas/:arena_id/block', adminController.toggleArenaBlock);
-router.delete('/arenas/:arena_id', adminController.removeArena);
+// System Stats
+router.get("/stats", adminController.getSystemStats);
 
-// User management
-router.get('/users', adminController.getAllUsers);
-router.get('/owners', adminController.getAllOwners);
+// Arena Management
+router.get("/arenas", adminController.getAllArenas);
+router.put("/arenas/:arena_id/block", adminController.toggleArenaBlock);
 
-// Financial management
-router.post('/arenas/:arena_id/payment', adminController.markPaymentCompleted);
-router.get('/reports/financial', adminController.getFinancialReports);
+// User Management
+router.get("/users", adminController.getAllUsers);
+
+// Owner Management
+router.get("/owners", adminController.getAllOwners);
+
+// Financial Reports
+router.get("/financial-reports", adminController.getFinancialReports);
+
+// Commission Payments
+router.post("/arenas/:arena_id/mark-paid", adminController.markCommissionPaid);
 
 module.exports = router;

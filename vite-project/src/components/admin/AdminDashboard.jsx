@@ -1,3 +1,4 @@
+// components/admin/AdminDashboard.jsx
 import React, { useState, useEffect } from "react";
 import {
   BuildingStorefrontIcon,
@@ -9,6 +10,8 @@ import {
   ClockIcon,
   ExclamationTriangleIcon,
   ArrowPathIcon,
+  CalendarIcon,
+  CheckCircleIcon,
 } from "@heroicons/react/24/outline";
 import RecentBookings from "./RecentBooking";
 import PendingCommissions from "./PendingCommissions";
@@ -21,65 +24,72 @@ const AdminDashboard = () => {
     pendingCommissionsCount: 0,
     totalUsers: 0,
     totalOwners: 0,
+    totalArenas: 0,
     totalBookings: 0,
     totalRevenue: 0,
     totalPlatformCommission: 0,
+    completedBookings: 0,
+    pendingCommission: 0,
     recentBookings: [],
     pendingCommissions: [],
   });
 
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(new Date());
+  const [systemStats, setSystemStats] = useState({});
 
   useEffect(() => {
-    // Direct test data - just like in UserBooking.jsx
-    const loadDashboard = async () => {
-      try {
-        const data = await integrationService.getAdminDashboard();
-        setDashboardData({
-          monthlyCommission: data.dashboard?.monthly_commission || 0,
-          activeArenas: data.dashboard?.active_arenas || 0,
-          pendingCommissionsCount:
-            data.dashboard?.pending_commissions_count || 0,
-          totalUsers: data.overall_stats?.total_users || 0,
-          totalOwners: data.overall_stats?.total_owners || 0,
-          totalBookings: data.overall_stats?.total_bookings || 0,
-          totalRevenue: data.overall_stats?.total_revenue || 0,
-          totalPlatformCommission:
-            data.overall_stats?.total_platform_commission || 0,
-          recentBookings: data.recent_bookings || [],
-          pendingCommissions: data.pending_commissions || [],
-        });
-      } catch (error) {
-        console.error("Failed to load admin dashboard", error);
-      } finally {
-        setLoading(false);
-      }
-    };
     loadDashboard();
   }, []);
 
+  const loadDashboard = async () => {
+    try {
+      setLoading(true);
+      const data = await integrationService.getAdminDashboard();
+
+      if (data.success) {
+        setDashboardData({
+          monthlyCommission: data.dashboard?.monthly_commission || 0,
+          activeArenas: data.dashboard?.active_arenas || 0,
+          pendingCommissionsCount: data.dashboard?.pending_commissions_count || 0,
+          totalUsers: data.overall_stats?.total_users || 0,
+          totalOwners: data.overall_stats?.total_owners || 0,
+          totalArenas: data.overall_stats?.total_arenas || 0,
+          totalBookings: data.overall_stats?.completed_bookings || 0,
+          totalRevenue: data.overall_stats?.total_revenue || 0,
+          totalPlatformCommission: data.overall_stats?.total_commission || 0,
+          pendingCommission: data.overall_stats?.pending_commission || 0,
+          recentBookings: data.recent_bookings || [],
+          pendingCommissions: data.pending_commissions || [],
+        });
+
+        setSystemStats(data.overall_stats || {});
+      }
+    } catch (error) {
+      console.error("Failed to load admin dashboard", error);
+    } finally {
+      setLoading(false);
+      setLastUpdated(new Date());
+    }
+  };
+
   const refreshData = () => {
-    setLoading(true);
-    integrationService
-      .getAdminDashboard()
-      .then((data) => {
-        setDashboardData((prev) => ({
-          ...prev,
-          monthlyCommission:
-            data.dashboard?.monthly_commission || prev.monthlyCommission,
-          activeArenas: data.dashboard?.active_arenas || prev.activeArenas,
-          pendingCommissionsCount:
-            data.dashboard?.pending_commissions_count ||
-            prev.pendingCommissionsCount,
-          recentBookings: data.recent_bookings || prev.recentBookings,
-          pendingCommissions:
-            data.pending_commissions || prev.pendingCommissions,
-        }));
-        setLastUpdated(new Date());
-      })
-      .catch((err) => console.error("Refresh dashboard failed", err))
-      .finally(() => setLoading(false));
+    loadDashboard();
+  };
+
+  const handleMarkPaid = async (arenaId, amount) => {
+    if (window.confirm(`Mark Rs ${amount} as paid for this arena?`)) {
+      try {
+        await integrationService.markArenaPayment(arenaId, {
+          amount_paid: amount,
+          payment_date: new Date().toISOString().split('T')[0]
+        });
+        alert("✅ Payment marked as paid successfully!");
+        refreshData();
+      } catch (error) {
+        alert("❌ Failed to mark payment: " + error.message);
+      }
+    }
   };
 
   const stats = [
@@ -87,56 +97,51 @@ const AdminDashboard = () => {
       name: "Monthly Commission",
       value: `Rs ${dashboardData.monthlyCommission.toLocaleString()}`,
       icon: CurrencyDollarIcon,
-      change: "+12.5%",
-      changeType: "positive",
       color: "bg-green-500",
+      description: "This month's platform commission"
     },
     {
       name: "Active Arenas",
       value: dashboardData.activeArenas,
       icon: BuildingStorefrontIcon,
-      change: "+8",
-      changeType: "positive",
       color: "bg-blue-500",
+      description: "Currently active arenas"
     },
     {
       name: "Total Users",
       value: dashboardData.totalUsers,
       icon: UsersIcon,
-      change: "+234",
-      changeType: "positive",
       color: "bg-purple-500",
+      description: "Registered players"
     },
     {
       name: "Total Owners",
       value: dashboardData.totalOwners,
       icon: UserGroupIcon,
-      change: "+5",
-      changeType: "positive",
       color: "bg-yellow-500",
+      description: "Arena owners"
     },
     {
       name: "Pending Commissions",
       value: dashboardData.pendingCommissionsCount,
       icon: ExclamationTriangleIcon,
-      change: "+2",
-      changeType: "negative",
       color: "bg-red-500",
+      description: "Unpaid commissions"
     },
     {
       name: "Total Revenue",
-      value: `Rs ${(dashboardData.totalRevenue / 100000).toFixed(1)}L`,
+      value: `Rs ${(dashboardData.totalRevenue || 0).toLocaleString()}`,
       icon: ChartBarIcon,
-      change: "+15.2%",
-      changeType: "positive",
       color: "bg-indigo-500",
+      description: "Platform revenue"
     },
   ];
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center h-96">
+      <div className="flex flex-col justify-center items-center h-96">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+        <p className="mt-4 text-gray-600">Loading dashboard data...</p>
       </div>
     );
   }
@@ -147,17 +152,13 @@ const AdminDashboard = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">
-            Dashboard Overview
+            Admin Dashboard
           </h1>
           <p className="text-gray-600">
             Welcome back! Here's what's happening with your platform today.
           </p>
           <p className="text-xs text-gray-400 mt-1">
-            Last updated:{" "}
-            {lastUpdated.toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
+            Last updated: {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
           </p>
         </div>
         <button
@@ -174,7 +175,7 @@ const AdminDashboard = () => {
         {stats.map((stat) => (
           <div
             key={stat.name}
-            className="bg-white rounded-xl shadow-sm border border-gray-200 p-6"
+            className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
           >
             <div className="flex items-center justify-between">
               <div>
@@ -182,20 +183,9 @@ const AdminDashboard = () => {
                 <p className="text-2xl font-semibold text-gray-900 mt-2">
                   {stat.value}
                 </p>
-                <div className="flex items-center mt-2">
-                  <span
-                    className={`text-sm ${
-                      stat.changeType === "positive"
-                        ? "text-green-600"
-                        : "text-red-600"
-                    }`}
-                  >
-                    {stat.change}
-                  </span>
-                  <span className="text-gray-500 text-sm ml-2">
-                    from last month
-                  </span>
-                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  {stat.description}
+                </p>
               </div>
               <div className={`${stat.color} p-3 rounded-lg`}>
                 <stat.icon className="h-6 w-6 text-white" />
@@ -205,41 +195,28 @@ const AdminDashboard = () => {
         ))}
       </div>
 
-      {/* Charts Placeholder */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">
-              Revenue Overview
-            </h2>
-            <button className="text-sm text-primary-600 hover:text-primary-500">
-              View Details
-            </button>
-          </div>
-          <div className="h-64 flex items-center justify-center bg-gray-50 rounded-lg">
-            <div className="text-center">
-              <ChartBarIcon className="h-12 w-12 text-gray-400 mx-auto mb-2" />
-              <p className="text-gray-500">Revenue chart will appear here</p>
-            </div>
-          </div>
+      {/* System Summary */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">Platform Overview</h2>
+          <span className="text-sm text-gray-500">Real-time data</span>
         </div>
-
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">
-              Booking Trends
-            </h2>
-            <button className="text-sm text-primary-600 hover:text-primary-500">
-              View Details
-            </button>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="text-center p-4 bg-gray-50 rounded-lg">
+            <div className="text-2xl font-bold text-gray-900">{dashboardData.totalArenas || 0}</div>
+            <div className="text-sm text-gray-600">Total Arenas</div>
           </div>
-          <div className="h-64 flex items-center justify-center bg-gray-50 rounded-lg">
-            <div className="text-center">
-              <ArrowTrendingUpIcon className="h-12 w-12 text-gray-400 mx-auto mb-2" />
-              <p className="text-gray-500">
-                Booking trends chart will appear here
-              </p>
-            </div>
+          <div className="text-center p-4 bg-gray-50 rounded-lg">
+            <div className="text-2xl font-bold text-green-600">{dashboardData.totalBookings || 0}</div>
+            <div className="text-sm text-gray-600">Completed Bookings</div>
+          </div>
+          <div className="text-center p-4 bg-gray-50 rounded-lg">
+            <div className="text-2xl font-bold text-blue-600">Rs {(dashboardData.totalRevenue || 0).toLocaleString()}</div>
+            <div className="text-sm text-gray-600">Total Revenue</div>
+          </div>
+          <div className="text-center p-4 bg-gray-50 rounded-lg">
+            <div className="text-2xl font-bold text-red-600">Rs {(dashboardData.pendingCommission || 0).toLocaleString()}</div>
+            <div className="text-sm text-gray-600">Pending Commission</div>
           </div>
         </div>
       </div>
@@ -247,7 +224,10 @@ const AdminDashboard = () => {
       {/* Recent Bookings & Pending Commissions */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <RecentBookings bookings={dashboardData.recentBookings} />
-        <PendingCommissions commissions={dashboardData.pendingCommissions} />
+        <PendingCommissions
+          commissions={dashboardData.pendingCommissions}
+          onMarkPaid={handleMarkPaid}
+        />
       </div>
 
       {/* Quick Actions */}
@@ -256,38 +236,50 @@ const AdminDashboard = () => {
           Quick Actions
         </h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <button className="flex flex-col items-center p-4 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors">
+          <button
+            onClick={() => window.location.href = '/admin/arenas'}
+            className="flex flex-col items-center p-4 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors"
+          >
             <BuildingStorefrontIcon className="h-8 w-8 text-gray-600 mb-2" />
-            <span className="text-sm font-medium text-gray-900">Add Arena</span>
+            <span className="text-sm font-medium text-gray-900">Manage Arenas</span>
             <span className="text-xs text-gray-500 mt-1">
-              Register new arena
+              View all arenas
             </span>
           </button>
-          <button className="flex flex-col items-center p-4 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors">
+          <button
+            onClick={() => window.location.href = '/admin/financial-reports'}
+            className="flex flex-col items-center p-4 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors"
+          >
             <CurrencyDollarIcon className="h-8 w-8 text-gray-600 mb-2" />
             <span className="text-sm font-medium text-gray-900">
-              Process Payment
+              Financial Reports
             </span>
             <span className="text-xs text-gray-500 mt-1">
-              Mark commission paid
+              View reports
             </span>
           </button>
-          <button className="flex flex-col items-center p-4 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors">
-            <ExclamationTriangleIcon className="h-8 w-8 text-gray-600 mb-2" />
+          <button
+            onClick={() => window.location.href = '/admin/owners'}
+            className="flex flex-col items-center p-4 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <UserGroupIcon className="h-8 w-8 text-gray-600 mb-2" />
             <span className="text-sm font-medium text-gray-900">
-              Block Arena
+              Manage Owners
             </span>
             <span className="text-xs text-gray-500 mt-1">
-              Block non-compliant
+              View all owners
             </span>
           </button>
-          <button className="flex flex-col items-center p-4 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors">
-            <ChartBarIcon className="h-8 w-8 text-gray-600 mb-2" />
+          <button
+            onClick={() => window.location.href = '/admin/users'}
+            className="flex flex-col items-center p-4 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <UsersIcon className="h-8 w-8 text-gray-600 mb-2" />
             <span className="text-sm font-medium text-gray-900">
-              Generate Report
+              Manage Users
             </span>
             <span className="text-xs text-gray-500 mt-1">
-              Download financials
+              View all users
             </span>
           </button>
         </div>

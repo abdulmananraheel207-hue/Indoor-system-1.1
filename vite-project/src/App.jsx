@@ -27,7 +27,7 @@ import AdminLayout from "./components/admin/AdminLayout";
 import ManagerDashboard from "./components/manager/ManagerDashboard";
 import UserArenaDetails from "./components/user/UserArenaDetails";
 import UserBookingChat from "./components/user/UserBookingChat";
-import { authAPI } from "./services/api";
+import integrationService from "./services/integrationService";
 // Test admin credentials
 const TEST_ADMIN = {
   username: "admin",
@@ -197,22 +197,25 @@ function App() {
   };
 
   // Admin auth wrapper
+  // In your App.jsx, update the AdminAuthWrapper component:
   const AdminAuthWrapper = () => {
     const navigate = useNavigate();
 
     const handleLogin = async (credentials) => {
       try {
-        const response = await authAPI.login({
-          email: credentials.username,
-          password: credentials.password,
-        });
-        const token = response.data?.token;
-        const role = response.data?.user?.role;
-        if (token && role === "admin") {
-          localStorage.setItem("adminToken", token);
-          auth.login(token, "admin", response.data.user);
+        // Use integrationService instead of authAPI
+        const result = await integrationService.adminLogin(credentials);
+        if (result && result.token) {
+          // Store admin token and user data
+          localStorage.setItem('adminToken', result.token);
+          localStorage.setItem('adminUser', JSON.stringify(result.user));
+          localStorage.setItem('userRole', 'admin');
+
+          // Update auth state
+          auth.login(result.token, 'admin', result.user);
+
           setTimeout(() => {
-            navigate("/admin/dashboard");
+            navigate('/admin/dashboard');
           }, 50);
           return true;
         }
@@ -318,41 +321,37 @@ function App() {
                 <div className="ml-8 flex space-x-4">
                   <button
                     onClick={() => setCurrentTab("home")}
-                    className={`px-3 py-2 rounded-lg ${
-                      currentTab === "home"
-                        ? "bg-blue-100 text-blue-700"
-                        : "text-gray-700 hover:bg-gray-100"
-                    }`}
+                    className={`px-3 py-2 rounded-lg ${currentTab === "home"
+                      ? "bg-blue-100 text-blue-700"
+                      : "text-gray-700 hover:bg-gray-100"
+                      }`}
                   >
                     Home
                   </button>
                   <button
                     onClick={() => setCurrentTab("teams")}
-                    className={`px-3 py-2 rounded-lg ${
-                      currentTab === "teams"
-                        ? "bg-blue-100 text-blue-700"
-                        : "text-gray-700 hover:bg-gray-100"
-                    }`}
+                    className={`px-3 py-2 rounded-lg ${currentTab === "teams"
+                      ? "bg-blue-100 text-blue-700"
+                      : "text-gray-700 hover:bg-gray-100"
+                      }`}
                   >
                     Teams
                   </button>
                   <button
                     onClick={() => setCurrentTab("booking")}
-                    className={`px-3 py-2 rounded-lg ${
-                      currentTab === "booking"
-                        ? "bg-blue-100 text-blue-700"
-                        : "text-gray-700 hover:bg-gray-100"
-                    }`}
+                    className={`px-3 py-2 rounded-lg ${currentTab === "booking"
+                      ? "bg-blue-100 text-blue-700"
+                      : "text-gray-700 hover:bg-gray-100"
+                      }`}
                   >
                     Booking
                   </button>
                   <button
                     onClick={() => setCurrentTab("profile")}
-                    className={`px-3 py-2 rounded-lg ${
-                      currentTab === "profile"
-                        ? "bg-blue-100 text-blue-700"
-                        : "text-gray-700 hover:bg-gray-100"
-                    }`}
+                    className={`px-3 py-2 rounded-lg ${currentTab === "profile"
+                      ? "bg-blue-100 text-blue-700"
+                      : "text-gray-700 hover:bg-gray-100"
+                      }`}
                   >
                     Profile
                   </button>
