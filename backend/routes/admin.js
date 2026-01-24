@@ -1,39 +1,25 @@
-// routes/admin.js - SIMPLIFIED
-const express = require("express");
+const express = require('express');
 const router = express.Router();
-const adminController = require("../controllers/adminController");
-const auth = require("../middleware/auth");
+const adminController = require('../Controllers/adminController');
+const auth = require('../middleware/auth');
 
-// =================== PUBLIC ADMIN LOGIN ===================
-router.post("/login", adminController.loginAdmin);
-
-// =================== TEST ENDPOINT ===================
-router.get("/test", adminController.testEndpoint);
-
-// =================== PROTECTED ADMIN ROUTES ===================
-router.use(auth.verifyToken);
-router.use(auth.isAdmin); // Only admin can access routes below
+// All routes require admin authentication
+router.use(auth.verifyToken, auth.isAdmin);
 
 // Dashboard
-router.get("/dashboard", adminController.getDashboard);
+router.get('/dashboard', adminController.getDashboard);
 
-// System Stats
-router.get("/stats", adminController.getSystemStats);
+// Arena management
+router.get('/arenas', adminController.getAllArenas);
+router.put('/arenas/:arena_id/block', adminController.toggleArenaBlock);
+router.delete('/arenas/:arena_id', adminController.removeArena);
 
-// Arena Management
-router.get("/arenas", adminController.getAllArenas);
-router.put("/arenas/:arena_id/block", adminController.toggleArenaBlock);
+// User management
+router.get('/users', adminController.getAllUsers);
+router.get('/owners', adminController.getAllOwners);
 
-// User Management
-router.get("/users", adminController.getAllUsers);
-
-// Owner Management
-router.get("/owners", adminController.getAllOwners);
-
-// Financial Reports
-router.get("/financial-reports", adminController.getFinancialReports);
-
-// Commission Payments
-router.post("/arenas/:arena_id/mark-paid", adminController.markCommissionPaid);
+// Financial management
+router.post('/arenas/:arena_id/payment', adminController.markPaymentCompleted);
+router.get('/reports/financial', adminController.getFinancialReports);
 
 module.exports = router;
