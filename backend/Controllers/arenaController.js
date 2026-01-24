@@ -1,4 +1,3 @@
-// File: arenaController.js - COMPLETE FIXED VERSION
 const pool = require("../db");
 const arenaController = {
   // Get all sports categories
@@ -286,139 +285,139 @@ const arenaController = {
     }
   },
 
-// File: arenaController.js - UPDATED getArenaReviews function
-getArenaReviews: async (req, res) => {
-  try {
-    const arena_id = parseInt(req.params.arena_id);
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const offset = (page - 1) * limit;
+  // File: arenaController.js - UPDATED getArenaReviews function
+  getArenaReviews: async (req, res) => {
+    try {
+      const arena_id = parseInt(req.params.arena_id);
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 10;
+      const offset = (page - 1) * limit;
 
-    // Get reviews with user info
-    const [reviews] = await pool.execute(
-      `SELECT ar.*, u.name as user_name, u.profile_picture_url,
+      // Get reviews with user info
+      const [reviews] = await pool.execute(
+        `SELECT ar.*, u.name as user_name, u.profile_picture_url,
               DATE_FORMAT(ar.created_at, '%M %d, %Y') as formatted_date
        FROM arena_reviews ar
        JOIN users u ON ar.user_id = u.user_id
        WHERE ar.arena_id = ?
        ORDER BY ar.created_at DESC
        LIMIT ? OFFSET ?`,
-      [arena_id, limit, offset]
-    );
+        [arena_id, limit, offset]
+      );
 
-    // Get total count
-    const [countResult] = await pool.execute(
-      "SELECT COUNT(*) as total FROM arena_reviews WHERE arena_id = ?",
-      [arena_id]
-    );
+      // Get total count
+      const [countResult] = await pool.execute(
+        "SELECT COUNT(*) as total FROM arena_reviews WHERE arena_id = ?",
+        [arena_id]
+      );
 
-    // Get average rating
-    const [ratingResult] = await pool.execute(
-      `SELECT AVG(rating) as avg_rating, COUNT(*) as total_reviews
+      // Get average rating
+      const [ratingResult] = await pool.execute(
+        `SELECT AVG(rating) as avg_rating, COUNT(*) as total_reviews
        FROM arena_reviews WHERE arena_id = ?`,
-      [arena_id]
-    );
+        [arena_id]
+      );
 
-    res.json({
-      reviews,
-      total: countResult[0].total,
-      page: parseInt(page),
-      limit: parseInt(limit),
-      avg_rating: ratingResult[0].avg_rating ? parseFloat(ratingResult[0].avg_rating).toFixed(1) : 0,
-      total_reviews: ratingResult[0].total_reviews
-    });
-  } catch (error) {
-    console.error("Error in getArenaReviews:", error);
-    res.status(500).json({ 
-      message: "Server error", 
-      error: error.message,
-      reviews: [] // Return empty array on error
-    });
-  }
-},
-
-addReview: async (req, res) => {
-  try {
-    const { arena_id } = req.params;
-    const { rating, comment } = req.body;
-
-    // Validate inputs
-    if (!rating || rating < 1 || rating > 5) {
-      return res.status(400).json({
-        message: "Rating is required and must be between 1 and 5",
+      res.json({
+        reviews,
+        total: countResult[0].total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        avg_rating: ratingResult[0].avg_rating ? parseFloat(ratingResult[0].avg_rating).toFixed(1) : 0,
+        total_reviews: ratingResult[0].total_reviews
+      });
+    } catch (error) {
+      console.error("Error in getArenaReviews:", error);
+      res.status(500).json({
+        message: "Server error",
+        error: error.message,
+        reviews: [] // Return empty array on error
       });
     }
+  },
 
-    if (!comment || comment.trim().length === 0) {
-      return res.status(400).json({
-        message: "Comment is required",
-      });
-    }
-
-    // Check if user already reviewed this arena
-    const [existingReview] = await pool.execute(
-      "SELECT review_id FROM arena_reviews WHERE user_id = ? AND arena_id = ?",
-      [req.user.id, arena_id]
-    );
-
-    if (existingReview.length > 0) {
-      return res.status(400).json({
-        message: "You have already reviewed this arena",
-      });
-    }
-
-    // Insert review (booking_id can be null)
-    const [result] = await pool.execute(
-      `INSERT INTO arena_reviews (user_id, arena_id, rating, comment)
-       VALUES (?, ?, ?, ?)`,
-      [req.user.id, arena_id, rating, comment.trim()]
-    );
-
-    // Update arena rating
-    const [avgRating] = await pool.execute(
-      `SELECT AVG(rating) as avg_rating, COUNT(*) as total_reviews
-       FROM arena_reviews WHERE arena_id = ?`,
-      [arena_id]
-    );
-
-    // Update arenas table if rating columns exist
+  addReview: async (req, res) => {
     try {
-      await pool.execute(
-        `UPDATE arenas 
+      const { arena_id } = req.params;
+      const { rating, comment } = req.body;
+
+      // Validate inputs
+      if (!rating || rating < 1 || rating > 5) {
+        return res.status(400).json({
+          message: "Rating is required and must be between 1 and 5",
+        });
+      }
+
+      if (!comment || comment.trim().length === 0) {
+        return res.status(400).json({
+          message: "Comment is required",
+        });
+      }
+
+      // Check if user already reviewed this arena
+      const [existingReview] = await pool.execute(
+        "SELECT review_id FROM arena_reviews WHERE user_id = ? AND arena_id = ?",
+        [req.user.id, arena_id]
+      );
+
+      if (existingReview.length > 0) {
+        return res.status(400).json({
+          message: "You have already reviewed this arena",
+        });
+      }
+
+      // Insert review (booking_id can be null)
+      const [result] = await pool.execute(
+        `INSERT INTO arena_reviews (user_id, arena_id, rating, comment)
+       VALUES (?, ?, ?, ?)`,
+        [req.user.id, arena_id, rating, comment.trim()]
+      );
+
+      // Update arena rating
+      const [avgRating] = await pool.execute(
+        `SELECT AVG(rating) as avg_rating, COUNT(*) as total_reviews
+       FROM arena_reviews WHERE arena_id = ?`,
+        [arena_id]
+      );
+
+      // Update arenas table if rating columns exist
+      try {
+        await pool.execute(
+          `UPDATE arenas 
          SET rating = ROUND(?, 1), total_reviews = ?
          WHERE arena_id = ?`,
-        [
-          avgRating[0].avg_rating || 0,
-          avgRating[0].total_reviews || 0,
-          arena_id,
-        ]
-      );
-    } catch (updateError) {
-      console.warn("Could not update arena rating:", updateError.message);
-    }
+          [
+            avgRating[0].avg_rating || 0,
+            avgRating[0].total_reviews || 0,
+            arena_id,
+          ]
+        );
+      } catch (updateError) {
+        console.warn("Could not update arena rating:", updateError.message);
+      }
 
-    // Get the newly created review
-    const [newReview] = await pool.execute(
-      `SELECT ar.*, u.name as user_name, u.profile_picture_url
+      // Get the newly created review
+      const [newReview] = await pool.execute(
+        `SELECT ar.*, u.name as user_name, u.profile_picture_url
        FROM arena_reviews ar
        JOIN users u ON ar.user_id = u.user_id
        WHERE ar.review_id = ?`,
-      [result.insertId]
-    );
+        [result.insertId]
+      );
 
-    res.status(201).json({
-      message: "Review added successfully",
-      review: newReview[0],
-    });
-  } catch (error) {
-    console.error("Error in addReview:", error);
-    res.status(500).json({
-      message: "Server error",
-      error: error.message,
-      stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
-    });
-  }
-},
+      res.status(201).json({
+        message: "Review added successfully",
+        review: newReview[0],
+      });
+    } catch (error) {
+      console.error("Error in addReview:", error);
+      res.status(500).json({
+        message: "Server error",
+        error: error.message,
+        stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
+      });
+    }
+  },
 
   // Get court details for an arena
   getCourtDetails: async (req, res) => {
