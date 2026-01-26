@@ -4,47 +4,134 @@ import integrationService from "../../services/integrationService";
 const UserProfile = () => {
   const [activeTab, setActiveTab] = useState("profile");
   const [profileData, setProfileData] = useState({
-    name: "John Doe",
-    email: "john@example.com",
-    phone: "+1234567890",
-    profilePicture: "https://via.placeholder.com/150",
-    location: "New York, NY",
+    name: "",
+    email: "",
+    phone_number: "",
+    profile_picture_url: "",
+    location_lat: null,
+    location_lng: null,
+    created_at: "",
+    favorite_arenas: [],
+    teams: []
   });
-
+  
   const [paymentMethods, setPaymentMethods] = useState([
     { id: 1, type: "credit_card", last4: "4242", isDefault: true },
     { id: 2, type: "paypal", email: "john@example.com" },
   ]);
-
+  
   const [favoriteArenas, setFavoriteArenas] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState({
+    profile: false,
+    favorites: false
+  });
+  const [error, setError] = useState("");
 
-  // Fetch favorite arenas when component mounts
+  // Fetch user profile when component mounts or when activeTab changes
   useEffect(() => {
+    if (activeTab === "profile") {
+      fetchUserProfile();
+    }
     if (activeTab === "favorites") {
       fetchFavoriteArenas();
     }
   }, [activeTab]);
 
+  // Fetch user profile from backend
+  const fetchUserProfile = async () => {
+    try {
+      setLoading(prev => ({ ...prev, profile: true }));
+      setError("");
+      
+      console.log("Fetching user profile...");
+      const profile = await integrationService.getUserProfile();
+      console.log("Profile data received:", profile);
+      
+      // Format the data for display
+      setProfileData({
+        name: profile.name || "",
+        email: profile.email || "",
+        phone_number: profile.phone_number || "",
+        profile_picture_url: profile.profile_picture_url || getDefaultProfilePicture(),
+        location_lat: profile.location_lat,
+        location_lng: profile.location_lng,
+        created_at: profile.created_at,
+        favorite_arenas: profile.favorite_arenas || [],
+        teams: profile.teams || []
+      });
+      
+      // Also set favorite arenas if available
+      if (profile.favorite_arenas) {
+        setFavoriteArenas(profile.favorite_arenas);
+      }
+      
+    } catch (error) {
+      console.error("Error fetching user profile:", error);
+      setError("Failed to load profile information. Please try again.");
+      
+      // Fallback to localStorage data if available
+      try {
+        const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+        if (storedUser) {
+          setProfileData(prev => ({
+            ...prev,
+            name: storedUser.name || "User",
+            email: storedUser.email || "No email provided",
+            phone_number: storedUser.phone_number || "Not provided",
+            profile_picture_url: getDefaultProfilePicture()
+          }));
+        }
+      } catch (e) {
+        console.error("Error parsing stored user:", e);
+      }
+    } finally {
+      setLoading(prev => ({ ...prev, profile: false }));
+    }
+  };
+
+  // Get default profile picture
+  const getDefaultProfilePicture = () => {
+    // Use a local fallback or a reliable placeholder
+    return "https://upload.wikimedia.org/wikipedia/commons/7/7c/Profile_avatar_placeholder_large.png?20150327203541";
+  };
+
   // Fetch favorite arenas from backend
   const fetchFavoriteArenas = async () => {
     try {
-      setLoading(true);
-      // This should call getFavoriteArenas, not getUserFavorites
+      setLoading(prev => ({ ...prev, favorites: true }));
       const favorites = await integrationService.getFavoriteArenas();
       setFavoriteArenas(favorites);
     } catch (error) {
       console.error("Error fetching favorite arenas:", error);
-      alert("Failed to load favorite arenas");
+      // If there's an error, try to use the ones from profile data
+      if (profileData.favorite_arenas && profileData.favorite_arenas.length > 0) {
+        setFavoriteArenas(profileData.favorite_arenas);
+      }
     } finally {
-      setLoading(false);
+      setLoading(prev => ({ ...prev, favorites: false }));
     }
   };
 
-  const handleSaveProfile = (e) => {
+  const handleSaveProfile = async (e) => {
     e.preventDefault();
-    console.log("Save profile:", profileData);
-    // Implement save logic
+    try {
+      // Prepare data for update (only send updatable fields)
+      const updateData = {
+        name: profileData.name,
+        phone_number: profileData.phone_number,
+        location_lat: profileData.location_lat,
+        location_lng: profileData.location_lng
+      };
+      
+      // Implement update profile logic here
+      await integrationService.updateProfile(updateData);
+      alert("Profile updated successfully!");
+      // Refresh profile data
+      fetchUserProfile();
+    } catch (error) {
+      console.error("Error updating profile:", error);
+      alert("Failed to update profile. Please try again.");
+    }
   };
 
   const handleAddPaymentMethod = () => {
@@ -55,14 +142,47 @@ const UserProfile = () => {
   const handleRemoveFavorite = async (arenaId) => {
     try {
       await integrationService.removeFromFavorites(arenaId);
-      // Remove from local state immediately
+      // Update local state
       setFavoriteArenas(
         favoriteArenas.filter((arena) => arena.arena_id !== arenaId)
       );
+      // Also update profile data
+      setProfileData(prev => ({
+        ...prev,
+        favorite_arenas: prev.favorite_arenas.filter(arena => arena.arena_id !== arenaId)
+      }));
     } catch (error) {
       console.error("Error removing favorite:", error);
       alert("Failed to remove from favorites");
     }
+  };
+
+  // Format location for display
+  const formatLocation = () => {
+    if (profileData.location_lat && profileData.location_lng) {
+      return `Lat: ${profileData.location_lat.toFixed(4)}, Lng: ${profileData.location_lng.toFixed(4)}`;
+    }
+    return "Location not set";
+  };
+
+  // Format date for display
+  const formatDate = (dateString) => {
+    if (!dateString) return "N/A";
+    try {
+      return new Date(dateString).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+    } catch (e) {
+      return "Invalid date";
+    }
+  };
+
+  // Handle profile picture error
+  const handleImageError = (e) => {
+    console.log("Profile picture failed to load, using default");
+    e.target.src = getDefaultProfilePicture();
   };
 
   return (
@@ -72,6 +192,13 @@ const UserProfile = () => {
         <p className="text-gray-600 mb-8">
           Manage your account settings and preferences
         </p>
+
+        {/* Error message */}
+        {error && (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-red-700">{error}</p>
+          </div>
+        )}
 
         {/* Tab Navigation */}
         <div className="border-b border-gray-200 mb-8">
@@ -122,144 +249,189 @@ const UserProfile = () => {
         {/* Profile Info Tab */}
         {activeTab === "profile" && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <div className="flex flex-col md:flex-row items-start md:items-center space-y-6 md:space-y-0 md:space-x-6 mb-8">
-              <div className="relative">
-                <img
-                  src={profileData.profilePicture}
-                  alt="Profile"
-                  className="h-32 w-32 rounded-full object-cover border-4 border-white shadow-lg"
-                />
-                <button className="absolute bottom-2 right-2 bg-primary-600 text-white p-2 rounded-full hover:bg-primary-700">
-                  <svg
-                    className="h-4 w-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
-                    />
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"
-                    />
-                  </svg>
-                </button>
+            {loading.profile ? (
+              <div className="text-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
+                <p className="mt-4 text-gray-600">Loading profile...</p>
               </div>
-              <div>
-                <h2 className="text-2xl font-bold text-gray-900">
-                  {profileData.name}
-                </h2>
-                <p className="text-gray-600">{profileData.email}</p>
-                <div className="flex items-center mt-2">
-                  <svg
-                    className="h-4 w-4 text-gray-400 mr-1"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
+            ) : (
+              <>
+                <div className="flex flex-col md:flex-row items-start md:items-center space-y-6 md:space-y-0 md:space-x-6 mb-8">
+                  <div className="relative">
+                    <img
+                      src={profileData.profile_picture_url}
+                      alt="Profile"
+                      className="h-32 w-32 rounded-full object-cover border-4 border-white shadow-lg"
+                      onError={handleImageError}
                     />
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
-                    />
-                  </svg>
-                  <span className="text-sm text-gray-600">
-                    {profileData.location}
-                  </span>
+                    <button 
+                      className="absolute bottom-2 right-2 bg-primary-600 text-white p-2 rounded-full hover:bg-primary-700"
+                      onClick={() => {
+                        // Add profile picture upload functionality here
+                        console.log("Upload profile picture clicked");
+                      }}
+                    >
+                      <svg
+                        className="h-4 w-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
+                        />
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-900">
+                      {profileData.name || "User"}
+                    </h2>
+                    <p className="text-gray-600">{profileData.email || "No email provided"}</p>
+                    <div className="flex items-center mt-2">
+                      <svg
+                        className="h-4 w-4 text-gray-400 mr-1"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
+                        />
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+                        />
+                      </svg>
+                      <span className="text-sm text-gray-600">
+                        {formatLocation()}
+                      </span>
+                    </div>
+                    <div className="flex items-center mt-1">
+                      <svg
+                        className="h-4 w-4 text-gray-400 mr-1"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                        />
+                      </svg>
+                      <span className="text-sm text-gray-600">
+                        Member since {formatDate(profileData.created_at)}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
 
-            <form onSubmit={handleSaveProfile} className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Full Name
-                  </label>
-                  <input
-                    type="text"
-                    value={profileData.name}
-                    onChange={(e) =>
-                      setProfileData({ ...profileData, name: e.target.value })
-                    }
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                  />
+                {/* Account Stats */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <p className="text-sm text-gray-600">Favorite Arenas</p>
+                    <p className="text-2xl font-bold">{profileData.favorite_arenas?.length || 0}</p>
+                  </div>
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <p className="text-sm text-gray-600">Teams</p>
+                    <p className="text-2xl font-bold">{profileData.teams?.length || 0}</p>
+                  </div>
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <p className="text-sm text-gray-600">Phone</p>
+                    <p className="text-lg font-medium">{profileData.phone_number || "Not provided"}</p>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Email Address
-                  </label>
-                  <input
-                    type="email"
-                    value={profileData.email}
-                    onChange={(e) =>
-                      setProfileData({ ...profileData, email: e.target.value })
-                    }
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Phone Number
-                  </label>
-                  <input
-                    type="tel"
-                    value={profileData.phone}
-                    onChange={(e) =>
-                      setProfileData({ ...profileData, phone: e.target.value })
-                    }
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Location
-                  </label>
-                  <input
-                    type="text"
-                    value={profileData.location}
-                    onChange={(e) =>
-                      setProfileData({
-                        ...profileData,
-                        location: e.target.value,
-                      })
-                    }
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    placeholder="City, State"
-                  />
-                </div>
-              </div>
 
-              <div className="pt-4 border-t border-gray-200">
-                <div className="flex justify-end space-x-3">
-                  <button
-                    type="button"
-                    className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
-                  >
-                    Save Changes
-                  </button>
-                </div>
-              </div>
-            </form>
+                <form onSubmit={handleSaveProfile} className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Full Name
+                      </label>
+                      <input
+                        type="text"
+                        value={profileData.name}
+                        onChange={(e) =>
+                          setProfileData({ ...profileData, name: e.target.value })
+                        }
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Email Address
+                      </label>
+                      <input
+                        type="email"
+                        value={profileData.email}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-50"
+                        disabled
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Email cannot be changed</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Phone Number
+                      </label>
+                      <input
+                        type="tel"
+                        value={profileData.phone_number}
+                        onChange={(e) =>
+                          setProfileData({ ...profileData, phone_number: e.target.value })
+                        }
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                        placeholder="+92 300 1234567"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Member Since
+                      </label>
+                      <input
+                        type="text"
+                        value={formatDate(profileData.created_at)}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-50"
+                        disabled
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-gray-200">
+                    <div className="flex justify-end space-x-3">
+                      <button
+                        type="button"
+                        onClick={fetchUserProfile}
+                        className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+                      >
+                        Save Changes
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              </>
+            )}
           </div>
         )}
 
@@ -331,7 +503,7 @@ const UserProfile = () => {
                 Favorite Arenas
               </h2>
 
-              {loading ? (
+              {loading.favorites ? (
                 <div className="text-center py-12">
                   <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
                   <p className="mt-4 text-gray-600">Loading favorites...</p>

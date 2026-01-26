@@ -1,3 +1,4 @@
+const API_URL = 'http://localhost:5000'; // or your backend URL
 /**
  * Integration Service
  * Handles all interactions between User and Owner modules
@@ -238,28 +239,29 @@ export const integrationService = {
   },
 
   // ===== USER PROFILE METHODS =====
-  getProfile: async () => {
-    try {
-      const token = localStorage.getItem("token");
-      const response = await fetch("http://localhost:5000/api/user/profile", {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to fetch profile");
+// In integrationService.js
+// ===== USER PROFILE METHODS =====
+getUserProfile: async () => {
+  try {
+    const token = localStorage.getItem('token');
+    const response = await fetch(`http://localhost:5000/api/users/profile`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
       }
-
-      return await response.json();
-    } catch (error) {
-      console.error("Error fetching profile:", error);
-      throw error;
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to fetch profile');
     }
-  },
-
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching user profile:', error);
+    throw error;
+  }
+},
   updateProfile: async (profileData) => {
     try {
       const token = localStorage.getItem("token");
