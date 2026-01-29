@@ -39,8 +39,64 @@ const userValidation = {
     body("name").optional().notEmpty().withMessage("Name cannot be empty"),
     body("phone_number")
       .optional()
-      .matches(/^\+?[1-9]\d{1,14}$/)
-      .withMessage("Valid phone number required"),
+      .matches(/^(\+92|0|92)?[0-9]{10}$/)
+      .withMessage("Valid Pakistani phone number required (e.g., 03331234567, +923331234567)"),
+  ]),
+
+  changeEmail: validate([
+    body("new_email")
+      .isEmail()
+      .withMessage("Valid email is required")
+      .custom(async (value, { req }) => {
+        // Check if email is already taken by another user
+        const [users] = await pool.execute(
+          "SELECT user_id FROM users WHERE email = ? AND user_id != ?",
+          [value, req.user.id]
+        );
+        if (users.length > 0) {
+          throw new Error("Email is already registered");
+        }
+        return true;
+      }),
+  ]),
+
+  verifyEmailOTP: validate([
+    body("otp_code")
+      .isLength({ min: 6, max: 6 })
+      .withMessage("OTP must be 6 digits")
+      .isNumeric()
+      .withMessage("OTP must contain only numbers"),
+    body("request_id")
+      .isInt()
+      .withMessage("Valid request ID required"),
+  ]),
+
+  changePassword: validate([
+    body("current_password")
+      .notEmpty()
+      .withMessage("Current password is required"),
+    body("new_password")
+      .isLength({ min: 8 })
+      .withMessage("New password must be at least 8 characters")
+      .matches(/[A-Z]/)
+      .withMessage("Password must contain at least one uppercase letter")
+      .matches(/[a-z]/)
+      .withMessage("Password must contain at least one lowercase letter")
+      .matches(/\d/)
+      .withMessage("Password must contain at least one number")
+      .custom((value, { req }) => {
+        if (value === req.body.current_password) {
+          throw new Error("New password must be different from current password");
+        }
+        return true;
+      }),
+    body("confirm_password")
+      .custom((value, { req }) => {
+        if (value !== req.body.new_password) {
+          throw new Error("Passwords do not match");
+        }
+        return true;
+      }),
   ]),
 };
 

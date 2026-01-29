@@ -14,18 +14,38 @@ const UserProfile = () => {
     favorite_arenas: [],
     teams: []
   });
-  
+
   const [paymentMethods, setPaymentMethods] = useState([
     { id: 1, type: "credit_card", last4: "4242", isDefault: true },
     { id: 2, type: "paypal", email: "john@example.com" },
   ]);
-  
+
   const [favoriteArenas, setFavoriteArenas] = useState([]);
   const [loading, setLoading] = useState({
     profile: false,
     favorites: false
   });
   const [error, setError] = useState("");
+  const [isSaving, setIsSaving] = useState(false); // Add isSaving state
+
+  // Add these states at the top of your component
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [showOTPModal, setShowOTPModal] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [emailForm, setEmailForm] = useState({
+    new_email: "",
+  });
+  const [otpForm, setOtpForm] = useState({
+    otp_code: "",
+    request_id: "",
+  });
+  const [passwordForm, setPasswordForm] = useState({
+    current_password: "",
+    new_password: "",
+    confirm_password: "",
+  });
+  const [otpTimer, setOtpTimer] = useState(0);
+  const [otpRequestId, setOtpRequestId] = useState("");
 
   // Fetch user profile when component mounts or when activeTab changes
   useEffect(() => {
@@ -42,11 +62,11 @@ const UserProfile = () => {
     try {
       setLoading(prev => ({ ...prev, profile: true }));
       setError("");
-      
+
       console.log("Fetching user profile...");
       const profile = await integrationService.getUserProfile();
       console.log("Profile data received:", profile);
-      
+
       // Format the data for display
       setProfileData({
         name: profile.name || "",
@@ -59,16 +79,16 @@ const UserProfile = () => {
         favorite_arenas: profile.favorite_arenas || [],
         teams: profile.teams || []
       });
-      
+
       // Also set favorite arenas if available
       if (profile.favorite_arenas) {
         setFavoriteArenas(profile.favorite_arenas);
       }
-      
+
     } catch (error) {
       console.error("Error fetching user profile:", error);
       setError("Failed to load profile information. Please try again.");
-      
+
       // Fallback to localStorage data if available
       try {
         const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
@@ -114,24 +134,203 @@ const UserProfile = () => {
 
   const handleSaveProfile = async (e) => {
     e.preventDefault();
+    if (isSaving) return;
+    setIsSaving(true);
+
     try {
-      // Prepare data for update (only send updatable fields)
+      // Format phone number for Pakistani format
+      let formattedPhone = profileData.phone_number;
+
+      if (formattedPhone) {
+        // Remove all non-digit characters first
+        const digitsOnly = formattedPhone.replace(/\D/g, '');
+
+        // Format based on Pakistani phone number patterns
+        if (digitsOnly.length === 11 && digitsOnly.startsWith('0')) {
+          // Format: 03XXXXXXXXX -> keep as is
+          formattedPhone = digitsOnly;
+        } else if (digitsOnly.length === 10) {
+          // Format: 3XXXXXXXXX -> add leading 0
+          formattedPhone = '0' + digitsOnly;
+        } else if (digitsOnly.length === 12 && digitsOnly.startsWith('92')) {
+          // Format: 92XXXXXXXXXXX -> convert to 0XXXXXXXXXX
+          formattedPhone = '0' + digitsOnly.slice(2);
+        } else {
+          // Keep as is if it already has +92 or other format
+          formattedPhone = profileData.phone_number.replace(/\s+/g, '');
+        }
+      }
+
+      // Prepare data for update
       const updateData = {
         name: profileData.name,
-        phone_number: profileData.phone_number,
-        location_lat: profileData.location_lat,
-        location_lng: profileData.location_lng
+        phone_number: formattedPhone || '', // Send empty string if null
+        // Only include location if it's set
+        ...(profileData.location_lat && profileData.location_lat !== null && {
+          location_lat: parseFloat(profileData.location_lat)
+        }),
+        ...(profileData.location_lng && profileData.location_lng !== null && {
+          location_lng: parseFloat(profileData.location_lng)
+        })
       };
-      
-      // Implement update profile logic here
-      await integrationService.updateProfile(updateData);
-      alert("Profile updated successfully!");
+
+      console.log("📤 Updating profile with data:", updateData);
+
+      // Update the integrationService to handle error messages properly
+      const result = await integrationService.updateProfile(updateData);
+
+      console.log("✅ Update successful:", result);
+
+      // Show success message
+      const alertDiv = document.createElement('div');
+      alertDiv.className = 'fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg z-50';
+      alertDiv.textContent = "Profile updated successfully!";
+      document.body.appendChild(alertDiv);
+
+      setTimeout(() => alertDiv.remove(), 3000);
+
       // Refresh profile data
       fetchUserProfile();
     } catch (error) {
-      console.error("Error updating profile:", error);
-      alert("Failed to update profile. Please try again.");
+      console.error("❌ Error updating profile:", error);
+
+      // Extract error message properly
+      let errorMessage = "Failed to update profile. Please try again.";
+      if (error.message && typeof error.message === 'string') {
+        errorMessage = error.message;
+      } else if (error.errors && Array.isArray(error.errors)) {
+        errorMessage = error.errors.map(err => err.msg || err.message).join(', ');
+      }
+
+      // Show detailed error message
+      const errorDiv = document.createElement('div');
+      errorDiv.className = 'fixed top-4 right-4 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg z-50';
+      errorDiv.innerHTML = `
+      <strong>Error:</strong> ${errorMessage}
+      <br><small>Check console for details</small>
+    `;
+      document.body.appendChild(errorDiv);
+
+      setTimeout(() => errorDiv.remove(), 5000);
+    } finally {
+      setIsSaving(false);
     }
+  };
+
+  // Helper function to show alerts
+  const showAlert = (message, type = "success") => {
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `fixed top-4 right-4 ${type === 'success' ? 'bg-green-500' : 'bg-red-500'} text-white px-6 py-3 rounded-lg shadow-lg z-50`;
+    alertDiv.textContent = message;
+    document.body.appendChild(alertDiv);
+    setTimeout(() => alertDiv.remove(), 3000);
+  };
+
+  // Add these functions to handle email/password changes
+  const handleRequestEmailChange = async () => {
+    try {
+      setError("");
+      const response = await integrationService.requestEmailChange(emailForm.new_email);
+
+      setOtpRequestId(response.request_id);
+      setOtpTimer(response.expires_in);
+      setShowEmailModal(false);
+      setShowOTPModal(true);
+
+      // Start OTP timer
+      startOTPTimer(response.expires_in);
+
+      // Show success message
+      showAlert("OTP sent to your new email address", "success");
+    } catch (error) {
+      setError(error.message || "Failed to request email change");
+    }
+  };
+
+  const handleVerifyOTP = async () => {
+    try {
+      setError("");
+      const payload = {
+        otp_code: otpForm.otp_code,
+        request_id: otpRequestId || otpForm.request_id,
+      };
+
+      const response = await integrationService.verifyEmailChange(payload);
+
+      setShowOTPModal(false);
+      showAlert("Email changed successfully!", "success");
+
+      // Update local profile data
+      setProfileData(prev => ({
+        ...prev,
+        email: response.new_email
+      }));
+
+      // Clear forms
+      setEmailForm({ new_email: "" });
+      setOtpForm({ otp_code: "", request_id: "" });
+
+    } catch (error) {
+      setError(error.message || "Failed to verify OTP");
+    }
+  };
+
+  const handleResendOTP = async () => {
+    try {
+      const response = await integrationService.resendEmailOTP(otpRequestId);
+      setOtpTimer(response.expires_in);
+      startOTPTimer(response.expires_in);
+      showAlert("New OTP sent successfully", "success");
+    } catch (error) {
+      setError(error.message || "Failed to resend OTP");
+    }
+  };
+
+  const handleChangePassword = async () => {
+    try {
+      if (passwordForm.new_password !== passwordForm.confirm_password) {
+        setError("Passwords do not match");
+        return;
+      }
+
+      const response = await integrationService.changePassword({
+        current_password: passwordForm.current_password,
+        new_password: passwordForm.new_password,
+      });
+
+      setShowPasswordModal(false);
+      showAlert("Password changed successfully!", "success");
+
+      // Clear form
+      setPasswordForm({
+        current_password: "",
+        new_password: "",
+        confirm_password: "",
+      });
+
+    } catch (error) {
+      setError(error.message || "Failed to change password");
+    }
+  };
+
+  const startOTPTimer = (seconds) => {
+    setOtpTimer(seconds);
+    const interval = setInterval(() => {
+      setOtpTimer(prev => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  // Add OTP timer display function
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
   const handleAddPaymentMethod = () => {
@@ -205,41 +404,37 @@ const UserProfile = () => {
           <nav className="-mb-px flex space-x-8">
             <button
               onClick={() => setActiveTab("profile")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "profile"
-                  ? "border-primary-500 text-primary-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-              }`}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === "profile"
+                ? "border-primary-500 text-primary-600"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                }`}
             >
               Profile Info
             </button>
             <button
               onClick={() => setActiveTab("payment")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "payment"
-                  ? "border-primary-500 text-primary-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-              }`}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === "payment"
+                ? "border-primary-500 text-primary-600"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                }`}
             >
               Payment Methods
             </button>
             <button
               onClick={() => setActiveTab("favorites")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "favorites"
-                  ? "border-primary-500 text-primary-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-              }`}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === "favorites"
+                ? "border-primary-500 text-primary-600"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                }`}
             >
               Favorite Arenas
             </button>
             <button
               onClick={() => setActiveTab("support")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "support"
-                  ? "border-primary-500 text-primary-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-              }`}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === "support"
+                ? "border-primary-500 text-primary-600"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                }`}
             >
               Help & Support
             </button>
@@ -264,7 +459,7 @@ const UserProfile = () => {
                       className="h-32 w-32 rounded-full object-cover border-4 border-white shadow-lg"
                       onError={handleImageError}
                     />
-                    <button 
+                    <button
                       className="absolute bottom-2 right-2 bg-primary-600 text-white p-2 rounded-full hover:bg-primary-700"
                       onClick={() => {
                         // Add profile picture upload functionality here
@@ -358,6 +553,7 @@ const UserProfile = () => {
                   </div>
                 </div>
 
+                {/* Form Section - UPDATED */}
                 <form onSubmit={handleSaveProfile} className="space-y-6">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
@@ -370,7 +566,8 @@ const UserProfile = () => {
                         onChange={(e) =>
                           setProfileData({ ...profileData, name: e.target.value })
                         }
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        placeholder="Enter your full name"
                       />
                     </div>
                     <div>
@@ -380,10 +577,11 @@ const UserProfile = () => {
                       <input
                         type="email"
                         value={profileData.email}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-50"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-50 text-gray-600 cursor-not-allowed"
                         disabled
+                        readOnly
                       />
-                      <p className="text-xs text-gray-500 mt-1">Email cannot be changed</p>
+                      <p className="text-xs text-gray-500 mt-1">Email cannot be changed directly</p>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -395,7 +593,7 @@ const UserProfile = () => {
                         onChange={(e) =>
                           setProfileData({ ...profileData, phone_number: e.target.value })
                         }
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                         placeholder="+92 300 1234567"
                       />
                     </div>
@@ -406,26 +604,97 @@ const UserProfile = () => {
                       <input
                         type="text"
                         value={formatDate(profileData.created_at)}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-50"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-50 text-gray-600"
                         disabled
                       />
                     </div>
                   </div>
 
-                  <div className="pt-4 border-t border-gray-200">
+                  {/* Add Security Settings Section */}
+                  <div className="pt-6 border-t border-gray-200">
+                    <div className="flex justify-between items-center mb-4">
+                      <div>
+                        <h4 className="font-medium text-gray-900">Security Settings</h4>
+                        <p className="text-sm text-gray-600">Manage your email and password</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <button
+                        type="button"
+                        onClick={() => setShowEmailModal(true)}
+                        className="w-full flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50"
+                      >
+                        <div className="flex items-center">
+                          <div className="h-10 w-10 bg-blue-100 rounded-lg flex items-center justify-center mr-3">
+                            <svg className="h-5 w-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                            </svg>
+                          </div>
+                          <div className="text-left">
+                            <p className="font-medium">Change Email Address</p>
+                            <p className="text-sm text-gray-600">Update your login email with OTP verification</p>
+                          </div>
+                        </div>
+                        <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setShowPasswordModal(true)}
+                        className="w-full flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50"
+                      >
+                        <div className="flex items-center">
+                          <div className="h-10 w-10 bg-green-100 rounded-lg flex items-center justify-center mr-3">
+                            <svg className="h-5 w-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                            </svg>
+                          </div>
+                          <div className="text-left">
+                            <p className="font-medium">Change Password</p>
+                            <p className="text-sm text-gray-600">Update your account password</p>
+                          </div>
+                        </div>
+                        <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="pt-6 border-t border-gray-200">
                     <div className="flex justify-end space-x-3">
                       <button
                         type="button"
-                        onClick={fetchUserProfile}
-                        className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                        onClick={() => {
+                          // Reset form to original data
+                          fetchUserProfile();
+                          // Show cancellation message
+                          const cancelDiv = document.createElement('div');
+                          cancelDiv.className = 'fixed top-4 right-4 bg-blue-500 text-white px-6 py-3 rounded-lg shadow-lg z-50';
+                          cancelDiv.textContent = "Changes cancelled";
+                          document.body.appendChild(cancelDiv);
+                          setTimeout(() => cancelDiv.remove(), 3000);
+                        }}
+                        className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-colors"
                       >
                         Cancel
                       </button>
                       <button
                         type="submit"
-                        className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+                        className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={isSaving || loading.profile}
                       >
-                        Save Changes
+                        {isSaving ? (
+                          <>
+                            <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></span>
+                            Saving...
+                          </>
+                        ) : (
+                          "Save Changes"
+                        )}
                       </button>
                     </div>
                   </div>
@@ -679,6 +948,169 @@ const UserProfile = () => {
           </div>
         )}
       </div>
+
+      {/* Email Change Modal */}
+      {showEmailModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold mb-4">Change Email Address</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Current Email
+                </label>
+                <input
+                  type="email"
+                  value={profileData.email}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-50"
+                  disabled
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  New Email Address
+                </label>
+                <input
+                  type="email"
+                  value={emailForm.new_email}
+                  onChange={(e) => setEmailForm({ ...emailForm, new_email: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                  placeholder="Enter new email"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end space-x-3 mt-6">
+              <button
+                onClick={() => setShowEmailModal(false)}
+                className="px-4 py-2 text-gray-600 hover:text-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRequestEmailChange}
+                className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+              >
+                Send OTP
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* OTP Verification Modal */}
+      {showOTPModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold mb-4">Verify OTP</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Enter 6-digit OTP
+                </label>
+                <input
+                  type="text"
+                  maxLength="6"
+                  value={otpForm.otp_code}
+                  onChange={(e) => setOtpForm({ ...otpForm, otp_code: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-center text-2xl tracking-widest"
+                  placeholder="000000"
+                />
+                <div className="text-sm text-gray-500 mt-2">
+                  OTP expires in: {formatTime(otpTimer)}
+                </div>
+              </div>
+              <button
+                onClick={handleResendOTP}
+                className="text-sm text-primary-600 hover:text-primary-500"
+                disabled={otpTimer > 0}
+              >
+                Resend OTP {otpTimer > 0 && `(in ${formatTime(otpTimer)})`}
+              </button>
+            </div>
+            <div className="flex justify-end space-x-3 mt-6">
+              <button
+                onClick={() => {
+                  setShowOTPModal(false);
+                  setShowEmailModal(true);
+                }}
+                className="px-4 py-2 text-gray-600 hover:text-gray-800"
+              >
+                Back
+              </button>
+              <button
+                onClick={handleVerifyOTP}
+                className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+              >
+                Verify & Change Email
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Password Change Modal */}
+      {showPasswordModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold mb-4">Change Password</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Current Password
+                </label>
+                <input
+                  type="password"
+                  value={passwordForm.current_password}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, current_password: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                  placeholder="Enter current password"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  New Password
+                </label>
+                <input
+                  type="password"
+                  value={passwordForm.new_password}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, new_password: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                  placeholder="Enter new password"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Must be at least 8 characters with uppercase, lowercase, and number
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Confirm New Password
+                </label>
+                <input
+                  type="password"
+                  value={passwordForm.confirm_password}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, confirm_password: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                  placeholder="Confirm new password"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end space-x-3 mt-6">
+              <button
+                onClick={() => setShowPasswordModal(false)}
+                className="px-4 py-2 text-gray-600 hover:text-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleChangePassword}
+                className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+              >
+                Change Password
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

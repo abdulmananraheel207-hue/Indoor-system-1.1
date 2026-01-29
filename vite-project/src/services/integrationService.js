@@ -239,34 +239,37 @@ export const integrationService = {
   },
 
   // ===== USER PROFILE METHODS =====
-// In integrationService.js
-// ===== USER PROFILE METHODS =====
-getUserProfile: async () => {
-  try {
-    const token = localStorage.getItem('token');
-    const response = await fetch(`http://localhost:5000/api/users/profile`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
+  // In integrationService.js
+  // ===== USER PROFILE METHODS =====
+  getUserProfile: async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`http://localhost:5000/api/users/profile`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch profile');
       }
-    });
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch profile');
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching user profile:', error);
+      throw error;
     }
-    
-    return await response.json();
-  } catch (error) {
-    console.error('Error fetching user profile:', error);
-    throw error;
-  }
-},
+  },
+  // In integrationService.js, update the updateProfile function:
   updateProfile: async (profileData) => {
     try {
       const token = localStorage.getItem("token");
+      console.log("📤 Sending profile update request with data:", profileData);
+
       const response = await fetch(
-        "http://localhost:5000/api/user/update-profile",
+        "http://localhost:5000/api/users/profile",
         {
           method: "PUT",
           headers: {
@@ -277,17 +280,40 @@ getUserProfile: async () => {
         }
       );
 
+      console.log("📡 Response status:", response.status);
+
+      const responseText = await response.text();
+      console.log("📡 Raw response:", responseText);
+
       if (!response.ok) {
-        throw new Error("Failed to update profile");
+        let errorData;
+        try {
+          errorData = JSON.parse(responseText);
+        } catch (e) {
+          errorData = { message: responseText || `HTTP error ${response.status}` };
+        }
+
+        // Create a more informative error
+        let errorMessage = "Failed to update profile";
+        if (errorData.errors && Array.isArray(errorData.errors)) {
+          errorMessage = errorData.errors.map(err =>
+            `${err.path}: ${err.msg} (value: ${err.value})`
+          ).join('; ');
+        } else if (errorData.message) {
+          errorMessage = errorData.message;
+        }
+
+        throw new Error(errorMessage);
       }
 
-      return await response.json();
+      const result = JSON.parse(responseText);
+      console.log("✅ Profile update successful:", result);
+      return result;
     } catch (error) {
-      console.error("Error updating profile:", error);
+      console.error("❌ Error updating profile:", error);
       throw error;
     }
   },
-
   getFavoriteArenas: async () => {
     try {
       const token = localStorage.getItem("token");
@@ -380,6 +406,146 @@ getUserProfile: async () => {
       return await response.json();
     } catch (error) {
       console.error("Error removing favorite:", error);
+      throw error;
+    }
+  },
+
+  // In integrationService.js - add these methods
+
+  // Email change methods
+  requestEmailChange: async (newEmail) => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        "http://localhost:5000/api/users/email/change-request",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ new_email: newEmail }),
+        }
+      );
+
+      const responseText = await response.text();
+      let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch (e) {
+        result = { message: responseText };
+      }
+
+      if (!response.ok) {
+        throw new Error(result.message || "Failed to request email change");
+      }
+
+      return result;
+    } catch (error) {
+      console.error("❌ Error requesting email change:", error);
+      throw error;
+    }
+  },
+
+  verifyEmailChange: async (otpData) => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        "http://localhost:5000/api/users/email/verify-otp",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(otpData),
+        }
+      );
+
+      const responseText = await response.text();
+      let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch (e) {
+        result = { message: responseText };
+      }
+
+      if (!response.ok) {
+        throw new Error(result.message || "Failed to verify OTP");
+      }
+
+      return result;
+    } catch (error) {
+      console.error("❌ Error verifying email change:", error);
+      throw error;
+    }
+  },
+
+  resendEmailOTP: async (requestId) => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        "http://localhost:5000/api/users/email/resend-otp",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ request_id: requestId }),
+        }
+      );
+
+      const responseText = await response.text();
+      let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch (e) {
+        result = { message: responseText };
+      }
+
+      if (!response.ok) {
+        throw new Error(result.message || "Failed to resend OTP");
+      }
+
+      return result;
+    } catch (error) {
+      console.error("❌ Error resending OTP:", error);
+      throw error;
+    }
+  },
+
+  // Password change method
+  changePassword: async (passwordData) => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        "http://localhost:5000/api/users/password/change",
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(passwordData),
+        }
+      );
+
+      const responseText = await response.text();
+      let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch (e) {
+        result = { message: responseText };
+      }
+
+      if (!response.ok) {
+        throw new Error(result.message || "Failed to change password");
+      }
+
+      return result;
+    } catch (error) {
+      console.error("❌ Error changing password:", error);
       throw error;
     }
   },

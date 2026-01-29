@@ -1,5 +1,7 @@
 const bcrypt = require("bcryptjs");
 const pool = require("../db");
+const emailService = require("../services/emailService"); // Add this import
+
 
 const userController = {
   // In userController.js - uploadProfilePicture function
@@ -77,9 +79,21 @@ const userController = {
   },
 
   // Update user profile
+  // In userController.js - updateProfile function
   updateProfile: async (req, res) => {
     try {
       const { name, phone_number, location_lat, location_lng } = req.body;
+
+      console.log("📱 Update profile request received:", {
+        name,
+        phone_number,
+        lat: location_lat,
+        lng: location_lng
+      });
+
+      // If phone_number is empty string, treat it as null
+      const cleanPhoneNumber = phone_number === '' ? null : phone_number;
+
       const updateFields = [];
       const values = [];
 
@@ -87,9 +101,9 @@ const userController = {
         updateFields.push("name = ?");
         values.push(name);
       }
-      if (phone_number) {
+      if (cleanPhoneNumber !== undefined) {
         updateFields.push("phone_number = ?");
-        values.push(phone_number);
+        values.push(cleanPhoneNumber);
       }
       if (location_lat !== undefined) {
         updateFields.push("location_lat = ?");
@@ -106,6 +120,9 @@ const userController = {
 
       values.push(req.user.id);
 
+      console.log("📱 Executing SQL update:", updateFields.join(", "));
+      console.log("📱 Values:", values);
+
       await pool.execute(
         `UPDATE users SET ${updateFields.join(", ")} WHERE user_id = ?`,
         values
@@ -113,7 +130,7 @@ const userController = {
 
       res.json({ message: "Profile updated successfully" });
     } catch (error) {
-      console.error(error);
+      console.error("❌ Update profile error:", error);
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
@@ -144,30 +161,180 @@ const userController = {
     }
   },
 
+  // Request email change with OTP
+  requestEmailChange: async (req, res) => {
+    try {
+      const { new_email } = req.body;
+      const user_id = req.user.id;
+      const old_email = req.user.email; // From token
+
+      console.log("📧 Requesting email change:", { user_id, old_email, new_email });
+
+      // Check if new email is different
+      if (new_email === old_email) {
+        return res.status(400).json({ message: "New email must be different from current email" });
+      }
+
+      // Check if email already exists
+      const [existing] = await pool.execute(
+        "SELECT user_id FROM users WHERE email = ? AND user_id != ?",
+        [new_email, user_id]
+      );
+
+      if (existing.length > 0) {
+        return res.status(400).json({ message: "Email is already registered" });
+      }
+
+      // Generate 6-digit OTP
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+      // Create or update email change request
+      await pool.execute(
+        `INSERT INTO email_change_requests 
+         (user_id, old_email, new_email, otp_code, expires_at) 
+         VALUES (?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+         otp_code = VALUES(otp_code),
+         expires_at = VALUES(expires_at),
+         is_verified = FALSE,
+         created_at = NOW()`,
+        [user_id, old_email, new_email, otpCode, expiresAt]
+      );
+
+      // Get the request ID
+      const [requests] = await pool.execute(
+        "SELECT request_id FROM email_change_requests WHERE user_id = ? AND new_email = ? ORDER BY created_at DESC LIMIT 1",
+        [user_id, new_email]
+      );
+
+      // Send OTP email
+      try {
+        await emailService.sendOTP(new_email, otpCode, "email change verification");
+      } catch (emailError) {
+        console.error("Failed to send OTP email:", emailError);
+        return res.status(500).json({
+          message: "Failed to send OTP email. Please try again later.",
+          request_id: requests[0]?.request_id // Still return request_id
+        });
+      }
+
+      res.json({
+        message: "OTP sent to new email address",
+        request_id: requests[0]?.request_id,
+        expires_in: 600 // 10 minutes in seconds
+      });
+
+    } catch (error) {
+      console.error("❌ Error requesting email change:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+
+  // Verify OTP and change email
+  verifyEmailChange: async (req, res) => {
+    try {
+      const { otp_code, request_id } = req.body;
+      const user_id = req.user.id;
+
+      console.log("📧 Verifying email change OTP:", { request_id, user_id });
+
+      // Get the email change request
+      const [requests] = await pool.execute(
+        `SELECT * FROM email_change_requests 
+         WHERE request_id = ? AND user_id = ? AND is_verified = FALSE`,
+        [request_id, user_id]
+      );
+
+      if (requests.length === 0) {
+        return res.status(404).json({ message: "Invalid or expired request" });
+      }
+
+      const request = requests[0];
+
+      // Check if OTP is expired
+      if (new Date() > new Date(request.expires_at)) {
+        return res.status(400).json({ message: "OTP has expired" });
+      }
+
+      // Verify OTP
+      if (request.otp_code !== otp_code) {
+        return res.status(400).json({ message: "Invalid OTP code" });
+      }
+
+      // Begin transaction
+      await pool.execute("START TRANSACTION");
+
+      try {
+        // Update user email
+        await pool.execute(
+          "UPDATE users SET email = ? WHERE user_id = ?",
+          [request.new_email, user_id]
+        );
+
+        // Mark request as verified
+        await pool.execute(
+          "UPDATE email_change_requests SET is_verified = TRUE WHERE request_id = ?",
+          [request_id]
+        );
+
+        // Delete other pending requests for this user
+        await pool.execute(
+          "DELETE FROM email_change_requests WHERE user_id = ? AND is_verified = FALSE AND request_id != ?",
+          [user_id, request_id]
+        );
+
+        await pool.execute("COMMIT");
+
+        // Send confirmation email to old email
+        emailService.sendOTP(
+          request.old_email,
+          "EMAIL_CHANGED",
+          "Email Address Changed - Security Notification"
+        ).catch(console.error);
+
+        console.log("✅ Email changed successfully for user:", user_id);
+
+        res.json({
+          message: "Email changed successfully",
+          new_email: request.new_email
+        });
+
+      } catch (transactionError) {
+        await pool.execute("ROLLBACK");
+        throw transactionError;
+      }
+
+    } catch (error) {
+      console.error("❌ Error verifying email change:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+
   // Change password
   changePassword: async (req, res) => {
     try {
       const { current_password, new_password } = req.body;
+      const user_id = req.user.id;
+
+      console.log("🔑 Changing password for user:", user_id);
 
       // Get current password hash
       const [users] = await pool.execute(
-        "SELECT password_hash FROM users WHERE user_id = ?",
-        [req.user.id]
+        "SELECT password_hash, email, name FROM users WHERE user_id = ?",
+        [user_id]
       );
 
       if (users.length === 0) {
         return res.status(404).json({ message: "User not found" });
       }
 
+      const user = users[0];
+
       // Verify current password
-      const isValid = await bcrypt.compare(
-        current_password,
-        users[0].password_hash
-      );
+      const isValid = await bcrypt.compare(current_password, user.password_hash);
       if (!isValid) {
-        return res
-          .status(400)
-          .json({ message: "Current password is incorrect" });
+        return res.status(400).json({ message: "Current password is incorrect" });
       }
 
       // Hash new password
@@ -176,16 +343,74 @@ const userController = {
       // Update password
       await pool.execute(
         "UPDATE users SET password_hash = ? WHERE user_id = ?",
-        [hashedPassword, req.user.id]
+        [hashedPassword, user_id]
       );
 
+      // Send notification email
+      emailService.sendPasswordChangeNotification(user.email, user.name)
+        .catch(error => console.error("Failed to send password change notification:", error));
+
+      console.log("✅ Password changed successfully for user:", user_id);
+
       res.json({ message: "Password changed successfully" });
+
     } catch (error) {
-      console.error(error);
+      console.error("❌ Error changing password:", error);
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
 
+  // Resend OTP for email change
+  resendEmailOTP: async (req, res) => {
+    try {
+      const { request_id } = req.body;
+      const user_id = req.user.id;
+
+      // Get the email change request
+      const [requests] = await pool.execute(
+        `SELECT * FROM email_change_requests 
+         WHERE request_id = ? AND user_id = ? AND is_verified = FALSE`,
+        [request_id, user_id]
+      );
+
+      if (requests.length === 0) {
+        return res.status(404).json({ message: "Invalid or expired request" });
+      }
+
+      const request = requests[0];
+
+      // Generate new OTP
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+      // Update OTP
+      await pool.execute(
+        "UPDATE email_change_requests SET otp_code = ?, expires_at = ? WHERE request_id = ?",
+        [otpCode, expiresAt, request_id]
+      );
+
+      // Send new OTP
+      try {
+        await emailService.sendOTP(request.new_email, otpCode, "email change verification");
+      } catch (emailError) {
+        console.error("Failed to resend OTP:", emailError);
+        return res.status(500).json({
+          message: "Failed to resend OTP. Please try again later.",
+          request_id
+        });
+      }
+
+      res.json({
+        message: "New OTP sent successfully",
+        request_id,
+        expires_in: 600
+      });
+
+    } catch (error) {
+      console.error("❌ Error resending OTP:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
   // Get nearby arenas based on location
   getNearbyArenas: async (req, res) => {
     try {

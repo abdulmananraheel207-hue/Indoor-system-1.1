@@ -17,14 +17,38 @@ router.put(
   userController.updateProfile
 );
 
-// === UPDATE THIS ROUTE FOR PROFILE PICTURE ===
+// Profile picture
 router.post(
-  "/profile/picture", // Changed from PUT to POST
-  uploadProfilePicture, // ADD THIS MIDDLEWARE
-  userController.uploadProfilePicture // Change from updateProfilePicture
+  "/profile/picture",
+  uploadProfilePicture,
+  userController.uploadProfilePicture
 );
 
-router.put("/profile/password", userController.changePassword);
+// Email change routes
+router.post(
+  "/email/change-request",
+  userValidation.changeEmail,
+  userController.requestEmailChange
+);
+
+router.post(
+  "/email/verify-otp",
+  userValidation.verifyEmailOTP,
+  userController.verifyEmailChange
+);
+
+router.post(
+  "/email/resend-otp",
+  userValidation.verifyEmailOTP, // Just for request_id validation
+  userController.resendEmailOTP
+);
+
+// Password change - UPDATED to match new code
+router.put(
+  "/password/change",
+  userValidation.changePassword,
+  userController.changePassword
+);
 
 // Arena discovery and search
 router.get("/arenas/nearby", userController.getNearbyArenas);
