@@ -47,6 +47,9 @@ router.post("/slots/:slot_id/lock", userController.lockTimeSlot);
 router.post("/slots/:slot_id/release", userController.releaseTimeSlot);
 
 // Add review endpoint
-router.post("/:arena_id/reviews", userController.addReview);
-
+router.post(
+    "/:arena_id/reviews",
+    reviewValidation.addReview, // ADD VALIDATION HERE
+    userController.addReview
+);
 module.exports = router;

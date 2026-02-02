@@ -27,7 +27,6 @@ router.post(
 // Email change routes
 router.post(
   "/email/change-request",
-  userValidation.changeEmail,
   userController.requestEmailChange
 );
 
@@ -46,7 +45,6 @@ router.post(
 // Password change - UPDATED to match new code
 router.put(
   "/password/change",
-  userValidation.changePassword,
   userController.changePassword
 );
 
@@ -71,8 +69,14 @@ router.delete("/slots/:slot_id/lock", arenaController.releaseTimeSlot);
 
 // Reviews
 router.get("/arenas/:arena_id/reviews", arenaController.getArenaReviews);
-router.post("/arenas/:arena_id/reviews", arenaController.addReview);
-
+router.post(
+  "/arenas/:arena_id/reviews",
+  reviewValidation.addReview, // ADD VALIDATION HERE
+  arenaController.addReview
+);// Review reminder routes
+router.get("/reviews/pending", arenaController.getPendingReviews);
+router.post("/reviews/dismiss-reminder", arenaController.dismissReviewReminder);
+router.post("/reviews/skip-all-reminders", arenaController.skipAllReviewReminders);
 // Court details
 router.get("/arenas/:arena_id/courts", arenaController.getCourtDetails);
 

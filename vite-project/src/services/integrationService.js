@@ -981,40 +981,119 @@ export const integrationService = {
   // In integrationService.js - UPDATED submitReview function
   submitReview: async (arenaId, rating, comment) => {
     try {
+      const token = localStorage.getItem("token");
+      console.log("Submitting review for arena:", arenaId, "Token exists:", !!token);
+
       const response = await fetch(
         `http://localhost:5000/api/arenas/${arenaId}/reviews`,
         {
           method: "POST",
-          headers: getAuthHeaders(),
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
           body: JSON.stringify({ rating, comment }),
         }
       );
 
+      console.log("Review response status:", response.status);
+
       const responseData = await response.json();
+      console.log("Review response data:", responseData);
 
       if (!response.ok) {
-        // Check if it's a validation error
-        if (response.status === 400) {
-          throw new Error(responseData.message || "Validation failed");
-        }
         throw new Error(responseData.message || `Failed to submit review (${response.status})`);
       }
 
       return responseData;
     } catch (error) {
       console.error("Error submitting review:", error);
+      throw error;
+    }
+  },
 
-      // Provide more specific error messages
-      if (error.message.includes("already reviewed")) {
-        throw new Error("You have already reviewed this arena");
-      }
-      if (error.message.includes("Validation failed")) {
-        throw new Error("Please provide both a rating and comment");
-      }
-      if (error.message.includes("completed booking")) {
-        throw new Error("You need to complete a booking before reviewing");
+  // Check for pending reviews
+  getPendingReviews: async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        "http://localhost:5000/api/users/reviews/pending",
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        // Check if it's a server error and return empty array
+        if (response.status >= 500) {
+          console.warn("Server error fetching pending reviews, returning empty array");
+          return { pending_reviews: [], count: 0 };
+        }
+        throw new Error(responseData.message || "Failed to fetch pending reviews");
       }
 
+      return responseData;
+    } catch (error) {
+      console.error("Error fetching pending reviews:", error);
+      // Return empty array instead of throwing error
+      return { pending_reviews: [], count: 0 };
+    }
+  },
+  // Dismiss review reminder
+  dismissReviewReminder: async (bookingId) => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        "http://localhost:5000/api/users/reviews/dismiss-reminder",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ booking_id: bookingId }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to dismiss review reminder");
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error("Error dismissing review reminder:", error);
+      throw error;
+    }
+  },
+
+  // Skip all reminders
+  skipAllReviewReminders: async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        "http://localhost:5000/api/users/reviews/skip-all-reminders",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to skip all reminders");
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error("Error skipping all reminders:", error);
       throw error;
     }
   },

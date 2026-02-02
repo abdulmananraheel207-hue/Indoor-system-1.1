@@ -90,6 +90,23 @@ const UserArenaDetails = () => {
     checkFavoriteStatus();
   }, [arenaId]);
 
+  // Check if should show review form from URL parameter
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const showForm = urlParams.get('showReviewForm');
+
+    if (showForm === 'true') {
+      setShowReviewForm(true);
+      // Scroll to review form section
+      setTimeout(() => {
+        const reviewSection = document.querySelector('.reviews-section');
+        if (reviewSection) {
+          reviewSection.scrollIntoView({ behavior: 'smooth' });
+        }
+      }, 100);
+    }
+  }, []);
+
   const fetchArenaDetails = async () => {
     try {
       setLoading(true);
@@ -136,7 +153,7 @@ const UserArenaDetails = () => {
     try {
       setLoadingReviews(true);
       const response = await integrationService.getArenaReviews(arenaId);
-      
+
       // Handle different response formats
       if (response.reviews) {
         setReviews(response.reviews);
@@ -416,22 +433,32 @@ const UserArenaDetails = () => {
         newReview.rating,
         newReview.comment
       );
-      
+
       alert("Review submitted successfully!");
       setNewReview({ rating: 5, comment: "" });
       setShowReviewForm(false);
-      
+
       // Refresh reviews
       await fetchArenaReviews();
-      
+
+      // Clear the URL parameter
+      const url = new URL(window.location);
+      url.searchParams.delete('showReviewForm');
+      window.history.replaceState({}, '', url);
+
     } catch (error) {
       console.error("Error submitting review:", error);
-      alert(error.response?.data?.message || "Failed to submit review. You may need to complete a booking first.");
+
+      // ✅ Show specific message for "no booking" error
+      if (error.message.includes("complete a booking")) {
+        alert("You need to complete a booking at this arena before you can review it. Please book and play first!");
+      } else {
+        alert(error.message || "Failed to submit review.");
+      }
     } finally {
       setSubmittingReview(false);
     }
   };
-
   // Get current court images
   const getCurrentCourtImages = () => {
     if (!selectedCourt || !selectedCourt.images) return [];
@@ -485,7 +512,7 @@ const UserArenaDetails = () => {
   const hasCourtImages = courtImages.length > 0;
 
   // Calculate average rating
-  const averageRating = reviews.length > 0 
+  const averageRating = reviews.length > 0
     ? (reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length).toFixed(1)
     : "No ratings yet";
 
@@ -769,7 +796,7 @@ const UserArenaDetails = () => {
                   <button
                     type="button"
                     onClick={() => setShowReviewForm(!showReviewForm)}
-                    className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+                    className="px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 shadow-sm hover:shadow"
                   >
                     {showReviewForm ? "Cancel Review" : "Write a Review"}
                   </button>
@@ -871,8 +898,8 @@ const UserArenaDetails = () => {
                                   <svg
                                     key={i}
                                     className={`h-4 w-4 ${i < review.rating
-                                        ? "text-yellow-400"
-                                        : "text-gray-300"
+                                      ? "text-yellow-400"
+                                      : "text-gray-300"
                                       }`}
                                     fill="currentColor"
                                     viewBox="0 0 20 20"
@@ -950,8 +977,8 @@ const UserArenaDetails = () => {
                         type="button"
                         onClick={() => handleCourtChange(court)}
                         className={`w-full text-left p-4 rounded-lg border transition-all ${selectedCourt?.court_id === court.court_id
-                            ? "border-primary-500 bg-primary-50 ring-1 ring-primary-500"
-                            : "border-gray-300 hover:bg-gray-50"
+                          ? "border-primary-500 bg-primary-50 ring-1 ring-primary-500"
+                          : "border-gray-300 hover:bg-gray-50"
                           }`}
                       >
                         <div className="flex justify-between items-center">

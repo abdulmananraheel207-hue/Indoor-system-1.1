@@ -1011,7 +1011,7 @@ const UserProfile = () => {
                   type="text"
                   maxLength="6"
                   value={otpForm.otp_code}
-                  onChange={(e) => setOtpForm({ ...otpForm, otp_code: e.target.value })}
+                  onChange={(e) => setOtpForm({ ...otpForm, otp_code: String(e.target.value).trim() })}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-center text-2xl tracking-widest"
                   placeholder="000000"
                 />

@@ -186,8 +186,9 @@ const userController = {
       }
 
       // Generate 6-digit OTP
-      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const otpCode = String(Math.floor(100000 + Math.random() * 900000)).padStart(6, '0');
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+      console.log("📧 Generated OTP:", otpCode);
 
       // Create or update email change request
       await pool.execute(
@@ -210,7 +211,7 @@ const userController = {
 
       // Send OTP email
       try {
-        await emailService.sendOTP(new_email, otpCode, "email change verification");
+        await emailService.sendOTP(old_email, otpCode, "email change verification");
       } catch (emailError) {
         console.error("Failed to send OTP email:", emailError);
         return res.status(500).json({
@@ -258,52 +259,34 @@ const userController = {
       }
 
       // Verify OTP
-      if (request.otp_code !== otp_code) {
+      const dbOTP = String(request.otp_code).trim();
+      const inputOTP = String(otp_code).trim();
+      console.log("🔍 OTP Comparison:", { dbOTP, inputOTP });
+
+      if (dbOTP !== inputOTP) {
         return res.status(400).json({ message: "Invalid OTP code" });
       }
 
-      // Begin transaction
-      await pool.execute("START TRANSACTION");
+      console.log("✅ OTP verified. Updating email...");
 
-      try {
-        // Update user email
-        await pool.execute(
-          "UPDATE users SET email = ? WHERE user_id = ?",
-          [request.new_email, user_id]
-        );
+      // 1. Update user email
+      await pool.execute(
+        "UPDATE users SET email = ? WHERE user_id = ?",
+        [request.new_email, user_id]
+      );
 
-        // Mark request as verified
-        await pool.execute(
-          "UPDATE email_change_requests SET is_verified = TRUE WHERE request_id = ?",
-          [request_id]
-        );
+      // 2. Mark request as verified
+      await pool.execute(
+        "UPDATE email_change_requests SET is_verified = 1 WHERE request_id = ?",
+        [request_id]
+      );
 
-        // Delete other pending requests for this user
-        await pool.execute(
-          "DELETE FROM email_change_requests WHERE user_id = ? AND is_verified = FALSE AND request_id != ?",
-          [user_id, request_id]
-        );
+      console.log("🎉 Email changed successfully for user:", user_id);
 
-        await pool.execute("COMMIT");
-
-        // Send confirmation email to old email
-        emailService.sendOTP(
-          request.old_email,
-          "EMAIL_CHANGED",
-          "Email Address Changed - Security Notification"
-        ).catch(console.error);
-
-        console.log("✅ Email changed successfully for user:", user_id);
-
-        res.json({
-          message: "Email changed successfully",
-          new_email: request.new_email
-        });
-
-      } catch (transactionError) {
-        await pool.execute("ROLLBACK");
-        throw transactionError;
-      }
+      res.json({
+        message: "Email changed successfully",
+        new_email: request.new_email
+      });
 
     } catch (error) {
       console.error("❌ Error verifying email change:", error);
@@ -380,7 +363,7 @@ const userController = {
       const request = requests[0];
 
       // Generate new OTP
-      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const otpCode = String(Math.floor(100000 + Math.random() * 900000)).padStart(6, '0');
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
       // Update OTP
@@ -391,7 +374,7 @@ const userController = {
 
       // Send new OTP
       try {
-        await emailService.sendOTP(request.new_email, otpCode, "email change verification");
+        await emailService.sendOTP(request.old_email, otpCode, "email change verification");
       } catch (emailError) {
         console.error("Failed to resend OTP:", emailError);
         return res.status(500).json({

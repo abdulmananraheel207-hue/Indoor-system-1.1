@@ -47,17 +47,6 @@ const userValidation = {
     body("new_email")
       .isEmail()
       .withMessage("Valid email is required")
-      .custom(async (value, { req }) => {
-        // Check if email is already taken by another user
-        const [users] = await pool.execute(
-          "SELECT user_id FROM users WHERE email = ? AND user_id != ?",
-          [value, req.user.id]
-        );
-        if (users.length > 0) {
-          throw new Error("Email is already registered");
-        }
-        return true;
-      }),
   ]),
 
   verifyEmailOTP: validate([
@@ -77,26 +66,7 @@ const userValidation = {
       .withMessage("Current password is required"),
     body("new_password")
       .isLength({ min: 8 })
-      .withMessage("New password must be at least 8 characters")
-      .matches(/[A-Z]/)
-      .withMessage("Password must contain at least one uppercase letter")
-      .matches(/[a-z]/)
-      .withMessage("Password must contain at least one lowercase letter")
-      .matches(/\d/)
-      .withMessage("Password must contain at least one number")
-      .custom((value, { req }) => {
-        if (value === req.body.current_password) {
-          throw new Error("New password must be different from current password");
-        }
-        return true;
-      }),
-    body("confirm_password")
-      .custom((value, { req }) => {
-        if (value !== req.body.new_password) {
-          throw new Error("Passwords do not match");
-        }
-        return true;
-      }),
+      .withMessage("New password must be at least 8 characters"),
   ]),
 };
 
@@ -150,6 +120,21 @@ const arenaValidation = {
     body("date").isDate().withMessage("Valid date required"),
     body("slots").isArray().withMessage("Slots must be an array"),
     body("is_blocked").optional().isBoolean(),
+  ]),
+};
+
+// Add this to your validation.js file
+const reviewValidation = {
+  addReview: validate([
+    body("rating")
+      .isInt({ min: 1, max: 5 })
+      .withMessage("Rating must be between 1 and 5"),
+    body("comment")
+      .trim()
+      .notEmpty()
+      .withMessage("Comment is required")
+      .isLength({ min: 10 })
+      .withMessage("Comment must be at least 10 characters long"),
   ]),
 };
 
@@ -232,6 +217,7 @@ module.exports = {
   bookingValidation,
   teamValidation,
   ownerValidation, // MAKE SURE THIS IS
+  reviewValidation,
   checkOwnerRole,
   validate,
 };

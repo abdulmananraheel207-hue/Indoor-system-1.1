@@ -340,6 +340,7 @@ const arenaController = {
     try {
       const { arena_id } = req.params;
       const { rating, comment } = req.body;
+      const userId = req.user.id;
 
       // Validate inputs
       if (!rating || rating < 1 || rating > 5) {
@@ -354,10 +355,28 @@ const arenaController = {
         });
       }
 
-      // Check if user already reviewed this arena
+      // ✅ CORRECT: Check if this SPECIFIC booking exists and qualifies for review
+      const [bookingCheck] = await pool.execute(
+        `SELECT b.booking_id 
+   FROM bookings b
+   WHERE b.booking_id = ?  // Get booking_id from review submission
+     AND b.user_id = ? 
+     AND b.arena_id = ? 
+     AND b.status = 'completed'
+     AND (b.payment_status = 'completed' OR b.payment_status IS NULL)`,
+        [booking_id, userId, arena_id]
+      );
+
+      if (bookingCheck.length === 0) {
+        return res.status(400).json({
+          message: "Invalid booking or booking not completed",
+        });
+      }
+
+      // ✅ SECOND: Check if user already reviewed this arena
       const [existingReview] = await pool.execute(
         "SELECT review_id FROM arena_reviews WHERE user_id = ? AND arena_id = ?",
-        [req.user.id, arena_id]
+        [userId, arena_id]
       );
 
       if (existingReview.length > 0) {
@@ -366,17 +385,20 @@ const arenaController = {
         });
       }
 
-      // Insert review (booking_id can be null)
+      // Get a booking ID for reference (use the first completed booking)
+      const bookingId = completedBookings[0].booking_id;
+
+      // Insert review
       const [result] = await pool.execute(
-        `INSERT INTO arena_reviews (user_id, arena_id, rating, comment)
-       VALUES (?, ?, ?, ?)`,
-        [req.user.id, arena_id, rating, comment.trim()]
+        `INSERT INTO arena_reviews (user_id, arena_id, booking_id, rating, comment)
+             VALUES (?, ?, ?, ?, ?)`,
+        [userId, arena_id, bookingId, rating, comment.trim()]
       );
 
       // Update arena rating
       const [avgRating] = await pool.execute(
         `SELECT AVG(rating) as avg_rating, COUNT(*) as total_reviews
-       FROM arena_reviews WHERE arena_id = ?`,
+             FROM arena_reviews WHERE arena_id = ?`,
         [arena_id]
       );
 
@@ -384,8 +406,8 @@ const arenaController = {
       try {
         await pool.execute(
           `UPDATE arenas 
-         SET rating = ROUND(?, 1), total_reviews = ?
-         WHERE arena_id = ?`,
+                 SET rating = ROUND(?, 1), total_reviews = ?
+                 WHERE arena_id = ?`,
           [
             avgRating[0].avg_rating || 0,
             avgRating[0].total_reviews || 0,
@@ -399,9 +421,9 @@ const arenaController = {
       // Get the newly created review
       const [newReview] = await pool.execute(
         `SELECT ar.*, u.name as user_name, u.profile_picture_url
-       FROM arena_reviews ar
-       JOIN users u ON ar.user_id = u.user_id
-       WHERE ar.review_id = ?`,
+             FROM arena_reviews ar
+             JOIN users u ON ar.user_id = u.user_id
+             WHERE ar.review_id = ?`,
         [result.insertId]
       );
 
@@ -418,7 +440,115 @@ const arenaController = {
       });
     }
   },
+  // Get pending reviews for user (arenas they've booked but not reviewed)
+  // Get pending reviews for user (arenas they've booked but not reviewed)
+  getPendingReviews: async (req, res) => {
+    try {
+      const userId = req.user.id;
 
+      // Find bookings that are completed but not reviewed AND reminder not shown
+      const [pendingReviews] = await pool.execute(`
+            SELECT 
+                b.booking_id,
+                b.arena_id,
+                b.court_id,
+                ts.date,
+                ts.start_time,
+                ts.end_time,
+                a.name as arena_name,
+                a.address as arena_address,
+                cd.court_name,
+                cd.court_number
+            FROM bookings b
+            JOIN time_slots ts ON b.slot_id = ts.slot_id
+            JOIN arenas a ON b.arena_id = a.arena_id
+            JOIN court_details cd ON b.court_id = cd.court_id
+            WHERE b.user_id = ?
+                AND b.status = 'completed'
+                AND (b.review_reminder_shown = FALSE OR b.review_reminder_shown IS NULL)
+                AND NOT EXISTS (
+                    SELECT 1 
+                    FROM arena_reviews ar 
+                    WHERE ar.arena_id = b.arena_id 
+                    AND ar.user_id = b.user_id
+                )
+            ORDER BY b.booking_date DESC
+            LIMIT 5
+        `, [userId]);
+
+      res.json({
+        pending_reviews: pendingReviews,
+        count: pendingReviews.length
+      });
+    } catch (error) {
+      console.error("Error in getPendingReviews:", error);
+      res.status(500).json({
+        message: "Server error",
+        error: error.message
+      });
+    }
+  },
+
+  // Mark review reminder as dismissed
+  dismissReviewReminder: async (req, res) => {
+    try {
+      const { booking_id } = req.body;
+      const userId = req.user.id;
+
+      console.log("Dismissing reminder for booking:", booking_id, "user:", userId);
+
+      // Update booking to mark reminder as shown
+      const [result] = await pool.execute(
+        "UPDATE bookings SET review_reminder_shown = TRUE WHERE booking_id = ? AND user_id = ?",
+        [booking_id, userId]
+      );
+
+      if (result.affectedRows === 0) {
+        return res.status(400).json({
+          message: "Booking not found or not owned by user"
+        });
+      }
+
+      res.json({
+        message: "Review reminder dismissed",
+        booking_id: booking_id
+      });
+    } catch (error) {
+      console.error("Error dismissing review reminder:", error);
+      res.status(500).json({
+        message: "Server error",
+        error: error.message
+      });
+    }
+  },
+
+  // Skip all review reminders for now
+  skipAllReviewReminders: async (req, res) => {
+    try {
+      const userId = req.user.id;
+
+      console.log("Skipping all reminders for user:", userId);
+
+      // Mark all completed bookings as reminder shown
+      const [result] = await pool.execute(
+        "UPDATE bookings SET review_reminder_shown = TRUE WHERE user_id = ? AND status = 'completed'",
+        [userId]
+      );
+
+      console.log("Updated", result.affectedRows, "bookings");
+
+      res.json({
+        message: "All review reminders skipped",
+        skipped_count: result.affectedRows
+      });
+    } catch (error) {
+      console.error("Error skipping all reminders:", error);
+      res.status(500).json({
+        message: "Server error",
+        error: error.message
+      });
+    }
+  },
   // Get court details for an arena
   getCourtDetails: async (req, res) => {
     try {
