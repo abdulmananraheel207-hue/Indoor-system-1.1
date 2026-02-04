@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -17,28 +17,13 @@ import UserBooking from "./components/user/UserBooking";
 import UserProfile from "./components/user/UserProfile";
 import OwnerDashboard from "./components/owner/OwnerDashboard";
 import OwnerRegistration from "./components/owner/OwnerRegistration";
-import AdminDashboard from "./components/admin/AdminDashboard";
-import ArenasManagement from "./components/admin/ArenasManagement";
-import UsersManagement from "./components/admin/UsersManagement";
-import OwnersManagement from "./components/admin/OwnersManagement";
-import FinancialReports from "./components/admin/FinancialReports";
-import CommissionPayments from "./components/admin/CommisionPayments";
-import AdminLayout from "./components/admin/AdminLayout";
 import ManagerDashboard from "./components/manager/ManagerDashboard";
 import UserArenaDetails from "./components/user/UserArenaDetails";
 import UserBookingChat from "./components/user/UserBookingChat";
-import { authAPI } from "./services/api";
+import integrationService from "./services/integrationService";
 import ReviewReminderModal from "./components/user/ReviewReminderModal";
-// Test admin credentials
-const TEST_ADMIN = {
-  username: "admin",
-  email: "admin@arenafinder.com",
-  password: "admin123",
-  name: "System Administrator",
-  role: "admin",
-};
+import SuperAdminDashboard from "./components/superadmin/superAdminDashboard"; // ADD THIS LINE
 
-// Custom hook to check authentication status
 const useAuth = () => {
   const [authState, setAuthState] = useState({
     isAuthenticated: false,
@@ -203,24 +188,25 @@ function App() {
 
     const handleLogin = async (credentials) => {
       try {
-        const response = await authAPI.login({
-          email: credentials.username,
-          password: credentials.password,
-        });
-        const token = response.data?.token;
-        const role = response.data?.user?.role;
-        if (token && role === "admin") {
-          localStorage.setItem("adminToken", token);
-          auth.login(token, "admin", response.data.user);
+        console.log('🔐 Super admin login attempt...');
+
+        // OPTION 1: Use integrationService (recommended)
+        const result = await integrationService.adminLogin(credentials);
+
+        if (result.success && result.token) {
+          console.log('✅ Super admin login successful');
+          auth.adminLogin(result.token, result.admin);
           setTimeout(() => {
-            navigate("/admin/dashboard");
+            navigate("/super-admin");
           }, 50);
           return true;
         }
-        return false;
+
+        throw new Error(result.message || 'Login failed');
+
       } catch (error) {
-        console.error("Admin login failed", error);
-        return false;
+        console.error("❌ Admin login failed:", error.message);
+        throw error; // Throw error so AdminAuth can show it
       }
     };
 
@@ -262,36 +248,24 @@ function App() {
     }
 
     if (requiredRole && auth.userRole !== requiredRole) {
+      // Allow "super_admin" to access "admin" routes
+      if (requiredRole === "admin" && auth.userRole === "super_admin") {
+        return children; // Allow super_admin to access admin routes
+      }
+
       // Redirect to appropriate dashboard based on actual role
       if (auth.userRole === "owner") {
         return <Navigate to="/owner/dashboard" />;
       } else if (auth.userRole === "manager") {
         return <Navigate to="/manager/dashboard" />;
-      } else if (auth.userRole === "admin") {
-        return <Navigate to="/admin/dashboard" />;
+      } else if (auth.userRole === "admin" || auth.userRole === "super_admin") {
+        return <Navigate to="/super-admin" />;
       } else {
         return <Navigate to="/user/dashboard" />;
       }
     }
 
     return children;
-  };
-
-  // Admin Layout Wrapper
-  const AdminWrapper = () => {
-    return (
-      <AdminLayout onLogout={auth.adminLogout}>
-        <Routes>
-          <Route index element={<Navigate to="dashboard" />} />
-          <Route path="dashboard" element={<AdminDashboard />} />
-          <Route path="arenas" element={<ArenasManagement />} />
-          <Route path="users" element={<UsersManagement />} />
-          <Route path="owners" element={<OwnersManagement />} />
-          <Route path="financial-reports" element={<FinancialReports />} />
-          <Route path="commission-payments" element={<CommissionPayments />} />
-        </Routes>
-      </AdminLayout>
-    );
   };
 
   // User Dashboard Layout
@@ -622,12 +596,12 @@ function App() {
           }
         />
 
-        {/* Protected Admin Routes */}
+        {/* Protected Super Admin Routes - ADD THIS ROUTE */}
         <Route
-          path="/admin/*"
+          path="/super-admin"
           element={
             <ProtectedRoute requiredRole="admin">
-              <AdminWrapper />
+              <SuperAdminDashboard />
             </ProtectedRoute>
           }
         />

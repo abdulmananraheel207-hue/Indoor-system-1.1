@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const userController = require("../Controllers/userController");
 const auth = require("../middleware/auth");
+const { reviewValidation } = require("../middleware/validation"); // ADD THIS IMPORT
 
 // ========================
 // PUBLIC ROUTES (No auth required)

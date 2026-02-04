@@ -33,7 +33,47 @@ const auth = {
       // Verify user exists in database based on role
       let user = null;
 
-      if (decoded.role === "owner") {
+      // 1. Check for SUPER ADMIN or ADMIN
+      if (decoded.role === "super_admin" || decoded.role === "admin") {
+        console.log("🔍 Checking admin in database...");
+        const [admins] = await pool.execute(
+          `SELECT admin_id as id, email, name, username, role, 
+                  is_super_admin, permissions, is_active 
+           FROM admins WHERE admin_id = ?`,
+          [decoded.id]
+        );
+
+        if (admins.length > 0) {
+          user = {
+            id: admins[0].id,
+            email: admins[0].email,
+            role: admins[0].role || 'admin',
+            name: admins[0].name,
+            username: admins[0].username,
+            is_super_admin: admins[0].is_super_admin || false,
+            permissions: admins[0].permissions || {},
+            is_active: admins[0].is_active
+          };
+
+          // Check if admin is active
+          if (!user.is_active) {
+            console.log("❌ Admin account is inactive");
+            return res.status(403).json({
+              success: false,
+              message: "Account is deactivated. Please contact support."
+            });
+          }
+
+          console.log("✅ Admin verified:", {
+            id: user.id,
+            email: user.email,
+            role: user.role,
+            is_super_admin: user.is_super_admin
+          });
+        }
+      }
+      // 2. Check for OWNER (your existing code)
+      else if (decoded.role === "owner") {
         console.log("🔍 Checking owner in database...");
         const [owners] = await pool.execute(
           "SELECT owner_id as id, email, arena_name, phone_number, is_active FROM arena_owners WHERE owner_id = ?",
@@ -62,6 +102,7 @@ const auth = {
           console.log("✅ Owner verified:", user);
         }
       }
+      // 3. Check for USER (your existing code)
       else if (decoded.role === "user") {
         console.log("🔍 Checking user in database...");
         const [users] = await pool.execute(
@@ -80,23 +121,7 @@ const auth = {
           console.log("✅ User verified:", user);
         }
       }
-      else if (decoded.role === "admin") {
-        console.log("🔍 Checking admin in database...");
-        const [admins] = await pool.execute(
-          "SELECT admin_id as id, email, name FROM admins WHERE admin_id = ?",
-          [decoded.id]
-        );
-
-        if (admins.length > 0) {
-          user = {
-            id: admins[0].id,
-            email: admins[0].email,
-            role: "admin",
-            name: admins[0].name
-          };
-          console.log("✅ Admin verified:", user);
-        }
-      }
+      // 4. Check for MANAGER (your existing code)
       else if (decoded.role === "manager") {
         console.log("🔍 Checking manager in database...");
         const [managers] = await pool.execute(
@@ -170,6 +195,31 @@ const auth = {
     }
   },
 
+  isSuperAdmin: (req, res, next) => {
+    console.log('👑 Checking super admin role:', req.user?.role);
+    if (req.user?.role === 'super_admin' || req.user?.is_super_admin === true) {
+      next();
+    } else {
+      console.log('❌ Access denied. Super admin role required.');
+      res.status(403).json({
+        success: false,
+        message: 'Access denied. Super admin privileges required.'
+      });
+    }
+  },
+
+  isAdminOrSuperAdmin: (req, res, next) => {
+    console.log('🔐 Checking admin/super admin role:', req.user?.role);
+    if (req.user?.role === 'admin' || req.user?.role === 'super_admin' ||
+      req.user?.is_super_admin === true) {
+      next();
+    } else {
+      res.status(403).json({
+        success: false,
+        message: 'Access denied. Admin privileges required.'
+      });
+    }
+  },
   // Check if user is a regular user
   isUser: (req, res, next) => {
     console.log("👤 Checking user role:", req.user?.role);

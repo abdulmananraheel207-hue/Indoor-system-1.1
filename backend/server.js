@@ -1,3 +1,4 @@
+// server.js - CORRECTED VERSION
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -21,6 +22,8 @@ const bookingRoutes = require("./routes/bookings");
 const chatRoutes = require("./routes/chats");
 const managerRoutes = require("./routes/managers");
 const ownerBookingsRoutes = require("./routes/ownerBookings");
+const superAdminRoutes = require('./routes/superAdmin');
+
 const app = express();
 const { applySchemaPatches } = require("./utils/schemaPatches");
 const { startLockExpiryJob } = require("./utils/slotLockService");
@@ -109,23 +112,30 @@ app.get("/api", (req, res) => {
       arenas: "/arenas",
       owners: "/owners",
       admin: "/admin",
+      super_admin: "/super-admin",
       bookings: "/bookings",
       chats: "/chats",
     },
   });
 });
 
-// API Routes
-app.use("/api/auth", authRoutes);
+// ========== ALL ROUTES ==========
+// Auth routes (public)
+app.use("/api/auth", authRoutes); // User/Owner/Manager auth
+
+
+// Super Admin routes (protected)
+app.use("/api/super-admin", superAdminRoutes); // All super admin features
+
+
+
+// Other API routes
 app.use("/api/users", userRoutes);
 app.use("/api/arenas", arenaRoutes);
 app.use("/api/owners", ownerRoutes);
-app.use("/api/admin", adminRoutes);
 app.use("/api/bookings", bookingRoutes);
 app.use("/api/chats", chatRoutes);
 app.use("/api/managers", managerRoutes);
-
-
 
 // 404 handler
 app.use("/api/*", (req, res) => {
@@ -159,8 +169,13 @@ const server = app.listen(PORT, () => {
     🔗 Base URL: http://localhost:${PORT}
     📊 API Health: http://localhost:${PORT}/api/health
     🗄️  Database: ${config.DB_DATABASE} @ ${config.DB_HOST}
-    🎯 CORS Origin: ${config.CORS_ORIGIN}
-    🧹 Cleanup Jobs: ${process.env.NODE_ENV !== 'development' ? '✅ Active' : '⚠️ Disabled'}
+    
+    🔐 AUTH ENDPOINTS:
+      • User/Owner/Manager Login: POST /api/auth/login
+      • Super Admin Login: POST /api/auth/admin/login
+      • Super Admin Dashboard: GET /api/super-admin/dashboard
+    
+    
     
     ⏰ Started at: ${new Date().toLocaleString()}
   `);

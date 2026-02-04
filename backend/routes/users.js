@@ -3,7 +3,7 @@ const router = express.Router();
 const userController = require("../Controllers/userController");
 const arenaController = require("../Controllers/arenaController");
 const auth = require("../middleware/auth");
-const { userValidation } = require("../middleware/validation");
+const { userValidation, reviewValidation } = require("../middleware/validation");
 const { uploadProfilePicture } = require("../middleware/upload"); // ADD THIS IMPORT
 
 // All routes require user authentication
@@ -38,7 +38,7 @@ router.post(
 
 router.post(
   "/email/resend-otp",
-  userValidation.verifyEmailOTP, // Just for request_id validation
+  userValidation.verifyEmailOTP,
   userController.resendEmailOTP
 );
 
@@ -71,7 +71,7 @@ router.delete("/slots/:slot_id/lock", arenaController.releaseTimeSlot);
 router.get("/arenas/:arena_id/reviews", arenaController.getArenaReviews);
 router.post(
   "/arenas/:arena_id/reviews",
-  reviewValidation.addReview, // ADD VALIDATION HERE
+  reviewValidation.addReview,
   arenaController.addReview
 );// Review reminder routes
 router.get("/reviews/pending", arenaController.getPendingReviews);

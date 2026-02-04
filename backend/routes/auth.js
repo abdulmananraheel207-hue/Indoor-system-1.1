@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const authController = require("../Controllers/authController");
 const auth = require("../middleware/auth");
+const adminAuthController = require("../Controllers/adminAuthController");
 const { userValidation } = require("../middleware/validation");
 const { ownerValidation } = require("../middleware/validation");
 
@@ -23,6 +24,8 @@ router.post(
 );
 router.post("/login", userValidation.login, authController.login);
 router.post("/guest", authController.createGuestSession);
+router.post("/admin/login", adminAuthController.adminLogin);
+
 
 // Protected routes (need authentication)
 router.post("/logout", auth.verifyToken, authController.logout);

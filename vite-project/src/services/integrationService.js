@@ -238,6 +238,185 @@ export const integrationService = {
     }
   },
 
+  adminLogin: async (credentials) => {
+    try {
+      console.log('🔐 Admin login attempt:', credentials.username);
+
+      const response = await fetch('http://localhost:5000/api/auth/admin/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(credentials)
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Admin login failed');
+      }
+
+      if (data.success && data.token) {
+        // Store admin token separately
+        localStorage.setItem('adminToken', data.token);
+        localStorage.setItem('adminUser', JSON.stringify(data.admin));
+        localStorage.setItem('userRole', 'admin');
+
+        console.log('✅ Admin login successful');
+        return data;
+      }
+
+      throw new Error(data.message || 'Admin login failed');
+
+    } catch (error) {
+      console.error('❌ Admin login error:', error);
+      throw error;
+    }
+  },
+
+  getSuperAdminDashboard: async () => {
+    try {
+      const token = localStorage.getItem('adminToken');
+
+      if (!token) {
+        throw new Error('No admin token found');
+      }
+
+      const response = await fetch('http://localhost:5000/api/super-admin/system-overview', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          localStorage.removeItem('adminToken');
+          localStorage.removeItem('adminUser');
+          localStorage.removeItem('userRole');
+          throw new Error('Session expired. Please login again.');
+        }
+        throw new Error('Failed to fetch dashboard data');
+      }
+
+      return await response.json();
+
+    } catch (error) {
+      console.error('❌ Get dashboard error:', error);
+      throw error;
+    }
+  },
+
+  markArenaPayment: async (arenaId, paymentData) => {
+    try {
+      const token = localStorage.getItem('adminToken');
+      console.log('📤 Marking payment for arena:', arenaId, 'with data:', paymentData);
+
+      const response = await fetch(`http://localhost:5000/api/super-admin/arenas/${arenaId}/enforce-payment`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          action: 'mark_paid',
+          ...paymentData
+        })
+      });
+
+      console.log('📡 Response status:', response.status);
+
+      const responseText = await response.text();
+      console.log('📡 Raw response:', responseText);
+
+      if (!response.ok) {
+        let errorMessage = 'Failed to mark payment';
+        try {
+          const errorData = JSON.parse(responseText);
+          errorMessage = errorData.message || errorData.error || errorMessage;
+        } catch (e) {
+          errorMessage = responseText || `HTTP error ${response.status}`;
+        }
+        throw new Error(errorMessage);
+      }
+
+      const result = JSON.parse(responseText);
+      console.log('✅ Payment marked successfully:', result);
+      return result;
+
+    } catch (error) {
+      console.error('❌ Payment error details:', error);
+      throw error;
+    }
+  },
+  toggleArenaBlock: async (arenaId, blockData) => {
+    try {
+      const token = localStorage.getItem('adminToken');
+      console.log('📤 Blocking arena:', arenaId, 'with data:', blockData);
+      console.log('🔑 Admin token exists:', !!token);
+
+      if (!token) {
+        throw new Error('No admin token found. Please login again.');
+      }
+
+      const response = await fetch(`http://localhost:5000/api/super-admin/arenas/${arenaId}/enforce-payment`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(blockData)
+      });
+
+      console.log('📡 Response status:', response.status);
+      console.log('📡 Response headers:', response.headers);
+
+      const responseText = await response.text();
+      console.log('📡 Raw response:', responseText);
+
+      if (!response.ok) {
+        let errorMessage = 'Failed to block arena';
+        let errorDetails = '';
+
+        try {
+          const errorData = JSON.parse(responseText);
+          errorMessage = errorData.message || errorData.error || errorMessage;
+          errorDetails = JSON.stringify(errorData, null, 2);
+        } catch (e) {
+          errorMessage = responseText || `HTTP error ${response.status}`;
+        }
+
+        console.error('❌ Server error response:', {
+          status: response.status,
+          message: errorMessage,
+          details: errorDetails,
+          fullResponse: responseText
+        });
+
+        throw new Error(errorMessage);
+      }
+
+      const result = JSON.parse(responseText);
+      console.log('✅ Arena action successful:', result);
+      return result;
+
+    } catch (error) {
+      console.error('❌ Arena action error details:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      });
+      throw error;
+    }
+  },
+
+  adminLogout: () => {
+    localStorage.removeItem('adminToken');
+    localStorage.removeItem('adminUser');
+    localStorage.removeItem('userRole');
+    window.location.href = '/';
+  },
+
   // ===== USER PROFILE METHODS =====
   // In integrationService.js
   // ===== USER PROFILE METHODS =====
