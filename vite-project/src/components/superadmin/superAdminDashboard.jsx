@@ -22,7 +22,7 @@ import {
     MapPinIcon,
     NoSymbolIcon,
     UserIcon,
-    BuildingOfficeIcon
+    ArrowRightOnRectangleIcon
 } from '@heroicons/react/24/outline';
 import integrationService from '../../services/integrationService';
 
@@ -691,82 +691,26 @@ const SuperAdminDashboard = () => {
                                 <ArrowPathIcon className="h-4 w-4 mr-2" />
                                 Refresh
                             </button>
-                            <button
-                                onClick={async () => {
-                                    try {
-                                        console.log('🧪 [FRONTEND TEST] Starting block test...');
 
-                                        const token = localStorage.getItem('adminToken');
-                                        console.log('🔑 Token:', token ? 'Exists (' + token.substring(0, 20) + '...)' : 'MISSING!');
-
-                                        if (!token) {
-                                            alert('❌ No admin token found! Please login again.');
-                                            return;
-                                        }
-
-                                        // Test with arena ID 1
-                                        const testData = {
-                                            action: 'block_for_non_payment',
-                                            reason: 'Test block from admin dashboard'
-                                        };
-
-                                        console.log('📤 Sending request:', {
-                                            url: 'http://localhost:5000/api/super-admin/arenas/1/enforce-payment',
-                                            method: 'POST',
-                                            data: testData
-                                        });
-
-                                        const response = await fetch('http://localhost:5000/api/super-admin/arenas/1/enforce-payment', {
-                                            method: 'POST',
-                                            headers: {
-                                                'Authorization': `Bearer ${token}`,
-                                                'Content-Type': 'application/json'
-                                            },
-                                            body: JSON.stringify(testData)
-                                        });
-
-                                        console.log('📡 Response received:', {
-                                            status: response.status,
-                                            statusText: response.statusText,
-                                            headers: Object.fromEntries(response.headers.entries())
-                                        });
-
-                                        const text = await response.text();
-                                        console.log('📄 Raw response text:', text);
-
-                                        try {
-                                            const data = JSON.parse(text);
-                                            console.log('✅ Parsed response:', data);
-
-                                            if (data.success) {
-                                                alert(`✅ Success: ${data.message}`);
-                                            } else {
-                                                alert(`❌ Failed: ${data.message}\n\nError: ${data.error || 'No error details'}`);
-                                            }
-                                        } catch (parseError) {
-                                            console.error('❌ Failed to parse JSON:', parseError);
-                                            alert('❌ Server returned invalid JSON:\n\n' + text.substring(0, 200));
-                                        }
-
-                                    } catch (error) {
-                                        console.error('❌ [FRONTEND TEST] Fetch error:', {
-                                            name: error.name,
-                                            message: error.message,
-                                            stack: error.stack
-                                        });
-                                        alert('❌ Network error: ' + error.message);
-                                    }
-                                }}
-                                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
-                            >
-                                🧪 Test Block API
-                            </button>
                             <button
                                 onClick={exportReport}
                                 className="px-4 py-2 bg-green-600 rounded-lg hover:bg-green-700 transition-colors flex items-center"
                             >
                                 <DocumentArrowDownIcon className="h-4 w-4 mr-2" />
                                 Export Report
+                            </button>
+
+                            <button
+                                onClick={() => {
+                                    if (window.confirm('Are you sure you want to logout from Super Admin?')) {
+                                        integrationService.adminLogout();
+                                    }
+                                }}
+                                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center"
+                            >
+                                {/* Add this import at the top: import { ArrowRightOnRectangleIcon } from '@heroicons/react/24/outline'; */}
+                                <ArrowRightOnRectangleIcon className="h-4 w-4 mr-2" />
+                                Logout
                             </button>
                         </div>
                     </div>

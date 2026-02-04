@@ -242,17 +242,12 @@ export const integrationService = {
     try {
       console.log('🔐 Admin login attempt:', credentials.username);
 
-      // Use the general login endpoint instead
-      const response = await fetch('http://localhost:5000/api/auth/login', {
+      const response = await fetch('http://localhost:5000/api/auth/admin/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          email: credentials.username, // Assuming username is email
-          password: credentials.password,
-          userType: 'admin'
-        })
+        body: JSON.stringify(credentials)
       });
 
       const data = await response.json();
@@ -261,14 +256,13 @@ export const integrationService = {
         throw new Error(data.message || 'Admin login failed');
       }
 
-      if (data.token) {
-        // Store based on role
-        const role = data.user.role;
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('userRole', role);
-        localStorage.setItem('userData', JSON.stringify(data.user));
+      if (data.success && data.token) {
+        // Store admin token separately
+        localStorage.setItem('adminToken', data.token);
+        localStorage.setItem('adminUser', JSON.stringify(data.admin));
+        localStorage.setItem('userRole', 'admin');
 
-        console.log('✅ Admin login successful, role:', role);
+        console.log('✅ Admin login successful');
         return data;
       }
 
@@ -313,10 +307,21 @@ export const integrationService = {
     }
   },
 
+  // In integrationService.js - FIXED markArenaPayment function
   markArenaPayment: async (arenaId, paymentData) => {
     try {
       const token = localStorage.getItem('adminToken');
       console.log('📤 Marking payment for arena:', arenaId, 'with data:', paymentData);
+
+      // Make sure we're sending the correct action
+      const requestData = {
+        action: 'mark_paid',
+        amount_paid: paymentData.amount_paid,
+        notes: paymentData.notes || `Monthly commission payment`,
+        notify_owner: true
+      };
+
+      console.log('📤 Request data:', requestData);
 
       const response = await fetch(`http://localhost:5000/api/super-admin/arenas/${arenaId}/enforce-payment`, {
         method: 'POST',
@@ -324,10 +329,7 @@ export const integrationService = {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          action: 'mark_paid',
-          ...paymentData
-        })
+        body: JSON.stringify(requestData)
       });
 
       console.log('📡 Response status:', response.status);
@@ -340,6 +342,7 @@ export const integrationService = {
         try {
           const errorData = JSON.parse(responseText);
           errorMessage = errorData.message || errorData.error || errorMessage;
+          console.error('❌ Server error details:', errorData);
         } catch (e) {
           errorMessage = responseText || `HTTP error ${response.status}`;
         }
@@ -355,6 +358,7 @@ export const integrationService = {
       throw error;
     }
   },
+
   toggleArenaBlock: async (arenaId, blockData) => {
     try {
       const token = localStorage.getItem('adminToken');

@@ -84,16 +84,28 @@ const OwnersTab = ({
         if (window.confirm(`Mark all pending commission (Rs ${totalCommissionDue}) as paid for this owner?`)) {
             setActionLoading(true);
             try {
+                // Mark payment for each arena
                 for (const arena of ownerArenas) {
                     if (arena.pending_commission > 0) {
                         await integrationService.markArenaPayment(arena.arena_id, {
+                            action: 'mark_paid',
                             amount_paid: arena.pending_commission,
+                            notes: `Monthly commission payment for owner: ${selectedOwner.arena_name}`,
                             payment_date: new Date().toISOString().split('T')[0]
                         });
                     }
                 }
+
                 alert('✅ All commission marked as paid!');
-                onMarkPaid && onMarkPaid();
+
+                // Refresh data
+                if (onMarkPaid) {
+                    onMarkPaid();
+                }
+
+                // Clear selected owner to force refresh
+                setSelectedOwner(null);
+
             } catch (error) {
                 alert('❌ Failed to mark as paid: ' + error.message);
             } finally {
