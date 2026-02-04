@@ -27,6 +27,16 @@ const OwnerAuth = (props) => {
     setError("");
 
     try {
+      // 🔥 CRITICAL: Clear ALL previous authentication data
+      localStorage.clear(); // Or selectively clear:
+      // localStorage.removeItem('token');
+      // localStorage.removeItem('userRole');
+      // localStorage.removeItem('userData');
+      // localStorage.removeItem('ownerData');
+      // localStorage.removeItem('adminToken');
+      // localStorage.removeItem('adminUser');
+      // localStorage.removeItem('admin');
+
       const response = await fetch("http://localhost:5000/api/auth/login", {
         method: "POST",
         headers: {
@@ -42,9 +52,13 @@ const OwnerAuth = (props) => {
       const data = await response.json();
 
       if (response.ok) {
+        // Store owner data
         localStorage.setItem("token", data.token);
         localStorage.setItem("userRole", "owner");
         localStorage.setItem("ownerData", JSON.stringify(data.owner || data.user));
+
+        // Don't store as userData - that's for regular users
+        // localStorage.setItem("userData", JSON.stringify(data.owner || data.user));
 
         if (props.onLogin) {
           props.onLogin(data.token, data.owner || data.user);
@@ -142,8 +156,8 @@ const OwnerAuth = (props) => {
             type="submit"
             disabled={loading}
             className={`w-full py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white ${loading
-                ? "bg-indigo-400 cursor-not-allowed"
-                : "bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700"
+              ? "bg-indigo-400 cursor-not-allowed"
+              : "bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700"
               } transition-all duration-200 shadow-lg`}
           >
             {loading ? "Processing..." : "Sign In to Owner Portal"}

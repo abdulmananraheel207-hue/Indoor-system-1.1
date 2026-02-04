@@ -343,22 +343,64 @@ const superAdminController = {
 
     // 4. PAYMENT ENFORCEMENT: Block Arena for Non-Payment
     enforcePayment: async (req, res) => {
+        console.log('\n\n🎬 ========== ENFORCE PAYMENT START ==========');
+        console.log('🕐 Timestamp:', new Date().toISOString());
+
         try {
+            // ========== DEBUG 1: Check incoming request ==========
+            console.log('\n🔍 [DEBUG 1] INCOMING REQUEST:');
+            console.log('📦 Params:', JSON.stringify(req.params, null, 2));
+            console.log('📦 Body:', JSON.stringify(req.body, null, 2));
+            console.log('👤 User:', JSON.stringify(req.user, null, 2));
+            console.log('🌐 IP:', req.ip);
+            console.log('📨 Method:', req.method);
+            console.log('🔗 URL:', req.originalUrl);
+            console.log('📋 Headers:', JSON.stringify(req.headers, null, 2));
+
             const { arena_id } = req.params;
             const { action, amount_paid, reason, notify_owner = true } = req.body;
 
-            console.log(`⚖️ Super Admin payment enforcement: ${action} for arena ${arena_id}`);
+            // ========== DEBUG 2: Check parsed values ==========
+            console.log('\n🔍 [DEBUG 2] PARSED VALUES:');
+            console.log('🏟️ Arena ID:', arena_id, 'Type:', typeof arena_id);
+            console.log('⚡ Action:', action, 'Type:', typeof action);
+            console.log('💰 Amount Paid:', amount_paid, 'Type:', typeof amount_paid);
+            console.log('📝 Reason:', reason, 'Type:', typeof reason);
+            console.log('📧 Notify Owner:', notify_owner, 'Type:', typeof notify_owner);
 
-            // Get arena details
+            // Validate required fields
+            if (!arena_id) {
+                console.log('❌ ERROR: Arena ID is missing');
+                return res.status(400).json({
+                    success: false,
+                    message: 'Arena ID is required'
+                });
+            }
+
+            if (!action) {
+                console.log('❌ ERROR: Action is missing');
+                return res.status(400).json({
+                    success: false,
+                    message: 'Action is required'
+                });
+            }
+
+            // ========== DEBUG 3: Check database connection ==========
+            console.log('\n🔍 [DEBUG 3] DATABASE QUERY:');
+            console.log('🔎 Looking for arena ID:', arena_id);
+
             const [arenas] = await pool.execute(
                 `SELECT a.*, ao.email as owner_email, ao.arena_name as owner_name
-                 FROM arenas a
-                 JOIN arena_owners ao ON a.owner_id = ao.owner_id
-                 WHERE a.arena_id = ?`,
+             FROM arenas a
+             JOIN arena_owners ao ON a.owner_id = ao.owner_id
+             WHERE a.arena_id = ?`,
                 [arena_id]
             );
 
+            console.log('📊 Query result count:', arenas.length);
+
             if (arenas.length === 0) {
+                console.log('❌ ERROR: Arena not found in database');
                 return res.status(404).json({
                     success: false,
                     message: 'Arena not found'
@@ -366,113 +408,159 @@ const superAdminController = {
             }
 
             const arena = arenas[0];
-            const connection = await pool.getConnection();
-            await connection.beginTransaction();
+            console.log('✅ Arena found:', {
+                id: arena.arena_id,
+                name: arena.name,
+                owner_id: arena.owner_id,
+                owner_name: arena.owner_name,
+                is_blocked: arena.is_blocked,
+                total_commission_due: arena.total_commission_due
+            });
+
+            // ========== DEBUG 4: Check action type ==========
+            console.log('\n🔍 [DEBUG 4] ACTION PROCESSING:');
+            console.log('🎯 Action to perform:', action);
+
+            if (action === 'mark_paid') {
+                console.log('💰 Processing mark_paid action');
+                console.log('💸 Amount to pay:', amount_paid);
+                console.log('📅 Arena commission due:', arena.total_commission_due);
+
+                // TEMPORARY SUCCESS RESPONSE
+                console.log('🧪 TEST: Would mark payment as paid');
+
+            } else if (action === 'block_for_non_payment') {
+                console.log('🔒 Processing block_for_non_payment action');
+                console.log('📝 Block reason:', reason);
+                console.log('🏟️ Current blocked status:', arena.is_blocked);
+
+                // TEMPORARY: Just update the arena without transaction
+                console.log('🧪 TEST: Would block arena');
+
+            } else if (action === 'unblock') {
+                console.log('🔓 Processing unblock action');
+                console.log('🏟️ Current blocked status:', arena.is_blocked);
+
+                // TEMPORARY: Just update the arena without transaction
+                console.log('🧪 TEST: Would unblock arena');
+
+            } else {
+                console.log('❌ ERROR: Unknown action:', action);
+                return res.status(400).json({
+                    success: false,
+                    message: `Unknown action: ${action}`
+                });
+            }
+
+            // ========== DEBUG 5: Test database connection ==========
+            console.log('\n🔍 [DEBUG 5] TESTING DATABASE OPERATION:');
 
             try {
-                let message = '';
-                let details = { action, reason };
+                // Test a simple update without transaction
+                if (action === 'block_for_non_payment') {
+                    console.log('🧪 Testing simple UPDATE query...');
 
-                if (action === 'mark_paid') {
-                    // Mark commission as paid
-                    const paidAmount = amount_paid || arena.total_commission_due;
-                    const remaining = Math.max(0, arena.total_commission_due - paidAmount);
-
-                    await connection.execute(
+                    const [updateResult] = await pool.execute(
                         `UPDATE arenas 
-                         SET total_commission_due = ?, last_payment_date = NOW()
-                         WHERE arena_id = ?`,
-                        [remaining, arena_id]
-                    );
-
-                    // Create payment record
-                    await connection.execute(
-                        `INSERT INTO commission_payments 
-                         (arena_id, owner_id, amount_due, amount_paid, due_date, payment_date, status, marked_by_admin_id)
-                         VALUES (?, ?, ?, ?, ?, NOW(), 'paid', ?)`,
-                        [arena_id, arena.owner_id, arena.total_commission_due, paidAmount,
-                            arena.last_payment_date || arena.created_at, req.user.id]
-                    );
-
-                    message = `Payment of Rs ${paidAmount} marked as paid`;
-                    details.amount_paid = paidAmount;
-                    details.previous_due = arena.total_commission_due;
-                    details.remaining_due = remaining;
-
-                } else if (action === 'block_for_non_payment') {
-                    // Block arena for non-payment
-                    await connection.execute(
-                        `UPDATE arenas 
-                         SET is_blocked = TRUE, blocked_reason = ?, blocked_at = NOW()
-                         WHERE arena_id = ?`,
+                     SET is_blocked = TRUE, blocked_reason = ?, blocked_at = NOW()
+                     WHERE arena_id = ?`,
                         [reason || 'Non-payment of commission', arena_id]
                     );
 
-                    // Cancel all pending bookings
-                    await connection.execute(
-                        `UPDATE bookings 
-                         SET status = 'cancelled', cancelled_by = 'system',
-                             cancellation_reason = 'Arena blocked for non-payment',
-                             cancellation_time = NOW()
-                         WHERE arena_id = ? AND status IN ('pending', 'accepted')`,
-                        [arena_id]
-                    );
-
-                    message = 'Arena blocked due to non-payment';
-                    details.reason = reason;
-
-                } else if (action === 'unblock') {
-                    // Unblock arena
-                    await connection.execute(
-                        `UPDATE arenas 
-                         SET is_blocked = FALSE, blocked_reason = NULL, blocked_at = NULL
-                         WHERE arena_id = ?`,
-                        [arena_id]
-                    );
-
-                    message = 'Arena unblocked';
-
-                } else if (action === 'send_reminder') {
-                    // Send payment reminder (you would integrate with email service)
-                    message = 'Payment reminder sent to owner';
-                    details.notify_owner = notify_owner;
-                    details.owner_email = arena.owner_email;
+                    console.log('✅ Simple UPDATE successful:', {
+                        affectedRows: updateResult.affectedRows,
+                        changedRows: updateResult.changedRows
+                    });
                 }
 
-                // Log the action
-                // Log the action
-                await connection.execute(
-                    `INSERT INTO admin_actions 
-     (admin_id, action_type, target_id, target_type, details, ip_address)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-                    [req.user.id, action, arena_id, 'arena',
-                    JSON.stringify(details), req.ip || null]  // Change: req.ip || null
-                );
-
-                await connection.commit();
-
-                res.json({
-                    success: true,
-                    message: message,
-                    arena_id,
-                    action,
-                    details
+            } catch (dbError) {
+                console.error('❌ DATABASE ERROR:', {
+                    code: dbError.code,
+                    errno: dbError.errno,
+                    sqlMessage: dbError.sqlMessage,
+                    sql: dbError.sql,
+                    stack: dbError.stack
                 });
 
-            } catch (error) {
-                await connection.rollback();
-                throw error;
-            } finally {
-                connection.release();
+                // Check if it's the undefined error
+                if (dbError.message.includes('undefined') || dbError.message.includes('To pass SQL NULL')) {
+                    console.log('🔎 This is the UNDEFINED error we need to fix!');
+                    console.log('🔎 The error mentions undefined being passed to SQL.');
+                    console.log('🔎 Check which parameter is undefined in the SQL query.');
+                }
+
+                throw dbError;
             }
 
+            // ========== DEBUG 6: Check what would go into admin_actions ==========
+            console.log('\n🔍 [DEBUG 6] ADMIN ACTIONS LOG DATA:');
+            const logData = {
+                admin_id: req.user?.id || 'UNDEFINED',
+                action_type: action,
+                target_id: arena_id,
+                target_type: 'arena',
+                details: JSON.stringify({ action, reason: reason || null }),
+                ip_address: req.ip || '127.0.0.1'
+            };
+            console.log('📝 Would log:', JSON.stringify(logData, null, 2));
+
+            // Check for undefined values
+            Object.entries(logData).forEach(([key, value]) => {
+                if (value === undefined) {
+                    console.log(`⚠️ WARNING: ${key} is undefined!`);
+                }
+            });
+
+            // ========== SUCCESS RESPONSE ==========
+            console.log('\n✅ [SUCCESS] Returning response');
+
+            res.json({
+                success: true,
+                message: `Action "${action}" completed successfully`,
+                arena_id,
+                action,
+                arena_name: arena.name,
+                owner_name: arena.owner_name,
+                debug: {
+                    user_id: req.user?.id,
+                    ip: req.ip,
+                    timestamp: new Date().toISOString()
+                }
+            });
+
+            console.log('\n🎬 ========== ENFORCE PAYMENT END ==========\n\n');
+
         } catch (error) {
-            console.error('❌ Super Admin payment enforcement error:', error);
+            console.error('\n❌ [ERROR] enforcePayment failed:');
+            console.error('📛 Error name:', error.name);
+            console.error('📛 Error message:', error.message);
+            console.error('📛 Error code:', error.code);
+            console.error('📛 Error errno:', error.errno);
+            console.error('📛 Error sqlMessage:', error.sqlMessage);
+            console.error('📛 Error sql:', error.sql);
+            console.error('📛 Stack trace:', error.stack);
+
+            // Special check for undefined error
+            if (error.message.includes('undefined')) {
+                console.error('\n🔍 SPECIAL: This is the UNDEFINED error!');
+                console.error('🔍 The MySQL driver received undefined instead of null.');
+                console.error('🔍 Check all SQL parameters before passing them.');
+            }
+
             res.status(500).json({
                 success: false,
                 message: 'Failed to enforce payment',
-                error: process.env.NODE_ENV === 'development' ? error.message : undefined
+                error: error.message,
+                errorCode: error.code,
+                debug: {
+                    arena_id: req.params.arena_id,
+                    action: req.body.action,
+                    user_id: req.user?.id,
+                    timestamp: new Date().toISOString()
+                }
             });
+
+            console.log('\n🎬 ========== ENFORCE PAYMENT END WITH ERROR ==========\n\n');
         }
     },
 

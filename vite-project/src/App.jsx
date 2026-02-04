@@ -51,9 +51,15 @@ const useAuth = () => {
   }, []);
 
   const checkAuthStatus = () => {
+    console.log("🔍 Checking auth status...");
     const token = localStorage.getItem("token");
     const userRole = localStorage.getItem("userRole");
     const adminToken = localStorage.getItem("adminToken");
+    console.log("📊 Auth debug:", {
+      token: token ? "exists" : "missing",
+      userRole,
+      adminToken: adminToken ? "exists" : "missing"
+    });
 
     if (adminToken) {
       setAuthState({
@@ -182,31 +188,61 @@ function App() {
     return <ManagerAuth onLogin={handleLogin} />;
   };
 
-  // Admin auth wrapper
+
   const AdminAuthWrapper = () => {
     const navigate = useNavigate();
 
     const handleLogin = async (credentials) => {
       try {
-        console.log('🔐 Super admin login attempt...');
+        console.log('🔐 Admin login attempt...');
 
-        // OPTION 1: Use integrationService (recommended)
-        const result = await integrationService.adminLogin(credentials);
+        // Use the general login endpoint, not adminLogin
+        const response = await fetch('http://localhost:5000/api/auth/login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            email: credentials.username, // Use username as email for admin login
+            password: credentials.password,
+            userType: 'admin'
+          })
+        });
 
-        if (result.success && result.token) {
-          console.log('✅ Super admin login successful');
-          auth.adminLogin(result.token, result.admin);
+        const data = await response.json();
+
+        if (response.ok && data.token) {
+          console.log('✅ Admin login successful, role:', data.user.role);
+
+          // Store token and user data based on role
+          localStorage.setItem('token', data.token);
+          localStorage.setItem('userRole', data.user.role);
+          localStorage.setItem('userData', JSON.stringify(data.user));
+
+          // Redirect based on role
           setTimeout(() => {
-            navigate("/super-admin");
+            const role = data.user.role;
+
+            if (role === 'super_admin') {
+              navigate("/super-admin");
+            } else if (role === 'admin') {
+              // Regular admin might have different dashboard
+              navigate("/admin/dashboard");
+            } else if (role === 'moderator') {
+              navigate("/moderator/dashboard");
+            } else {
+              // Default fallback
+              navigate("/super-admin");
+            }
           }, 50);
-          return true;
+
+          return data;
+        } else {
+          throw new Error(data.message || 'Login failed');
         }
-
-        throw new Error(result.message || 'Login failed');
-
       } catch (error) {
         console.error("❌ Admin login failed:", error.message);
-        throw error; // Throw error so AdminAuth can show it
+        throw error;
       }
     };
 

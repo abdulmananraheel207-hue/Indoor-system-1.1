@@ -5,77 +5,77 @@ const crypto = require("crypto");
 
 const authController = {
   // User Registration
-// User Registration
-registerUser: async (req, res) => {
-  try {
-    // Accept both phone and phone_number from frontend
-    const { name, email, password, phone, phone_number, location } = req.body;
-    
-    // Use phone if provided, otherwise phone_number, otherwise null
-    const userPhone = phone || phone_number || null;
-    
-    // Handle location if provided (you might want to parse lat/lng from string)
-    let location_lat = null;
-    let location_lng = null;
-    
-    if (location) {
-      // If location is a string like "lat,lng", parse it
-      if (typeof location === 'string' && location.includes(',')) {
-        const [lat, lng] = location.split(',').map(coord => parseFloat(coord.trim()));
-        location_lat = lat;
-        location_lng = lng;
+  // User Registration
+  registerUser: async (req, res) => {
+    try {
+      // Accept both phone and phone_number from frontend
+      const { name, email, password, phone, phone_number, location } = req.body;
+
+      // Use phone if provided, otherwise phone_number, otherwise null
+      const userPhone = phone || phone_number || null;
+
+      // Handle location if provided (you might want to parse lat/lng from string)
+      let location_lat = null;
+      let location_lng = null;
+
+      if (location) {
+        // If location is a string like "lat,lng", parse it
+        if (typeof location === 'string' && location.includes(',')) {
+          const [lat, lng] = location.split(',').map(coord => parseFloat(coord.trim()));
+          location_lat = lat;
+          location_lng = lng;
+        }
+        // If location is an object with lat/lng
+        else if (typeof location === 'object') {
+          location_lat = location.lat || location.latitude || null;
+          location_lng = location.lng || location.longitude || null;
+        }
       }
-      // If location is an object with lat/lng
-      else if (typeof location === 'object') {
-        location_lat = location.lat || location.latitude || null;
-        location_lng = location.lng || location.longitude || null;
+
+      // Check if user exists
+      const [existingUser] = await pool.execute(
+        "SELECT user_id FROM users WHERE email = ?",
+        [email]
+      );
+
+      if (existingUser.length > 0) {
+        return res.status(400).json({ message: "User already exists" });
       }
-    }
 
-    // Check if user exists
-    const [existingUser] = await pool.execute(
-      "SELECT user_id FROM users WHERE email = ?",
-      [email]
-    );
+      // Hash password
+      const hashedPassword = await bcrypt.hash(password, 10);
 
-    if (existingUser.length > 0) {
-      return res.status(400).json({ message: "User already exists" });
-    }
-
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Insert user - include all fields from your table
-    const [result] = await pool.execute(
-      `INSERT INTO users 
+      // Insert user - include all fields from your table
+      const [result] = await pool.execute(
+        `INSERT INTO users 
        (name, email, password_hash, phone_number, location_lat, location_lng, is_logged_in, last_login) 
        VALUES (?, ?, ?, ?, ?, ?, TRUE, NOW())`,
-      [name, email, hashedPassword, userPhone, location_lat, location_lng]
-    );
+        [name, email, hashedPassword, userPhone, location_lat, location_lng]
+      );
 
-    // Generate token
-    const token = jwt.sign(
-      { id: result.insertId, email, role: "user" },
-      process.env.JWT_SECRET || "your-secret-key",
-      { expiresIn: "7d" }
-    );
+      // Generate token
+      const token = jwt.sign(
+        { id: result.insertId, email, role: "user" },
+        process.env.JWT_SECRET || "your-secret-key",
+        { expiresIn: "7d" }
+      );
 
-    res.status(201).json({
-      message: "User registered successfully",
-      token,
-      user: { 
-        id: result.insertId, 
-        name, 
-        email, 
-        phone_number: userPhone, 
-        role: "user" 
-      },
-    });
-  } catch (error) {
-    console.error("Registration error:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
-  }
-},
+      res.status(201).json({
+        message: "User registered successfully",
+        token,
+        user: {
+          id: result.insertId,
+          name,
+          email,
+          phone_number: userPhone,
+          role: "user"
+        },
+      });
+    } catch (error) {
+      console.error("Registration error:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
   // Arena Owner Registration
   registerOwner: async (req, res) => {
     try {
@@ -280,6 +280,7 @@ registerUser: async (req, res) => {
   },
 
   // Login for all user types
+  // Login for all user types
   login: async (req, res) => {
     try {
       const { email, password, userType } = req.body;
@@ -297,6 +298,7 @@ registerUser: async (req, res) => {
           break;
         case "admin":
           table = "admins";
+          // Default role, will be overwritten with actual role from database
           role = "admin";
           break;
         case "manager":
@@ -342,16 +344,29 @@ registerUser: async (req, res) => {
         );
       }
 
+      // Determine actual role from database for admins
+      let actualRole = role;
+      if (table === "admins") {
+        // Get the actual role from the database
+        actualRole = user.role || "admin"; // Use the role column from admins table
+      }
+
       // Generate token
       const tokenPayload = {
         id: user.user_id || user.owner_id || user.admin_id || user.manager_id,
         email: user.email,
-        role,
+        role: actualRole, // Use the actual role
       };
 
       // Add owner_id for managers
-      if (role === "manager") {
+      if (actualRole === "manager") {
         tokenPayload.owner_id = user.owner_id;
+      }
+
+      // Add admin-specific info
+      if (table === "admins") {
+        tokenPayload.is_super_admin = user.is_super_admin || false;
+        tokenPayload.permissions = user.permissions || null;
       }
 
       const token = jwt.sign(
@@ -362,32 +377,34 @@ registerUser: async (req, res) => {
 
       // Prepare response data
       let userData;
-      if (role === "user") {
+      if (actualRole === "user") {
         userData = {
           id: user.user_id,
           name: user.name,
           email: user.email,
           phone_number: user.phone_number,
           profile_picture_url: user.profile_picture_url,
-          role,
+          role: actualRole,
         };
-      } else if (role === "owner") {
+      } else if (actualRole === "owner") {
         userData = {
           id: user.owner_id,
           arena_name: user.arena_name,
           email: user.email,
           phone_number: user.phone_number,
-          role,
+          role: actualRole,
         };
-      } else if (role === "admin") {
+      } else if (table === "admins") {
         userData = {
           id: user.admin_id,
+          name: user.name,
           username: user.username,
           email: user.email,
-          full_name: user.full_name,
-          role,
+          role: actualRole, // This will be 'super_admin', 'admin', or 'moderator'
+          is_super_admin: user.is_super_admin || false,
+          permissions: user.permissions || null,
         };
-      } else if (role === "manager") {
+      } else if (actualRole === "manager") {
         userData = {
           id: user.manager_id,
           name: user.name,
@@ -395,7 +412,7 @@ registerUser: async (req, res) => {
           phone_number: user.phone_number,
           permissions: user.permissions,
           owner_id: user.owner_id,
-          role,
+          role: actualRole,
         };
       }
 

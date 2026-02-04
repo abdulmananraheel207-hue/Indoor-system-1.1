@@ -168,8 +168,8 @@ const UsersTab = ({ users = [], recentBookings = {} }) => {
                                                                 Rs {booking.total_amount}
                                                             </div>
                                                             <span className={`text-xs px-2 py-1 rounded-full ${booking.status === 'completed' ? 'bg-green-100 text-green-800' :
-                                                                    booking.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                                                                        'bg-red-100 text-red-800'
+                                                                booking.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                                                                    'bg-red-100 text-red-800'
                                                                 }`}>
                                                                 {booking.status}
                                                             </span>
@@ -229,15 +229,25 @@ const OwnersTab = ({
             setActionLoading(true);
             try {
                 const ownerArenasToBlock = arenas.filter(a => a.owner_id === ownerId);
+                console.log('🔍 Blocking owner - Arenas to block:', ownerArenasToBlock);
+
                 for (const arena of ownerArenasToBlock) {
+                    console.log('🔒 Blocking arena:', {
+                        id: arena.arena_id,
+                        name: arena.name,
+                        owner_id: arena.owner_id
+                    });
+
                     await integrationService.toggleArenaBlock(arena.arena_id, {
-                        is_blocked: true,
+                        action: 'block_for_non_payment',
                         reason: 'Owner blocked by admin'
                     });
                 }
+
                 alert('✅ Owner and all arenas blocked!');
                 onBlockOwner && onBlockOwner();
             } catch (error) {
+                console.error('Block error details:', error);
                 alert('❌ Failed to block owner: ' + error.message);
             } finally {
                 setActionLoading(false);
@@ -680,6 +690,76 @@ const SuperAdminDashboard = () => {
                             >
                                 <ArrowPathIcon className="h-4 w-4 mr-2" />
                                 Refresh
+                            </button>
+                            <button
+                                onClick={async () => {
+                                    try {
+                                        console.log('🧪 [FRONTEND TEST] Starting block test...');
+
+                                        const token = localStorage.getItem('adminToken');
+                                        console.log('🔑 Token:', token ? 'Exists (' + token.substring(0, 20) + '...)' : 'MISSING!');
+
+                                        if (!token) {
+                                            alert('❌ No admin token found! Please login again.');
+                                            return;
+                                        }
+
+                                        // Test with arena ID 1
+                                        const testData = {
+                                            action: 'block_for_non_payment',
+                                            reason: 'Test block from admin dashboard'
+                                        };
+
+                                        console.log('📤 Sending request:', {
+                                            url: 'http://localhost:5000/api/super-admin/arenas/1/enforce-payment',
+                                            method: 'POST',
+                                            data: testData
+                                        });
+
+                                        const response = await fetch('http://localhost:5000/api/super-admin/arenas/1/enforce-payment', {
+                                            method: 'POST',
+                                            headers: {
+                                                'Authorization': `Bearer ${token}`,
+                                                'Content-Type': 'application/json'
+                                            },
+                                            body: JSON.stringify(testData)
+                                        });
+
+                                        console.log('📡 Response received:', {
+                                            status: response.status,
+                                            statusText: response.statusText,
+                                            headers: Object.fromEntries(response.headers.entries())
+                                        });
+
+                                        const text = await response.text();
+                                        console.log('📄 Raw response text:', text);
+
+                                        try {
+                                            const data = JSON.parse(text);
+                                            console.log('✅ Parsed response:', data);
+
+                                            if (data.success) {
+                                                alert(`✅ Success: ${data.message}`);
+                                            } else {
+                                                alert(`❌ Failed: ${data.message}\n\nError: ${data.error || 'No error details'}`);
+                                            }
+                                        } catch (parseError) {
+                                            console.error('❌ Failed to parse JSON:', parseError);
+                                            alert('❌ Server returned invalid JSON:\n\n' + text.substring(0, 200));
+                                        }
+
+                                    } catch (error) {
+                                        console.error('❌ [FRONTEND TEST] Fetch error:', {
+                                            name: error.name,
+                                            message: error.message,
+                                            stack: error.stack
+                                        });
+                                        alert('❌ Network error: ' + error.message);
+                                    }
+                                }}
+                                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                            >
+                                🧪 Test Block API
                             </button>
                             <button
                                 onClick={exportReport}

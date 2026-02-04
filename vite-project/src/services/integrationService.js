@@ -242,12 +242,17 @@ export const integrationService = {
     try {
       console.log('🔐 Admin login attempt:', credentials.username);
 
-      const response = await fetch('http://localhost:5000/api/auth/admin/login', {
+      // Use the general login endpoint instead
+      const response = await fetch('http://localhost:5000/api/auth/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(credentials)
+        body: JSON.stringify({
+          email: credentials.username, // Assuming username is email
+          password: credentials.password,
+          userType: 'admin'
+        })
       });
 
       const data = await response.json();
@@ -256,13 +261,14 @@ export const integrationService = {
         throw new Error(data.message || 'Admin login failed');
       }
 
-      if (data.success && data.token) {
-        // Store admin token separately
-        localStorage.setItem('adminToken', data.token);
-        localStorage.setItem('adminUser', JSON.stringify(data.admin));
-        localStorage.setItem('userRole', 'admin');
+      if (data.token) {
+        // Store based on role
+        const role = data.user.role;
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('userRole', role);
+        localStorage.setItem('userData', JSON.stringify(data.user));
 
-        console.log('✅ Admin login successful');
+        console.log('✅ Admin login successful, role:', role);
         return data;
       }
 
@@ -352,12 +358,12 @@ export const integrationService = {
   toggleArenaBlock: async (arenaId, blockData) => {
     try {
       const token = localStorage.getItem('adminToken');
-      console.log('📤 Blocking arena:', arenaId, 'with data:', blockData);
-      console.log('🔑 Admin token exists:', !!token);
 
       if (!token) {
-        throw new Error('No admin token found. Please login again.');
+        throw new Error('No admin token found');
       }
+
+      console.log('📤 [toggleArenaBlock] Blocking arena:', arenaId, 'Data:', blockData);
 
       const response = await fetch(`http://localhost:5000/api/super-admin/arenas/${arenaId}/enforce-payment`, {
         method: 'POST',
@@ -368,44 +374,19 @@ export const integrationService = {
         body: JSON.stringify(blockData)
       });
 
-      console.log('📡 Response status:', response.status);
-      console.log('📡 Response headers:', response.headers);
-
       const responseText = await response.text();
-      console.log('📡 Raw response:', responseText);
+      console.log('📡 [toggleArenaBlock] Response:', response.status, responseText);
 
       if (!response.ok) {
-        let errorMessage = 'Failed to block arena';
-        let errorDetails = '';
-
-        try {
-          const errorData = JSON.parse(responseText);
-          errorMessage = errorData.message || errorData.error || errorMessage;
-          errorDetails = JSON.stringify(errorData, null, 2);
-        } catch (e) {
-          errorMessage = responseText || `HTTP error ${response.status}`;
-        }
-
-        console.error('❌ Server error response:', {
-          status: response.status,
-          message: errorMessage,
-          details: errorDetails,
-          fullResponse: responseText
-        });
-
-        throw new Error(errorMessage);
+        throw new Error(`HTTP ${response.status}: ${responseText}`);
       }
 
       const result = JSON.parse(responseText);
-      console.log('✅ Arena action successful:', result);
+      console.log('✅ [toggleArenaBlock] Success:', result);
       return result;
 
     } catch (error) {
-      console.error('❌ Arena action error details:', {
-        name: error.name,
-        message: error.message,
-        stack: error.stack
-      });
+      console.error('❌ [toggleArenaBlock] Error:', error);
       throw error;
     }
   },
