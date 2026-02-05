@@ -27,7 +27,6 @@ const superAdminRoutes = require('./routes/superAdmin');
 const app = express();
 const { applySchemaPatches } = require("./utils/schemaPatches");
 const { startLockExpiryJob } = require("./utils/slotLockService");
-
 // Middleware
 app.use(helmet());
 app.use(
@@ -136,7 +135,6 @@ app.use("/api/owners", ownerRoutes);
 app.use("/api/bookings", bookingRoutes);
 app.use("/api/chats", chatRoutes);
 app.use("/api/managers", managerRoutes);
-
 // 404 handler
 app.use("/api/*", (req, res) => {
   res.status(404).json({

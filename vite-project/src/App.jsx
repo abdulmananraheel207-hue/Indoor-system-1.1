@@ -23,6 +23,7 @@ import UserBookingChat from "./components/user/UserBookingChat";
 import integrationService from "./services/integrationService";
 import ReviewReminderModal from "./components/user/ReviewReminderModal";
 import SuperAdminDashboard from "./components/superadmin/superAdminDashboard"; // ADD THIS LINE
+import ManagerLogin from "./components/auth/ManagerAuth";
 
 const useAuth = () => {
   const [authState, setAuthState] = useState({
@@ -553,6 +554,8 @@ function App() {
         <Route path="/auth/manager" element={<ManagerAuthWrapper />} />
         <Route path="/auth/guest" element={<GuestAuthWrapper />} />
         <Route path="/owner/register" element={<OwnerRegistration />} />
+        <Route path="/manager/login" element={<ManagerLogin />} />
+        <Route path="/manager/dashboard" element={<ManagerDashboard />} />
 
         {/* Protected User Routes */}
         <Route

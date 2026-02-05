@@ -1,20 +1,12 @@
-// components/auth/ManagerAuth.jsx
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
-const ManagerAuth = ({ onLogin }) => {
-    const [formData, setFormData] = useState({
-        email: "",
-        password: ""
-    });
+const ManagerLogin = () => {
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
-
-    const handleInputChange = (e) => {
-        setFormData({
-            ...formData,
-            [e.target.name]: e.target.value
-        });
-    };
+    const navigate = useNavigate();
 
     const handleLogin = async (e) => {
         e.preventDefault();
@@ -25,27 +17,29 @@ const ManagerAuth = ({ onLogin }) => {
             const response = await fetch("http://localhost:5000/api/managers/login", {
                 method: "POST",
                 headers: {
-                    "Content-Type": "application/json"
+                    "Content-Type": "application/json",
                 },
-                body: JSON.stringify(formData)
+                body: JSON.stringify({ email, password }),
             });
 
             const data = await response.json();
 
-            if (response.ok) {
-                // Save token and manager info
+            if (response.ok && data.success) {
+                // Store token and manager data
                 localStorage.setItem("token", data.token);
-                localStorage.setItem("managerData", JSON.stringify(data.manager));
                 localStorage.setItem("userRole", "manager");
+                localStorage.setItem("managerData", JSON.stringify(data.manager));
 
-                // Call parent's login handler
-                onLogin();
+                console.log("✅ Manager login successful:", data.manager);
+
+                // 🔥 FIX: Navigate to manager dashboard
+                navigate("/manager/dashboard");
             } else {
                 setError(data.message || "Login failed");
             }
         } catch (err) {
             setError("Network error. Please try again.");
-            console.error("Manager login error:", err);
+            console.error("Login error:", err);
         } finally {
             setLoading(false);
         }
@@ -56,22 +50,24 @@ const ManagerAuth = ({ onLogin }) => {
             <div className="max-w-md w-full space-y-8">
                 <div>
                     <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-                        Manager Sign In
+                        Manager Login
                     </h2>
                     <p className="mt-2 text-center text-sm text-gray-600">
-                        Enter your credentials provided by the arena owner
+                        Arena management portal
                     </p>
                 </div>
+
                 <form className="mt-8 space-y-6" onSubmit={handleLogin}>
                     {error && (
-                        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+                        <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-md">
                             {error}
                         </div>
                     )}
-                    <div className="rounded-md shadow-sm -space-y-px">
+
+                    <div className="rounded-md shadow-sm space-y-4">
                         <div>
-                            <label htmlFor="email" className="sr-only">
-                                Email address
+                            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
+                                Email Address
                             </label>
                             <input
                                 id="email"
@@ -79,15 +75,15 @@ const ManagerAuth = ({ onLogin }) => {
                                 type="email"
                                 autoComplete="email"
                                 required
-                                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                                placeholder="Email address"
-                                value={formData.email}
-                                onChange={handleInputChange}
-                                disabled={loading}
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                className="appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                                placeholder="manager@arena.com"
                             />
                         </div>
+
                         <div>
-                            <label htmlFor="password" className="sr-only">
+                            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
                                 Password
                             </label>
                             <input
@@ -96,20 +92,11 @@ const ManagerAuth = ({ onLogin }) => {
                                 type="password"
                                 autoComplete="current-password"
                                 required
-                                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                                placeholder="Password"
-                                value={formData.password}
-                                onChange={handleInputChange}
-                                disabled={loading}
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                className="appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                                placeholder="••••••••"
                             />
-                        </div>
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                        <div className="text-sm">
-                            <span className="text-gray-600">
-                                Don't have credentials? Contact the arena owner
-                            </span>
                         </div>
                     </div>
 
@@ -117,13 +104,15 @@ const ManagerAuth = ({ onLogin }) => {
                         <button
                             type="submit"
                             disabled={loading}
-                            className={`group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white ${loading ? "bg-blue-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                            className={`group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white ${loading
+                                    ? "bg-blue-400 cursor-not-allowed"
+                                    : "bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                                 }`}
                         >
                             {loading ? (
                                 <>
                                     <span className="absolute left-0 inset-y-0 flex items-center pl-3">
-                                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
                                     </span>
                                     Signing in...
                                 </>
@@ -133,14 +122,10 @@ const ManagerAuth = ({ onLogin }) => {
                         </button>
                     </div>
 
-                    <div className="text-center">
-                        <button
-                            type="button"
-                            onClick={() => window.history.back()}
-                            className="text-sm text-blue-600 hover:text-blue-500"
-                        >
-                            ← Back to selection
-                        </button>
+                    <div className="text-sm text-center">
+                        <p className="text-gray-600">
+                            Contact arena owner if you need access
+                        </p>
                     </div>
                 </form>
             </div>
@@ -148,4 +133,4 @@ const ManagerAuth = ({ onLogin }) => {
     );
 };
 
-export default ManagerAuth;
+export default ManagerLogin;

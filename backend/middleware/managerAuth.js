@@ -1,90 +1,53 @@
-// middleware/managerAuth.js
 const jwt = require("jsonwebtoken");
-const pool = require("../db");
 
 const managerAuth = {
+    // Verify token for managers
     verifyToken: async (req, res, next) => {
         try {
-            const authHeader = req.headers.authorization;
-            if (!authHeader || !authHeader.startsWith("Bearer ")) {
+            const token = req.headers.authorization?.split(" ")[1];
+
+            if (!token) {
                 return res.status(401).json({
                     message: "Access denied. No token provided."
                 });
             }
 
-            const token = authHeader.split(" ")[1];
-
-            // Verify JWT token
             const decoded = jwt.verify(
                 token,
                 process.env.JWT_SECRET || "your-secret-key"
             );
 
-            // Check if user is a manager
+            // Check if this is a manager token
             if (decoded.role !== "manager") {
                 return res.status(403).json({
-                    message: "Access denied. Manager role required."
+                    message: "Access denied. Invalid token type."
                 });
             }
 
-            // Get manager from database
-            const [managers] = await pool.execute(
-                `SELECT m.*, o.arena_name as owner_arena_name 
-         FROM arena_managers m
-         JOIN arena_owners o ON m.owner_id = o.owner_id
-         WHERE m.manager_id = ?`,
-                [decoded.id]
-            );
-
-            if (managers.length === 0) {
-                return res.status(404).json({ message: "Manager not found" });
-            }
-
-            const manager = managers[0];
-
-            // Check if manager is active
-            if (!manager.is_active) {
-                return res.status(403).json({
-                    message: "Manager account is inactive"
-                });
-            }
-
-            // Parse permissions
-            const permissions = typeof manager.permissions === 'string'
-                ? JSON.parse(manager.permissions)
-                : (manager.permissions || {});
-
-            // Attach manager info to request as BOTH req.manager AND req.user
+            // Attach manager info to request
             req.manager = {
-                id: manager.manager_id,
-                owner_id: manager.owner_id,
-                name: manager.name,
-                email: manager.email,
-                permissions: permissions,
-                arena_name: manager.owner_arena_name
+                id: decoded.id,
+                owner_id: decoded.owner_id,
+                name: decoded.name,
+                email: decoded.email,
+                role: decoded.role,
+                permissions: decoded.permissions || {},
+                arena_name: decoded.arena_name
             };
 
-            // Also set req.user for compatibility
-            req.user = {
-                id: manager.manager_id,
-                owner_id: manager.owner_id,
-                name: manager.name,
-                email: manager.email,
-                role: "manager"
-            };
-
+            console.log("Manager authenticated:", req.manager.email);
             next();
         } catch (error) {
-            console.error("Auth error:", error);
-            if (error.name === "JsonWebTokenError") {
-                return res.status(401).json({ message: "Invalid token" });
-            }
+            console.error("Token verification error:", error);
+
             if (error.name === "TokenExpiredError") {
-                return res.status(401).json({ message: "Token expired" });
+                return res.status(401).json({
+                    message: "Token expired. Please login again."
+                });
             }
-            res.status(500).json({
-                message: "Authentication error",
-                error: error.message
+
+            return res.status(401).json({
+                message: "Invalid token"
             });
         }
     },
@@ -93,15 +56,17 @@ const managerAuth = {
     hasPermission: (permission) => {
         return (req, res, next) => {
             if (!req.manager) {
-                return res.status(401).json({ message: "Authentication required" });
+                return res.status(401).json({
+                    message: "Authentication required"
+                });
             }
 
-            const permissions = req.manager.permissions || {};
+            // Check if manager has the required permission
+            const hasPermission = req.manager.permissions[permission] === true;
 
-            if (!permissions[permission]) {
+            if (!hasPermission) {
                 return res.status(403).json({
-                    message: "Insufficient permissions",
-                    requiredPermission: permission
+                    message: `Insufficient permissions. Required: ${permission}`
                 });
             }
 
@@ -109,20 +74,23 @@ const managerAuth = {
         };
     },
 
-    // Check any permission (at least one)
-    hasAnyPermission: (requiredPermissions) => {
+    // Check any of the permissions
+    hasAnyPermission: (permissions) => {
         return (req, res, next) => {
             if (!req.manager) {
-                return res.status(401).json({ message: "Authentication required" });
+                return res.status(401).json({
+                    message: "Authentication required"
+                });
             }
 
-            const permissions = req.manager.permissions || {};
-            const hasAny = requiredPermissions.some(perm => permissions[perm]);
+            // Check if manager has any of the required permissions
+            const hasAnyPermission = permissions.some(
+                permission => req.manager.permissions[permission] === true
+            );
 
-            if (!hasAny) {
+            if (!hasAnyPermission) {
                 return res.status(403).json({
-                    message: "Insufficient permissions",
-                    requiredPermissions: requiredPermissions
+                    message: `Insufficient permissions. Required one of: ${permissions.join(", ")}`
                 });
             }
 

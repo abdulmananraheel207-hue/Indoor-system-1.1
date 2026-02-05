@@ -125,8 +125,8 @@ const bookingController = {
               reason: s.existing_booking
                 ? "Already booked"
                 : s.is_blocked_by_owner
-                ? "Blocked by owner"
-                : "Holiday",
+                  ? "Blocked by owner"
+                  : "Holiday",
             })),
           });
         }
@@ -282,8 +282,8 @@ const bookingController = {
             reason: slot.existing_booking
               ? "Already booked"
               : slot.is_blocked_by_owner
-              ? "Blocked by owner"
-              : "Holiday",
+                ? "Blocked by owner"
+                : "Holiday",
           });
         }
 
@@ -737,7 +737,7 @@ const bookingController = {
     try {
       const { booking_id } = req.params;
 
-      // Only owners/managers can mark booking as completed
+      // Only owners/s can mark booking as completed
       const [bookingCheck] = await pool.execute(
         `SELECT b.* FROM bookings b
          JOIN arenas a ON b.arena_id = a.arena_id

@@ -18,7 +18,9 @@ router.post("/login", async (req, res) => {
             return res.status(400).json({ message: "Email and password required" });
         }
 
-        // Find manager
+        console.log("Manager login attempt for email:", email);
+
+        // Find manager with proper status check
         const [managers] = await pool.execute(
             `SELECT m.*, o.arena_name as owner_arena_name 
        FROM arena_managers m
@@ -28,13 +30,15 @@ router.post("/login", async (req, res) => {
         );
 
         if (managers.length === 0) {
+            console.log("Manager not found:", email);
             return res.status(401).json({ message: "Invalid email or password" });
         }
 
         const manager = managers[0];
 
         // Check if manager is active
-        if (!manager.is_active) {
+        if (manager.is_active !== 1 && manager.is_active !== true) {
+            console.log("Manager inactive:", manager.manager_id);
             return res.status(403).json({
                 message: "Account is inactive. Please contact the arena owner."
             });
@@ -43,13 +47,22 @@ router.post("/login", async (req, res) => {
         // Verify password
         const isValidPassword = await bcrypt.compare(password, manager.password_hash);
         if (!isValidPassword) {
+            console.log("Invalid password for manager:", manager.manager_id);
             return res.status(401).json({ message: "Invalid email or password" });
         }
 
-        // Parse permissions
-        const permissions = typeof manager.permissions === 'string'
-            ? JSON.parse(manager.permissions)
-            : (manager.permissions || {});
+        // Parse permissions safely
+        let permissions = {};
+        try {
+            permissions = typeof manager.permissions === 'string'
+                ? JSON.parse(manager.permissions)
+                : (manager.permissions || {});
+        } catch (parseError) {
+            console.error("Error parsing permissions:", parseError);
+            permissions = {};
+        }
+
+        console.log("Manager login successful:", manager.manager_id);
 
         // Create JWT token
         const token = jwt.sign(
@@ -66,13 +79,14 @@ router.post("/login", async (req, res) => {
             { expiresIn: "24h" }
         );
 
-        // Get arenas
+        // Get arenas for this manager
         const [arenas] = await pool.execute(
             "SELECT arena_id, name FROM arenas WHERE owner_id = ? AND is_active = TRUE",
             [manager.owner_id]
         );
 
         res.json({
+            success: true,
             message: "Login successful",
             token,
             manager: {
@@ -82,69 +96,163 @@ router.post("/login", async (req, res) => {
                 phone_number: manager.phone_number,
                 arena_name: manager.owner_arena_name,
                 permissions: permissions,
-                arenas: arenas
+                arenas: arenas,
+                owner_id: manager.owner_id
             }
         });
     } catch (error) {
         console.error("Login error:", error);
-        res.status(500).json({ message: "Server error", error: error.message });
+        res.status(500).json({
+            success: false,
+            message: "Server error",
+            error: error.message
+        });
     }
 });
 
 // All protected routes require manager authentication
 router.use(managerAuth.verifyToken);
 
-// Dashboard (requires view_dashboard permission)
+// Dashboard - requires view_dashboard
 router.get("/dashboard",
-    managerAuth.hasPermission("view_dashboard"),
+    (req, res, next) => {
+        if (req.manager.permissions.view_dashboard) {
+            next();
+        } else {
+            res.status(403).json({
+                message: "Permission denied: view_dashboard required"
+            });
+        }
+    },
     managerController.getDashboard
 );
 
-// Bookings management
+// Bookings management with permission checks
 router.get("/bookings",
-    managerAuth.hasPermission("view_bookings"),
+    (req, res, next) => {
+        if (req.manager.permissions.view_bookings || req.manager.permissions.manage_bookings) {
+            next();
+        } else {
+            res.status(403).json({
+                message: "Permission denied: view_bookings required"
+            });
+        }
+    },
     managerController.getBookings
 );
 
 router.post("/bookings/:booking_id/accept",
-    managerAuth.hasPermission("manage_bookings"),
+    (req, res, next) => {
+        if (req.manager.permissions.manage_bookings) {
+            next();
+        } else {
+            res.status(403).json({
+                message: "Permission denied: manage_bookings required"
+            });
+        }
+    },
     managerController.acceptBooking
 );
 
 router.post("/bookings/:booking_id/reject",
-    managerAuth.hasPermission("manage_bookings"),
+    (req, res, next) => {
+        if (req.manager.permissions.manage_bookings) {
+            next();
+        } else {
+            res.status(403).json({
+                message: "Permission denied: manage_bookings required"
+            });
+        }
+    },
     managerController.rejectBooking
 );
 
-// Arena and calendar management
-router.get("/arenas",
-    managerAuth.hasAnyPermission(["view_calendar", "manage_arena", "view_bookings"]),
-    managerController.getArenas
+// Complete booking - new route
+router.put("/bookings/:booking_id/complete",
+    (req, res, next) => {
+        if (req.manager.permissions.manage_bookings) {
+            next();
+        } else {
+            res.status(403).json({
+                message: "Permission denied: manage_bookings required"
+            });
+        }
+    },
+    managerController.completeBooking
 );
 
-router.get("/arenas/slots",
-    managerAuth.hasPermission("view_calendar"),
-    managerController.getTimeSlots
+// Calendar - requires view_calendar
+router.get("/calendar",
+    (req, res, next) => {
+        if (req.manager.permissions.view_calendar || req.manager.permissions.manage_calendar) {
+            next();
+        } else {
+            res.status(403).json({
+                message: "Permission denied: view_calendar required"
+            });
+        }
+    },
+    managerController.getCalendar
 );
 
-router.put("/arenas/:arena_id/slots",
-    managerAuth.hasPermission("manage_calendar"),
+// Update time slots - requires manage_calendar
+router.put("/calendar/slots",
+    (req, res, next) => {
+        if (req.manager.permissions.manage_calendar) {
+            next();
+        } else {
+            res.status(403).json({
+                message: "Permission denied: manage_calendar required"
+            });
+        }
+    },
     managerController.updateTimeSlots
 );
 
-// Reports and stats
+// Arena and court management
+router.get("/arenas",
+    (req, res, next) => {
+        if (req.manager.permissions.view_arena || req.manager.permissions.manage_arena) {
+            next();
+        } else {
+            res.status(403).json({
+                message: "Permission denied: view_arena required"
+            });
+        }
+    },
+    managerController.getArenas
+);
+
+// Courts - requires manage_arena
+router.get("/courts/:arena_id",
+    (req, res, next) => {
+        if (req.manager.permissions.manage_arena) {
+            next();
+        } else {
+            res.status(403).json({
+                message: "Permission denied: manage_arena required"
+            });
+        }
+    },
+    managerController.getCourts
+);
+
+// Stats and reports
 router.get("/stats",
-    managerAuth.hasAnyPermission(["view_dashboard", "view_financial"]),
-    managerController.getBookingStats
+    (req, res, next) => {
+        if (req.manager.permissions.view_financial || req.manager.permissions.view_dashboard) {
+            next();
+        } else {
+            res.status(403).json({
+                message: "Permission denied: view_financial required"
+            });
+        }
+    },
+    managerController.getStats
 );
 
-// Profile management
-router.get("/profile",
-    managerController.getProfile
-);
-
-router.put("/profile",
-    managerController.updateProfile
-);
+// Profile management (always accessible)
+router.get("/profile", managerController.getProfile);
+router.put("/profile", managerController.updateProfile);
 
 module.exports = router;

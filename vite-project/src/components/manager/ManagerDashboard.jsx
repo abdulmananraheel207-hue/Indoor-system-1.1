@@ -5,6 +5,8 @@ import ManagerHome from "./ManagerHome";
 import ManagerBookings from "./ManagerBookings";
 import ManagerCalendar from "./ManagerCalender";
 import ManagerProfile from "./ManagerProfile";
+import ManagerArenaSettings from "./ManagerArenaSettings";
+import ManagerStats from "./ManagerStats";
 
 const ManagerDashboard = () => {
     const navigate = useNavigate();
@@ -15,7 +17,9 @@ const ManagerDashboard = () => {
     const [hasPermissions, setHasPermissions] = useState({
         canViewDashboard: false,
         canViewBookings: false,
-        canViewCalendar: false
+        canViewCalendar: false,
+        canViewArena: false,
+        canViewStats: false
     });
 
     useEffect(() => {
@@ -29,18 +33,26 @@ const ManagerDashboard = () => {
             setHasPermissions({
                 canViewDashboard: permissions.view_dashboard === true,
                 canViewBookings: permissions.view_bookings === true || permissions.manage_bookings === true,
-                canViewCalendar: permissions.view_calendar === true || permissions.manage_calendar === true
+                canViewCalendar: permissions.view_calendar === true || permissions.manage_calendar === true,
+                canViewArena: permissions.view_arena === true || permissions.manage_arena === true,
+                canViewStats: permissions.view_financial === true
             });
         }
     }, [managerData]);
 
-    // Handle tab switching based on permissions - MOVED OUT OF useEffect
+    // Handle tab switching based on permissions
     const handleTabChange = (tab) => {
+        // Check if user has permission for the requested tab
         if (tab === "home" && !hasPermissions.canViewDashboard) {
+            // Find first available tab
             if (hasPermissions.canViewBookings) {
                 setCurrentTab("bookings");
             } else if (hasPermissions.canViewCalendar) {
                 setCurrentTab("calendar");
+            } else if (hasPermissions.canViewArena) {
+                setCurrentTab("arena");
+            } else if (hasPermissions.canViewStats) {
+                setCurrentTab("stats");
             } else {
                 setCurrentTab("profile");
             }
@@ -49,6 +61,10 @@ const ManagerDashboard = () => {
                 setCurrentTab("home");
             } else if (hasPermissions.canViewCalendar) {
                 setCurrentTab("calendar");
+            } else if (hasPermissions.canViewArena) {
+                setCurrentTab("arena");
+            } else if (hasPermissions.canViewStats) {
+                setCurrentTab("stats");
             } else {
                 setCurrentTab("profile");
             }
@@ -57,6 +73,34 @@ const ManagerDashboard = () => {
                 setCurrentTab("home");
             } else if (hasPermissions.canViewBookings) {
                 setCurrentTab("bookings");
+            } else if (hasPermissions.canViewArena) {
+                setCurrentTab("arena");
+            } else if (hasPermissions.canViewStats) {
+                setCurrentTab("stats");
+            } else {
+                setCurrentTab("profile");
+            }
+        } else if (tab === "arena" && !hasPermissions.canViewArena) {
+            if (hasPermissions.canViewDashboard) {
+                setCurrentTab("home");
+            } else if (hasPermissions.canViewBookings) {
+                setCurrentTab("bookings");
+            } else if (hasPermissions.canViewCalendar) {
+                setCurrentTab("calendar");
+            } else if (hasPermissions.canViewStats) {
+                setCurrentTab("stats");
+            } else {
+                setCurrentTab("profile");
+            }
+        } else if (tab === "stats" && !hasPermissions.canViewStats) {
+            if (hasPermissions.canViewDashboard) {
+                setCurrentTab("home");
+            } else if (hasPermissions.canViewBookings) {
+                setCurrentTab("bookings");
+            } else if (hasPermissions.canViewCalendar) {
+                setCurrentTab("calendar");
+            } else if (hasPermissions.canViewArena) {
+                setCurrentTab("arena");
             } else {
                 setCurrentTab("profile");
             }
@@ -119,9 +163,13 @@ const ManagerDashboard = () => {
         if (currentTab === "home" && hasPermissions.canViewDashboard) {
             return <ManagerHome managerData={managerData} />;
         } else if (currentTab === "bookings" && hasPermissions.canViewBookings) {
-            return <ManagerBookings />;
+            return <ManagerBookings permissions={permissions} />;
         } else if (currentTab === "calendar" && hasPermissions.canViewCalendar) {
             return <ManagerCalendar arenas={managerData.arenas} permissions={managerData.permissions} />;
+        } else if (currentTab === "arena" && hasPermissions.canViewArena) {
+            return <ManagerArenaSettings permissions={permissions} />;
+        } else if (currentTab === "stats" && hasPermissions.canViewStats) {
+            return <ManagerStats permissions={permissions} />;
         } else if (currentTab === "profile") {
             return <ManagerProfile managerData={managerData} />;
         } else {
@@ -233,6 +281,34 @@ const ManagerDashboard = () => {
                                         Calendar
                                     </button>
                                 )}
+                                {hasPermissions.canViewArena && (
+                                    <button
+                                        onClick={() => {
+                                            handleTabChange("arena");
+                                            setMobileMenuOpen(false);
+                                        }}
+                                        className={`px-3 py-2.5 rounded-lg text-left ${currentTab === "arena"
+                                            ? "bg-blue-100 text-blue-700"
+                                            : "text-gray-700 hover:bg-gray-100"
+                                            }`}
+                                    >
+                                        Arena Settings
+                                    </button>
+                                )}
+                                {hasPermissions.canViewStats && (
+                                    <button
+                                        onClick={() => {
+                                            handleTabChange("stats");
+                                            setMobileMenuOpen(false);
+                                        }}
+                                        className={`px-3 py-2.5 rounded-lg text-left ${currentTab === "stats"
+                                            ? "bg-blue-100 text-blue-700"
+                                            : "text-gray-700 hover:bg-gray-100"
+                                            }`}
+                                    >
+                                        Statistics
+                                    </button>
+                                )}
                                 <button
                                     onClick={() => {
                                         handleTabChange("profile");
@@ -289,6 +365,28 @@ const ManagerDashboard = () => {
                                 Calendar
                             </button>
                         )}
+                        {hasPermissions.canViewArena && (
+                            <button
+                                onClick={() => handleTabChange("arena")}
+                                className={`px-3 py-2 rounded-lg text-sm ${currentTab === "arena"
+                                    ? "bg-blue-100 text-blue-700"
+                                    : "text-gray-700 hover:bg-gray-100"
+                                    }`}
+                            >
+                                Arena Settings
+                            </button>
+                        )}
+                        {hasPermissions.canViewStats && (
+                            <button
+                                onClick={() => handleTabChange("stats")}
+                                className={`px-3 py-2 rounded-lg text-sm ${currentTab === "stats"
+                                    ? "bg-blue-100 text-blue-700"
+                                    : "text-gray-700 hover:bg-gray-100"
+                                    }`}
+                            >
+                                Statistics
+                            </button>
+                        )}
                         <button
                             onClick={() => handleTabChange("profile")}
                             className={`px-3 py-2 rounded-lg text-sm ${currentTab === "profile"
@@ -308,6 +406,6 @@ const ManagerDashboard = () => {
             </main>
         </div>
     );
-};
 
+};
 export default ManagerDashboard;
