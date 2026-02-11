@@ -1915,6 +1915,11 @@ const ownerController = {
     try {
       const { name, email, password, phone_number, permissions } = req.body;
 
+      // Remove view_managers if it's somehow included
+      if (permissions && permissions.view_managers) {
+        delete permissions.view_managers;
+      }
+
       // Check if manager already exists
       const [existingManager] = await pool.execute(
         "SELECT manager_id FROM arena_managers WHERE email = ? AND owner_id = ?",
@@ -1931,15 +1936,15 @@ const ownerController = {
       // Insert manager
       const [result] = await pool.execute(
         `INSERT INTO arena_managers 
-         (owner_id, name, email, password_hash, phone_number, permissions)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+       (owner_id, name, email, password_hash, phone_number, permissions)
+       VALUES (?, ?, ?, ?, ?, ?)`,
         [
           req.user.id,
           name,
           email,
           hashedPassword,
           phone_number,
-          JSON.stringify(permissions),
+          JSON.stringify(permissions || {}),
         ]
       );
 
@@ -2142,64 +2147,64 @@ const ownerController = {
           }
 
           await connection.execute(query, params);
-        }  else if (action === "update_slots" && slots && slots.length > 0) {
-  // Update specific slots
-  for (const slot of slots) {
-    // Use court_id from the slot itself, fallback to top-level court_id
-    const slotCourtId = slot.court_id || validCourtId;
-    
-    if (!slotCourtId) {
-      // Skip if no court_id at all
-      console.warn("Skipping slot - no court_id provided:", slot);
-      continue;
-    }
+        } else if (action === "update_slots" && slots && slots.length > 0) {
+          // Update specific slots
+          for (const slot of slots) {
+            // Use court_id from the slot itself, fallback to top-level court_id
+            const slotCourtId = slot.court_id || validCourtId;
 
-    // First check if slot exists
-    const [existingSlot] = await connection.execute(
-      `SELECT slot_id FROM time_slots 
+            if (!slotCourtId) {
+              // Skip if no court_id at all
+              console.warn("Skipping slot - no court_id provided:", slot);
+              continue;
+            }
+
+            // First check if slot exists
+            const [existingSlot] = await connection.execute(
+              `SELECT slot_id FROM time_slots 
        WHERE arena_id = ? AND date = ? AND start_time = ? AND end_time = ? 
        AND court_id = ?`,
-      [arena_id, date, slot.start_time, slot.end_time, slotCourtId]
-    );
+              [arena_id, date, slot.start_time, slot.end_time, slotCourtId]
+            );
 
-    if (existingSlot.length > 0) {
-      // Update existing slot
-      await connection.execute(
-        `UPDATE time_slots 
+            if (existingSlot.length > 0) {
+              // Update existing slot
+              await connection.execute(
+                `UPDATE time_slots 
          SET is_blocked_by_owner = ?,
              is_holiday = ?,
              price = ?
          WHERE slot_id = ?`,
-        [
-          slot.is_blocked || false,
-          slot.is_holiday || false,
-          slot.price || 500,
-          existingSlot[0].slot_id,
-        ]
-      );
-    } else {
-      // Create new slot only if not blocked
-      const slotAvailable = !(slot.is_blocked || false);
-      await connection.execute(
-        `INSERT INTO time_slots 
+                [
+                  slot.is_blocked || false,
+                  slot.is_holiday || false,
+                  slot.price || 500,
+                  existingSlot[0].slot_id,
+                ]
+              );
+            } else {
+              // Create new slot only if not blocked
+              const slotAvailable = !(slot.is_blocked || false);
+              await connection.execute(
+                `INSERT INTO time_slots 
          (arena_id, court_id, date, start_time, end_time, price, 
           is_blocked_by_owner, is_holiday, is_available)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          arena_id,
-          slotCourtId,
-          date,
-          slot.start_time,
-          slot.end_time,
-          slot.price || 500,
-          slot.is_blocked || false,
-          slot.is_holiday || false,
-          slotAvailable,
-        ]
-      );
-    }
-  }
-} else if (action === "update_price" && price) {
+                [
+                  arena_id,
+                  slotCourtId,
+                  date,
+                  slot.start_time,
+                  slot.end_time,
+                  slot.price || 500,
+                  slot.is_blocked || false,
+                  slot.is_holiday || false,
+                  slotAvailable,
+                ]
+              );
+            }
+          }
+        } else if (action === "update_price" && price) {
           // Update price for all slots on this date
           let query = `UPDATE time_slots 
                      SET price = ?
@@ -2253,6 +2258,11 @@ const ownerController = {
     try {
       const { manager_id } = req.params;
       const { permissions, is_active } = req.body;
+
+      // Remove view_managers if it's somehow included
+      if (permissions && permissions.view_managers) {
+        delete permissions.view_managers;
+      }
 
       // Verify owner owns this manager
       const [managerCheck] = await pool.execute(
@@ -2357,65 +2367,65 @@ const ownerController = {
     }
   },
   // Update owner password
-updateOwnerPassword: async (req, res) => {
-  try {
-    const { current_password, new_password } = req.body;
-    
-    if (!current_password || !new_password) {
-      return res.status(400).json({ 
-        message: "Current password and new password are required" 
+  updateOwnerPassword: async (req, res) => {
+    try {
+      const { current_password, new_password } = req.body;
+
+      if (!current_password || !new_password) {
+        return res.status(400).json({
+          message: "Current password and new password are required"
+        });
+      }
+
+      if (new_password.length < 6) {
+        return res.status(400).json({
+          message: "New password must be at least 6 characters long"
+        });
+      }
+
+      // Get current password hash
+      const [ownerData] = await pool.execute(
+        "SELECT password_hash FROM arena_owners WHERE owner_id = ?",
+        [req.user.id]
+      );
+
+      if (ownerData.length === 0) {
+        return res.status(404).json({ message: "Owner not found" });
+      }
+
+      // Verify current password
+      const passwordMatch = await bcrypt.compare(
+        current_password,
+        ownerData[0].password_hash
+      );
+
+      if (!passwordMatch) {
+        return res.status(400).json({
+          message: "Current password is incorrect"
+        });
+      }
+
+      // Hash new password
+      const hashedPassword = await bcrypt.hash(new_password, 10);
+
+      // Update password
+      await pool.execute(
+        "UPDATE arena_owners SET password_hash = ? WHERE owner_id = ?",
+        [hashedPassword, req.user.id]
+      );
+
+      res.json({
+        message: "Password updated successfully"
+      });
+
+    } catch (error) {
+      console.error("Error updating password:", error);
+      res.status(500).json({
+        message: "Server error",
+        error: error.message
       });
     }
-    
-    if (new_password.length < 6) {
-      return res.status(400).json({ 
-        message: "New password must be at least 6 characters long" 
-      });
-    }
-    
-    // Get current password hash
-    const [ownerData] = await pool.execute(
-      "SELECT password_hash FROM arena_owners WHERE owner_id = ?",
-      [req.user.id]
-    );
-    
-    if (ownerData.length === 0) {
-      return res.status(404).json({ message: "Owner not found" });
-    }
-    
-    // Verify current password
-    const passwordMatch = await bcrypt.compare(
-      current_password, 
-      ownerData[0].password_hash
-    );
-    
-    if (!passwordMatch) {
-      return res.status(400).json({ 
-        message: "Current password is incorrect" 
-      });
-    }
-    
-    // Hash new password
-    const hashedPassword = await bcrypt.hash(new_password, 10);
-    
-    // Update password
-    await pool.execute(
-      "UPDATE arena_owners SET password_hash = ? WHERE owner_id = ?",
-      [hashedPassword, req.user.id]
-    );
-    
-    res.json({ 
-      message: "Password updated successfully" 
-    });
-    
-  } catch (error) {
-    console.error("Error updating password:", error);
-    res.status(500).json({ 
-      message: "Server error", 
-      error: error.message 
-    });
-  }
-},
+  },
 
   // Export booking data as JSON
   exportBookingData: async (req, res) => {

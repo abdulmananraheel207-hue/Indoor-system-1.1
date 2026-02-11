@@ -3,10 +3,12 @@ import { useParams, useNavigate } from "react-router-dom";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import integrationService from "../../services/integrationService";
+import useRequireAuth from "../../hooks/useRequireAuth";
 
 const UserArenaDetails = () => {
   const { arenaId } = useParams();
   const navigate = useNavigate();
+  const { requireAuth, Modal } = useRequireAuth();
   const [arena, setArena] = useState(null);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedCourt, setSelectedCourt] = useState(null);
@@ -257,7 +259,13 @@ const UserArenaDetails = () => {
   };
 
   const handleBooking = async () => {
-    // ... (keep existing booking logic)
+    const canProceed = await requireAuth(() => {
+      // This callback will be executed only if user is authenticated
+      // ... rest of your logic
+    }, "book a court");
+
+    if (!canProceed) return;
+
     // 1. Check if sport is selected
     if (!selectedSportId) {
       alert("Please select a sport before booking");
@@ -385,6 +393,13 @@ const UserArenaDetails = () => {
   };
 
   const handleAddFavorite = async () => {
+    const canProceed = await requireAuth(() => {
+      // This callback will be executed only if user is authenticated
+      // ... rest of your logic
+    }, "add arenas to favorites");
+
+    if (!canProceed) return;
+
     try {
       // Check if already favorited first
       if (isFavorited) {
@@ -425,6 +440,13 @@ const UserArenaDetails = () => {
       alert("Please select a rating between 1 and 5 stars");
       return;
     }
+
+    const canProceed = await requireAuth(() => {
+      // This callback will be executed only if user is authenticated
+      // ... rest of your logic
+    }, "leave a review");
+
+    if (!canProceed) return;
 
     try {
       setSubmittingReview(true);
@@ -795,7 +817,12 @@ const UserArenaDetails = () => {
                   </h3>
                   <button
                     type="button"
-                    onClick={() => setShowReviewForm(!showReviewForm)}
+                    onClick={() => {
+                      if (!requireAuth(() => { }, "leave a review")) {
+                        return;
+                      }
+                      setShowReviewForm(!showReviewForm);
+                    }}
                     className="px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 shadow-sm hover:shadow"
                   >
                     {showReviewForm ? "Cancel Review" : "Write a Review"}
@@ -932,7 +959,12 @@ const UserArenaDetails = () => {
                     <p className="text-gray-500 text-sm mt-1">Be the first to share your experience!</p>
                     <button
                       type="button"
-                      onClick={() => setShowReviewForm(true)}
+                      onClick={() => {
+                        if (!requireAuth(() => { }, "leave a review")) {
+                          return;
+                        }
+                        setShowReviewForm(true);
+                      }}
                       className="mt-4 px-4 py-2 text-primary-600 hover:text-primary-700 font-medium"
                     >
                       Write the first review
@@ -1364,6 +1396,7 @@ const UserArenaDetails = () => {
           </div>
         </div>
       )}
+      <Modal />
     </div>
   );
 };

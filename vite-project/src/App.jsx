@@ -22,27 +22,25 @@ import UserArenaDetails from "./components/user/UserArenaDetails";
 import UserBookingChat from "./components/user/UserBookingChat";
 import integrationService from "./services/integrationService";
 import ReviewReminderModal from "./components/user/ReviewReminderModal";
-import SuperAdminDashboard from "./components/superadmin/superAdminDashboard"; // ADD THIS LINE
+import SuperAdminDashboard from "./components/superadmin/superAdminDashboard";
 import ManagerLogin from "./components/auth/ManagerAuth";
 
 const useAuth = () => {
   const [authState, setAuthState] = useState({
     isAuthenticated: false,
     userRole: null,
+    isGuest: false,
     isLoading: true,
   });
 
   useEffect(() => {
     checkAuthStatus();
 
-    // Listen for storage changes (like when login happens in another tab)
     const handleStorageChange = () => {
       checkAuthStatus();
     };
 
     window.addEventListener("storage", handleStorageChange);
-
-    // Also check on focus
     window.addEventListener("focus", checkAuthStatus);
 
     return () => {
@@ -54,31 +52,38 @@ const useAuth = () => {
   const checkAuthStatus = () => {
     const token = localStorage.getItem("token");
     const userRole = localStorage.getItem("userRole");
+    const isGuest = localStorage.getItem("isGuest") === "true";
     const adminToken = localStorage.getItem("adminToken");
 
     if (adminToken) {
       setAuthState({
         isAuthenticated: true,
         userRole: "admin",
+        isGuest: false,
         isLoading: false,
       });
     } else if (token && userRole) {
       setAuthState({
         isAuthenticated: true,
         userRole,
+        isGuest: isGuest,
         isLoading: false,
       });
     } else {
       setAuthState({
         isAuthenticated: false,
         userRole: null,
+        isGuest: false,
         isLoading: false,
       });
     }
   };
 
   const login = (token, role, userData = null) => {
-    // 🔥 FIX: Clear admin tokens when logging in as non-admin
+    // Clear guest flag when logging in
+    localStorage.removeItem("isGuest");
+
+    // Clear admin tokens when logging in as non-admin
     if (role !== "admin" && role !== "super_admin") {
       localStorage.removeItem("adminToken");
       localStorage.removeItem("adminUser");
@@ -92,20 +97,38 @@ const useAuth = () => {
     checkAuthStatus();
   };
 
+  const guestLogin = () => {
+    const guestToken = "guest-" + Date.now();
+    const guestData = {
+      id: null,
+      name: "Guest User",
+      email: "guest@example.com",
+      role: "user",
+      isGuest: true
+    };
+
+    localStorage.setItem("token", guestToken);
+    localStorage.setItem("userRole", "user");
+    localStorage.setItem("isGuest", "true");
+    localStorage.setItem("userData", JSON.stringify(guestData));
+    checkAuthStatus();
+  };
+
   const logout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("userRole");
     localStorage.removeItem("userData");
-    localStorage.removeItem("ownerData");
-    localStorage.removeItem("managerData");
+    localStorage.removeItem("isGuest");
     setAuthState({
       isAuthenticated: false,
       userRole: null,
+      isGuest: false,
       isLoading: false,
     });
   };
 
   const adminLogin = (token) => {
+    localStorage.removeItem("isGuest");
     localStorage.setItem("adminToken", token);
     localStorage.setItem("userRole", "admin");
     checkAuthStatus();
@@ -115,9 +138,11 @@ const useAuth = () => {
     localStorage.removeItem("adminToken");
     localStorage.removeItem("token");
     localStorage.removeItem("userRole");
+    localStorage.removeItem("isGuest");
     setAuthState({
       isAuthenticated: false,
       userRole: null,
+      isGuest: false,
       isLoading: false,
     });
   };
@@ -126,6 +151,7 @@ const useAuth = () => {
     ...authState,
     login,
     logout,
+    guestLogin,
     adminLogin,
     adminLogout,
     checkAuthStatus,
@@ -140,11 +166,9 @@ function App() {
     const navigate = useNavigate();
 
     const handleLogin = (token, userData) => {
-      // Determine role from response or default to 'user'
       const role = userData?.role || "user";
       auth.login(token, role, userData);
 
-      // Small delay to ensure state updates
       setTimeout(() => {
         if (role === "owner") {
           navigate("/owner/dashboard");
@@ -165,7 +189,6 @@ function App() {
 
     const handleLogin = (token, ownerData) => {
       auth.login(token, "owner", ownerData);
-
       setTimeout(() => {
         navigate("/owner/dashboard");
       }, 50);
@@ -180,7 +203,6 @@ function App() {
 
     const handleLogin = (token, managerData) => {
       auth.login(token, "manager", managerData);
-
       setTimeout(() => {
         navigate("/manager/dashboard");
       }, 50);
@@ -189,15 +211,13 @@ function App() {
     return <ManagerAuth onLogin={handleLogin} />;
   };
 
-  // Admin auth wrapper - KEEP ORIGINAL THAT WAS WORKING
+  // Admin auth wrapper
   const AdminAuthWrapper = () => {
     const navigate = useNavigate();
 
     const handleLogin = async (credentials) => {
       try {
         console.log('🔐 Super admin login attempt...');
-
-        // OPTION 1: Use integrationService (recommended)
         const result = await integrationService.adminLogin(credentials);
 
         if (result.success && result.token) {
@@ -210,34 +230,30 @@ function App() {
         }
 
         throw new Error(result.message || 'Login failed');
-
       } catch (error) {
         console.error("❌ Admin login failed:", error.message);
-        throw error; // Throw error so AdminAuth can show it
+        throw error;
       }
     };
 
     return <AdminAuth onLogin={handleLogin} />;
   };
 
-  // Guest auth wrapper
+  // Guest auth wrapper - UPDATED
   const GuestAuthWrapper = () => {
     const navigate = useNavigate();
 
-    const handleLogin = () => {
-      // Guest login - create a temporary token
-      const tempToken = "guest-" + Date.now();
-      auth.login(tempToken, "guest");
-
+    const handleGuestLogin = () => {
+      auth.guestLogin();
       setTimeout(() => {
         navigate("/user/dashboard");
       }, 50);
     };
 
-    return <GuestAuth onLogin={handleLogin} />;
+    return <GuestAuth onLogin={handleGuestLogin} />;
   };
 
-  // Protected Route Component
+  // Protected Route Component - UPDATED with guest handling
   const ProtectedRoute = ({ children, requiredRole }) => {
     if (auth.isLoading) {
       return (
@@ -250,6 +266,11 @@ function App() {
       );
     }
 
+    // Allow guests to access user routes
+    if (requiredRole === "user" && auth.isGuest) {
+      return children;
+    }
+
     if (!auth.isAuthenticated) {
       return <Navigate to="/" />;
     }
@@ -257,7 +278,7 @@ function App() {
     if (requiredRole && auth.userRole !== requiredRole) {
       // Allow "super_admin" to access "admin" routes
       if (requiredRole === "admin" && auth.userRole === "super_admin") {
-        return children; // Allow super_admin to access admin routes
+        return children;
       }
 
       // Redirect to appropriate dashboard based on actual role
@@ -275,10 +296,11 @@ function App() {
     return children;
   };
 
-  // User Dashboard Layout
+  // User Dashboard Layout - UPDATED with guest handling
   const UserDashboard = () => {
     const navigate = useNavigate();
     const [currentTab, setCurrentTab] = useState("home");
+    const isGuest = auth.isGuest;
 
     const handleLogout = () => {
       auth.logout();
@@ -336,15 +358,52 @@ function App() {
                   </button>
                 </div>
               </div>
-              <button
-                onClick={handleLogout}
-                className="px-4 py-2 text-gray-600 hover:text-gray-900"
-              >
-                Logout
-              </button>
+              {isGuest ? (
+                <div className="flex items-center space-x-4">
+                  <span className="text-sm bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full">
+                    Guest Mode
+                  </span>
+                  <button
+                    onClick={() => navigate("/auth/user")}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
+                  >
+                    Sign Up / Login
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={handleLogout}
+                  className="px-4 py-2 text-gray-600 hover:text-gray-900"
+                >
+                  Logout
+                </button>
+              )}
             </div>
           </div>
         </header>
+
+        {/* Guest Banner - Show only for guests */}
+        {isGuest && (
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <div className="bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl p-6 text-white shadow-lg">
+              <div className="flex flex-col md:flex-row items-center justify-between">
+                <div className="flex items-center mb-4 md:mb-0">
+                  <span className="text-4xl mr-4">🎯</span>
+                  <div>
+                    <h3 className="text-lg font-semibold">You're browsing as a guest</h3>
+                    <p className="text-blue-100">Create a free account to book courts, create teams, and more!</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => navigate("/auth/user")}
+                  className="px-6 py-2 bg-white text-blue-600 rounded-lg font-semibold hover:bg-blue-50 transition-colors"
+                >
+                  Sign Up Free
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <main>
           {currentTab === "home" && <UserHome />}
@@ -465,10 +524,13 @@ function App() {
             </div>
           </button>
 
-          {/* Guest View Card */}
+          {/* Guest View Card - UPDATED */}
           <button
-            onClick={() => navigate("/auth/guest")}
-            className="bg-white p-6 rounded-xl shadow-md hover:shadow-lg transition-all duration-300 hover:-translate-y-1 text-left border border-gray-100"
+            onClick={() => {
+              auth.guestLogin();
+              setTimeout(() => navigate("/user/dashboard"), 50);
+            }}
+            className="bg-white p-6 rounded-xl shadow-md hover:shadow-lg transition-all duration-300 hover:-translate-y-1 text-left border border-gray-100 hover:border-blue-300"
           >
             <div className="flex items-center">
               <div className="h-12 w-12 bg-gray-100 rounded-lg flex items-center justify-center mr-4">
@@ -479,6 +541,9 @@ function App() {
                 <p className="text-sm text-gray-600 mt-1">
                   Explore features without login
                 </p>
+                <span className="inline-block mt-2 px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded">
+                  No registration required
+                </span>
               </div>
             </div>
           </button>
@@ -542,7 +607,8 @@ function App() {
 
   return (
     <Router>
-      {auth.isAuthenticated && auth.userRole === "user" && (
+      {/* Only show review modal for authenticated non-guest users */}
+      {auth.isAuthenticated && !auth.isGuest && auth.userRole === "user" && (
         <ReviewReminderModal />
       )}
       <Routes>
@@ -557,7 +623,7 @@ function App() {
         <Route path="/manager/login" element={<ManagerLogin />} />
         <Route path="/manager/dashboard" element={<ManagerDashboard />} />
 
-        {/* Protected User Routes */}
+        {/* Protected User Routes - Now accessible to guests too */}
         <Route
           path="/user/dashboard"
           element={
@@ -605,7 +671,7 @@ function App() {
           }
         />
 
-        {/* Protected Super Admin Routes - ADD THIS ROUTE */}
+        {/* Protected Super Admin Routes */}
         <Route
           path="/super-admin"
           element={

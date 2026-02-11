@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import useRequireAuth from "../../hooks/useRequireAuth";
 
 const UserTeams = () => {
     const [activeTab, setActiveTab] = useState('opponent');
@@ -21,17 +22,27 @@ const UserTeams = () => {
         description: ''
     });
 
+    const { requireAuth, Modal } = useRequireAuth();
+
     const handleChallenge = (teamId) => {
-        console.log('Challenge team:', teamId);
-        // Implement challenge logic
+        const canProceed = requireAuth(() => {
+            console.log('Challenge team:', teamId);
+            // Implement challenge logic
+        }, "challenge a team");
+
+        if (!canProceed) return;
     };
 
     const handleCreateTeam = (e) => {
         e.preventDefault();
-        console.log('Create team:', teamForm);
-        // Implement create team logic
-        setShowCreateTeam(false);
-        setTeamForm({ name: '', sport: 'Cricket', description: '' });
+        const canProceed = requireAuth(() => {
+            console.log('Create team:', teamForm);
+            // Implement create team logic
+            setShowCreateTeam(false);
+            setTeamForm({ name: '', sport: 'Cricket', description: '' });
+        }, "create a team");
+
+        if (!canProceed) return;
     };
 
     return (
@@ -46,8 +57,8 @@ const UserTeams = () => {
                         <button
                             onClick={() => setActiveTab('opponent')}
                             className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'opponent'
-                                    ? 'border-primary-500 text-primary-600'
-                                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                                ? 'border-primary-500 text-primary-600'
+                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                                 }`}
                         >
                             Opponent Teams
@@ -55,8 +66,8 @@ const UserTeams = () => {
                         <button
                             onClick={() => setActiveTab('myteam')}
                             className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'myteam'
-                                    ? 'border-primary-500 text-primary-600'
-                                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                                ? 'border-primary-500 text-primary-600'
+                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                                 }`}
                         >
                             My Team
@@ -128,7 +139,12 @@ const UserTeams = () => {
                         <div className="mb-6 flex justify-between items-center">
                             <h2 className="text-lg font-semibold text-gray-900">My Teams</h2>
                             <button
-                                onClick={() => setShowCreateTeam(true)}
+                                onClick={() => {
+                                    const canProceed = requireAuth(() => {
+                                        setShowCreateTeam(true);
+                                    }, "create a team");
+                                    if (!canProceed) return;
+                                }}
                                 className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
                             >
                                 + Create New Team
@@ -144,7 +160,12 @@ const UserTeams = () => {
                                 <p className="mt-1 text-sm text-gray-500">Get started by creating your first team.</p>
                                 <div className="mt-6">
                                     <button
-                                        onClick={() => setShowCreateTeam(true)}
+                                        onClick={() => {
+                                            const canProceed = requireAuth(() => {
+                                                setShowCreateTeam(true);
+                                            }, "create a team");
+                                            if (!canProceed) return;
+                                        }}
                                         className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700"
                                     >
                                         + Create Team
@@ -173,10 +194,28 @@ const UserTeams = () => {
                                         </div>
 
                                         <div className="space-y-3">
-                                            <button className="w-full px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
+                                            <button
+                                                onClick={() => {
+                                                    const canProceed = requireAuth(() => {
+                                                        console.log('Edit team:', team.id);
+                                                        // Implement edit team logic
+                                                    }, "edit a team");
+                                                    if (!canProceed) return;
+                                                }}
+                                                className="w-full px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                                            >
                                                 Edit Team
                                             </button>
-                                            <button className="w-full px-4 py-2 border border-primary-600 text-primary-600 rounded-lg hover:bg-primary-50 transition-colors">
+                                            <button
+                                                onClick={() => {
+                                                    const canProceed = requireAuth(() => {
+                                                        console.log('Invite players:', team.id);
+                                                        // Implement invite logic
+                                                    }, "invite players");
+                                                    if (!canProceed) return;
+                                                }}
+                                                className="w-full px-4 py-2 border border-primary-600 text-primary-600 rounded-lg hover:bg-primary-50 transition-colors"
+                                            >
                                                 Invite Players
                                             </button>
                                         </div>
@@ -262,6 +301,7 @@ const UserTeams = () => {
                     </div>
                 )}
             </div>
+            <Modal />
         </div>
     );
 };

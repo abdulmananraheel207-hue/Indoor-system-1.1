@@ -182,6 +182,7 @@ router.put("/bookings/:booking_id/complete",
 );
 
 // Calendar - requires view_calendar
+// In managers.js - Update the getCalendar route
 router.get("/calendar",
     (req, res, next) => {
         if (req.manager.permissions.view_calendar || req.manager.permissions.manage_calendar) {
@@ -192,9 +193,14 @@ router.get("/calendar",
             });
         }
     },
-    managerController.getCalendar
+    (req, res) => {
+        // Forward to controller with query params
+        req.query.arena_id = req.query.arena_id;
+        req.query.date = req.query.date;
+        req.query.court_id = req.query.court_id; // Make sure court_id is passed
+        managerController.getCalendar(req, res);
+    }
 );
-
 // Update time slots - requires manage_calendar
 router.put("/calendar/slots",
     (req, res, next) => {

@@ -1,3 +1,4 @@
+// File: OwnerManagers.jsx - UPDATED (View Managers permission removed)
 import React, { useState, useEffect } from "react";
 
 const OwnerManagers = () => {
@@ -13,7 +14,7 @@ const OwnerManagers = () => {
   });
   const [loading, setLoading] = useState(false);
 
-  // Define all available permissions based on owner portal features
+  // Define all available permissions - REMOVED view_managers
   const availablePermissions = [
     {
       id: "view_dashboard",
@@ -46,14 +47,9 @@ const OwnerManagers = () => {
       description: "Can view financial reports",
     },
     {
-      id: "view_managers",
-      name: "View Managers",
-      description: "Can view other managers (read-only)",
-    },
-    {
       id: "manage_arena",
       name: "Manage Arena",
-      description: "Can edit arena details",
+      description: "Can edit arena details, courts, and photos",
     },
     {
       id: "view_financial",
@@ -79,7 +75,6 @@ const OwnerManagers = () => {
       );
       const data = await response.json();
       if (response.ok) {
-        // FIX: Ensure permissions are parsed on fetch if they come as strings
         const processedManagers = data.map((manager) => ({
           ...manager,
           permissions:
@@ -198,7 +193,6 @@ const OwnerManagers = () => {
   };
 
   const handleEditManager = (manager) => {
-    // Permissions are now pre-parsed in fetchManagers, making this simpler
     const permissions = manager.permissions || {};
 
     setFormData({
@@ -221,7 +215,6 @@ const OwnerManagers = () => {
   };
 
   const getPermissionCount = (manager) => {
-    // FIX: Permissions are guaranteed to be an object now
     const perms = manager.permissions || {};
     return Object.values(perms).filter(Boolean).length;
   };
@@ -425,11 +418,10 @@ const OwnerManagers = () => {
                 <button
                   type="submit"
                   disabled={loading}
-                  className={`px-4 py-2 text-sm rounded-md text-white ${
-                    loading
+                  className={`px-4 py-2 text-sm rounded-md text-white ${loading
                       ? "bg-blue-400 cursor-not-allowed"
                       : "bg-blue-600 hover:bg-blue-700"
-                  }`}
+                    }`}
                 >
                   {loading ? (
                     <>
@@ -528,10 +520,9 @@ const OwnerManagers = () => {
                       <td className="px-4 py-3 whitespace-nowrap">
                         <span
                           className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                            ${
-                              manager.is_active
-                                ? "bg-green-100 text-green-800"
-                                : "bg-red-100 text-red-800"
+                            ${manager.is_active
+                              ? "bg-green-100 text-green-800"
+                              : "bg-red-100 text-red-800"
                             }`}
                         >
                           {manager.is_active ? "Active" : "Inactive"}
@@ -549,10 +540,9 @@ const OwnerManagers = () => {
                             onClick={async () => {
                               if (
                                 window.confirm(
-                                  `Are you sure you want to ${
-                                    manager.is_active
-                                      ? "deactivate"
-                                      : "activate"
+                                  `Are you sure you want to ${manager.is_active
+                                    ? "deactivate"
+                                    : "activate"
                                   } this manager?`
                                 )
                               ) {
@@ -574,10 +564,9 @@ const OwnerManagers = () => {
 
                                   if (response.ok) {
                                     alert(
-                                      `Manager ${
-                                        manager.is_active
-                                          ? "deactivated"
-                                          : "activated"
+                                      `Manager ${manager.is_active
+                                        ? "deactivated"
+                                        : "activated"
                                       } successfully`
                                     );
                                     fetchManagers();
@@ -631,10 +620,9 @@ const OwnerManagers = () => {
                     </div>
                     <span
                       className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
-                        ${
-                          manager.is_active
-                            ? "bg-green-100 text-green-800"
-                            : "bg-red-100 text-red-800"
+                        ${manager.is_active
+                          ? "bg-green-100 text-green-800"
+                          : "bg-red-100 text-red-800"
                         }`}
                     >
                       {manager.is_active ? "Active" : "Inactive"}
@@ -674,8 +662,7 @@ const OwnerManagers = () => {
                         onClick={async () => {
                           if (
                             window.confirm(
-                              `Are you sure you want to ${
-                                manager.is_active ? "deactivate" : "activate"
+                              `Are you sure you want to ${manager.is_active ? "deactivate" : "activate"
                               } this manager?`
                             )
                           ) {
@@ -697,10 +684,9 @@ const OwnerManagers = () => {
 
                               if (response.ok) {
                                 alert(
-                                  `Manager ${
-                                    manager.is_active
-                                      ? "deactivated"
-                                      : "activated"
+                                  `Manager ${manager.is_active
+                                    ? "deactivated"
+                                    : "activated"
                                   } successfully`
                                 );
                                 fetchManagers();
@@ -710,11 +696,10 @@ const OwnerManagers = () => {
                             }
                           }
                         }}
-                        className={`px-3 py-1.5 text-sm rounded text-center ${
-                          manager.is_active
+                        className={`px-3 py-1.5 text-sm rounded text-center ${manager.is_active
                             ? "bg-red-100 text-red-700 hover:bg-red-200"
                             : "bg-green-100 text-green-700 hover:bg-green-200"
-                        }`}
+                          }`}
                       >
                         {manager.is_active ? "Deactivate" : "Activate"}
                       </button>
@@ -727,19 +712,16 @@ const OwnerManagers = () => {
         )}
       </div>
 
-      {/* Information Box - Mobile optimized */}
+      {/* Information Box - Updated */}
       <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg md:mt-6 md:p-4">
         <h3 className="text-sm font-medium text-blue-900 mb-2">
           About Manager Permissions
         </h3>
         <ul className="text-xs text-blue-700 space-y-1 md:text-sm">
           <li>• Managers can only access features you explicitly permit</li>
-          <li>
-            • Financial data access is controlled separately through "View
-            Financial" permission
-          </li>
-          <li>• Managers cannot modify other managers' permissions</li>
+          <li>• Financial data access is controlled separately through "View Financial" permission</li>
           <li>• Deactivated managers cannot login to the system</li>
+          <li className="font-medium">• Managers CANNOT view other managers - this is owner-only access</li>
         </ul>
       </div>
     </div>

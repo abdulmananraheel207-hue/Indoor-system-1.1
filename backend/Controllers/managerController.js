@@ -255,11 +255,11 @@ const managerController = {
     }
   },
 
-  // Get calendar
+  // In managerController.js - Update getCalendar
   getCalendar: async (req, res) => {
     try {
       const { owner_id } = req.manager;
-      const { arena_id, date, court_id } = req.query;
+      const { arena_id, date, court_id } = req.query; // Add court_id here
 
       if (!date) {
         return res.status(400).json({ message: "Date is required" });
@@ -278,15 +278,15 @@ const managerController = {
       }
 
       let query = `
-                SELECT ts.*, b.booking_id, b.status as booking_status,
-                       u.name as booked_by, cd.court_number, cd.court_name
-                FROM time_slots ts
-                LEFT JOIN court_details cd ON ts.court_id = cd.court_id
-                LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
-                    AND b.status IN ('pending', 'accepted', 'completed')
-                LEFT JOIN users u ON b.user_id = u.user_id
-                WHERE ts.arena_id = ? AND ts.date = ?
-            `;
+            SELECT ts.*, b.booking_id, b.status as booking_status,
+                   u.name as booked_by, cd.court_number, cd.court_name
+            FROM time_slots ts
+            LEFT JOIN court_details cd ON ts.court_id = cd.court_id
+            LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
+                AND b.status IN ('pending', 'accepted', 'completed')
+            LEFT JOIN users u ON b.user_id = u.user_id
+            WHERE ts.arena_id = ? AND ts.date = ?
+        `;
 
       const params = [arena_id, date];
 
@@ -306,10 +306,14 @@ const managerController = {
   },
 
   // Update time slots
+  // In managerController.js - FIXED updateTimeSlots function
   updateTimeSlots: async (req, res) => {
     try {
       const { owner_id } = req.manager;
       const { arena_id, date, slots, action, court_id } = req.body;
+
+      // Log the received payload for debugging
+      console.log("Manager updateTimeSlots payload:", req.body);
 
       // Verify arena belongs to owner
       const [arenaCheck] = await pool.execute(
@@ -328,33 +332,114 @@ const managerController = {
 
       try {
         if (action === "block_all") {
-          await connection.execute(
-            `UPDATE time_slots 
-                         SET is_blocked_by_owner = TRUE
-                         WHERE arena_id = ? AND date = ?`,
-            [arena_id, date]
-          );
-        } else if (action === "unblock_all") {
-          await connection.execute(
-            `UPDATE time_slots 
-                         SET is_blocked_by_owner = FALSE
-                         WHERE arena_id = ? AND date = ?`,
-            [arena_id, date]
-          );
-        } else if (slots && slots.length > 0) {
+          let query = `UPDATE time_slots 
+                           SET is_blocked_by_owner = TRUE,
+                               is_available = FALSE,
+                               locked_until = NULL,
+                               locked_by_user_id = NULL
+                           WHERE arena_id = ? AND date = ?`;
+          const params = [arena_id, date];
+
+          if (court_id) {
+            query += " AND court_id = ?";
+            params.push(court_id);
+          }
+
+          await connection.execute(query, params);
+        }
+        else if (action === "unblock_all") {
+          let query = `UPDATE time_slots 
+                           SET is_blocked_by_owner = FALSE,
+                               is_available = TRUE,
+                               locked_until = NULL,
+                               locked_by_user_id = NULL
+                           WHERE arena_id = ? AND date = ?`;
+          const params = [arena_id, date];
+
+          if (court_id) {
+            query += " AND court_id = ?";
+            params.push(court_id);
+          }
+
+          await connection.execute(query, params);
+        }
+        else if (action === "update_slots" && slots && slots.length > 0) {
+          // Update specific slots
           for (const slot of slots) {
-            await connection.execute(
-              `UPDATE time_slots 
+            const slotCourtId = slot.court_id || court_id;
+
+            if (!slotCourtId) {
+              console.warn("Skipping slot - no court_id provided:", slot);
+              continue;
+            }
+
+            // First check if slot exists
+            const [existingSlot] = await connection.execute(
+              `SELECT slot_id FROM time_slots 
+                         WHERE arena_id = ? AND date = ? AND start_time = ? AND end_time = ? 
+                         AND court_id = ?`,
+              [arena_id, date, slot.start_time, slot.end_time, slotCourtId]
+            );
+
+            if (existingSlot.length > 0) {
+              // Update existing slot
+              await connection.execute(
+                `UPDATE time_slots 
                              SET is_blocked_by_owner = ?,
+                                 is_holiday = ?,
                                  price = ?
                              WHERE slot_id = ?`,
-              [slot.is_blocked || false, slot.price || 500, slot.slot_id]
-            );
+                [
+                  slot.is_blocked || false,
+                  slot.is_holiday || false,
+                  slot.price || 500,
+                  existingSlot[0].slot_id,
+                ]
+              );
+            } else {
+              // Create new slot
+              const slotAvailable = !(slot.is_blocked || false);
+              await connection.execute(
+                `INSERT INTO time_slots 
+                             (arena_id, court_id, date, start_time, end_time, price, 
+                              is_blocked_by_owner, is_holiday, is_available)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  arena_id,
+                  slotCourtId,
+                  date,
+                  slot.start_time,
+                  slot.end_time,
+                  slot.price || 500,
+                  slot.is_blocked || false,
+                  slot.is_holiday || false,
+                  slotAvailable,
+                ]
+              );
+            }
           }
+        }
+        else if (action === "update_price" && price) {
+          let query = `UPDATE time_slots 
+                           SET price = ?
+                           WHERE arena_id = ? AND date = ?`;
+          const params = [price, arena_id, date];
+
+          if (court_id) {
+            query += " AND court_id = ?";
+            params.push(court_id);
+          }
+
+          await connection.execute(query, params);
         }
 
         await connection.commit();
-        res.json({ message: "Time slots updated successfully" });
+        res.json({
+          message: "Time slots updated successfully",
+          date: date,
+          action: action,
+          court_id: court_id || null,
+        });
       } catch (error) {
         await connection.rollback();
         throw error;
@@ -363,7 +448,10 @@ const managerController = {
       }
     } catch (error) {
       console.error("Update time slots error:", error);
-      res.status(500).json({ message: "Server error", error: error.message });
+      res.status(500).json({
+        message: "Server error",
+        error: error.message
+      });
     }
   },
 
@@ -390,6 +478,7 @@ const managerController = {
   },
 
   // Get courts
+  // In managerController.js - Update getCourts to include images
   getCourts: async (req, res) => {
     try {
       const { arena_id } = req.params;
@@ -409,15 +498,27 @@ const managerController = {
 
       const [courts] = await pool.execute(
         `SELECT cd.*, 
-                        GROUP_CONCAT(DISTINCT st.name) as sports_names
-                 FROM court_details cd
-                 LEFT JOIN court_sports cs ON cd.court_id = cs.court_id
-                 LEFT JOIN sports_types st ON cs.sport_id = st.sport_id
-                 WHERE cd.arena_id = ?
-                 GROUP BY cd.court_id
-                 ORDER BY cd.court_number`,
+              GROUP_CONCAT(DISTINCT st.name) as sports_names
+       FROM court_details cd
+       LEFT JOIN court_sports cs ON cd.court_id = cs.court_id
+       LEFT JOIN sports_types st ON cs.sport_id = st.sport_id
+       WHERE cd.arena_id = ?
+       GROUP BY cd.court_id
+       ORDER BY cd.court_number`,
         [arena_id]
       );
+
+      // FIX: Also fetch images for each court
+      for (let court of courts) {
+        const [images] = await pool.execute(
+          `SELECT image_id, image_url, cloudinary_id, is_primary, uploaded_at
+         FROM court_images 
+         WHERE court_id = ?
+         ORDER BY is_primary DESC, uploaded_at DESC`,
+          [court.court_id]
+        );
+        court.images = images;
+      }
 
       res.json(courts);
     } catch (error) {

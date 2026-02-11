@@ -8,11 +8,16 @@ const UserDashboard = () => {
   const [stats, setStats] = useState({});
   const [recentBookings, setRecentBookings] = useState([]);
   const [loading, setLoading] = useState(true);
+  const isGuest = localStorage.getItem("isGuest") === "true";
 
   useEffect(() => {
-    fetchUserData();
-    fetchDashboardData();
-  }, []);
+    if (!isGuest) {
+      fetchUserData();
+      fetchDashboardData();
+    } else {
+      setLoading(false);
+    }
+  }, [isGuest]);
 
   const fetchUserData = async () => {
     try {
@@ -43,6 +48,7 @@ const UserDashboard = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("userRole");
     localStorage.removeItem("userData");
+    localStorage.removeItem("isGuest");
     navigate("/");
   };
 
@@ -62,86 +68,153 @@ const UserDashboard = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">
-                Welcome, {user?.name || "User"}!
+                Welcome, {isGuest ? "Guest!" : user?.name || "User"}!
               </h1>
               <p className="text-gray-600 text-sm">
-                Your sports arena booking dashboard
+                {isGuest
+                  ? "👋 You're browsing as a guest. Sign up to book arenas and more!"
+                  : "Your sports arena booking dashboard"}
               </p>
             </div>
             <div className="flex items-center space-x-4">
-              <button
-                onClick={handleLogout}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
-              >
-                Logout
-              </button>
+              {isGuest ? (
+                <button
+                  onClick={() => navigate("/auth/user")}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
+                >
+                  Sign Up / Login
+                </button>
+              ) : (
+                <button
+                  onClick={handleLogout}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+                >
+                  Logout
+                </button>
+              )}
             </div>
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className="flex items-center">
-              <div className="p-3 bg-blue-100 rounded-lg mr-4">
-                <span className="text-2xl">📅</span>
+      {/* Guest Banner */}
+      {isGuest && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl p-6 text-white">
+            <div className="flex flex-col md:flex-row items-center justify-between">
+              <div className="flex items-center mb-4 md:mb-0">
+                <span className="text-4xl mr-4">🎯</span>
+                <div>
+                  <h3 className="text-lg font-semibold">You're viewing as a guest</h3>
+                  <p className="text-blue-100">Create a free account to book courts, create teams, and more!</p>
+                </div>
               </div>
-              <div>
-                <p className="text-sm text-gray-500">Total Bookings</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {stats.total_bookings || 0}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className="flex items-center">
-              <div className="p-3 bg-green-100 rounded-lg mr-4">
-                <span className="text-2xl">✅</span>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Completed</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {stats.completed_bookings || 0}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className="flex items-center">
-              <div className="p-3 bg-yellow-100 rounded-lg mr-4">
-                <span className="text-2xl">⏳</span>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Pending</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {stats.pending_bookings || 0}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className="flex items-center">
-              <div className="p-3 bg-purple-100 rounded-lg mr-4">
-                <span className="text-2xl">💰</span>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Total Spent</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  Rs {stats.total_spent || 0}
-                </p>
-              </div>
+              <button
+                onClick={() => navigate("/auth/user")}
+                className="px-6 py-2 bg-white text-blue-600 rounded-lg font-semibold hover:bg-blue-50"
+              >
+                Sign Up Free
+              </button>
             </div>
           </div>
         </div>
+      )}
 
-        {/* Quick Actions */}
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {!isGuest ? (
+          <>
+            {/* Stats Cards - Only for authenticated users */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+              <div className="bg-white rounded-xl shadow-sm p-6">
+                <div className="flex items-center">
+                  <div className="p-3 bg-blue-100 rounded-lg mr-4">
+                    <span className="text-2xl">📅</span>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">Total Bookings</p>
+                    <p className="text-2xl font-bold text-gray-900">
+                      {stats.total_bookings || 0}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm p-6">
+                <div className="flex items-center">
+                  <div className="p-3 bg-green-100 rounded-lg mr-4">
+                    <span className="text-2xl">✅</span>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">Completed</p>
+                    <p className="text-2xl font-bold text-gray-900">
+                      {stats.completed_bookings || 0}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm p-6">
+                <div className="flex items-center">
+                  <div className="p-3 bg-yellow-100 rounded-lg mr-4">
+                    <span className="text-2xl">⏳</span>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">Pending</p>
+                    <p className="text-2xl font-bold text-gray-900">
+                      {stats.pending_bookings || 0}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm p-6">
+                <div className="flex items-center">
+                  <div className="p-3 bg-purple-100 rounded-lg mr-4">
+                    <span className="text-2xl">💰</span>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">Total Spent</p>
+                    <p className="text-2xl font-bold text-gray-900">
+                      Rs {stats.total_spent || 0}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
+        ) : (
+          /* Guest placeholder stats */
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            {[1, 2, 3, 4].map((item) => (
+              <div key={item} className="bg-white rounded-xl shadow-sm p-6 opacity-75">
+                <div className="flex items-center">
+                  <div className="p-3 bg-gray-100 rounded-lg mr-4">
+                    <span className="text-2xl text-gray-400">
+                      {item === 1 && "📅"}
+                      {item === 2 && "✅"}
+                      {item === 3 && "⏳"}
+                      {item === 4 && "💰"}
+                    </span>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-400">
+                      {item === 1 && "Total Bookings"}
+                      {item === 2 && "Completed"}
+                      {item === 3 && "Pending"}
+                      {item === 4 && "Total Spent"}
+                    </p>
+                    <p className="text-2xl font-bold text-gray-300">
+                      {item === 4 ? "Rs 0" : "0"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Quick Actions - Available for everyone */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           <button
             onClick={() => navigate("/user")}
@@ -161,7 +234,7 @@ const UserDashboard = () => {
           </button>
 
           <button
-            onClick={() => navigate("/user/bookings")}
+            onClick={() => isGuest ? navigate("/auth/user") : navigate("/user/bookings")}
             className="bg-white rounded-xl shadow-sm p-6 text-left hover:shadow-md transition-shadow"
           >
             <div className="flex items-center">
@@ -171,14 +244,14 @@ const UserDashboard = () => {
               <div>
                 <h3 className="font-semibold text-gray-900">My Bookings</h3>
                 <p className="text-sm text-gray-600">
-                  View and manage your bookings
+                  {isGuest ? "Login to view your bookings" : "View and manage your bookings"}
                 </p>
               </div>
             </div>
           </button>
 
           <button
-            onClick={() => navigate("/user/profile")}
+            onClick={() => isGuest ? navigate("/auth/user") : navigate("/user/profile")}
             className="bg-white rounded-xl shadow-sm p-6 text-left hover:shadow-md transition-shadow"
           >
             <div className="flex items-center">
@@ -188,7 +261,7 @@ const UserDashboard = () => {
               <div>
                 <h3 className="font-semibold text-gray-900">Profile</h3>
                 <p className="text-sm text-gray-600">
-                  Update your profile information
+                  {isGuest ? "Login to manage your profile" : "Update your profile information"}
                 </p>
               </div>
             </div>
@@ -201,15 +274,27 @@ const UserDashboard = () => {
             <h2 className="text-lg font-semibold text-gray-900">
               Recent Bookings
             </h2>
-            <button
-              onClick={() => navigate("/user/bookings")}
-              className="text-primary-600 hover:text-primary-700 text-sm"
-            >
-              View All
-            </button>
+            {!isGuest && (
+              <button
+                onClick={() => navigate("/user/bookings")}
+                className="text-primary-600 hover:text-primary-700 text-sm"
+              >
+                View All
+              </button>
+            )}
           </div>
 
-          {recentBookings.length === 0 ? (
+          {isGuest ? (
+            <div className="text-center py-8">
+              <p className="text-gray-600">Sign up to see your booking history</p>
+              <button
+                onClick={() => navigate("/auth/user")}
+                className="mt-4 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+              >
+                Sign Up / Login
+              </button>
+            </div>
+          ) : recentBookings.length === 0 ? (
             <div className="text-center py-8">
               <p className="text-gray-600">No recent bookings</p>
               <button
@@ -237,13 +322,12 @@ const UserDashboard = () => {
                       </p>
                     </div>
                     <span
-                      className={`px-3 py-1 text-xs font-medium rounded-full ${
-                        booking.status === "completed"
+                      className={`px-3 py-1 text-xs font-medium rounded-full ${booking.status === "completed"
                           ? "bg-green-100 text-green-800"
                           : booking.status === "pending"
-                          ? "bg-yellow-100 text-yellow-800"
-                          : "bg-gray-100 text-gray-800"
-                      }`}
+                            ? "bg-yellow-100 text-yellow-800"
+                            : "bg-gray-100 text-gray-800"
+                        }`}
                     >
                       {booking.status}
                     </span>
