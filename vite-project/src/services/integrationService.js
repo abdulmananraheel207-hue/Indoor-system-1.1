@@ -1093,17 +1093,46 @@ export const integrationService = {
   },
 
   // ===== REVIEWS =====
-  submitReview: async (arenaId, rating, comment) => {
+  // In integrationService.js - FIX submitReview method
+  submitReview: async (arenaId, rating, comment, bookingId = null) => {
     try {
+      const token = localStorage.getItem("token");
+
+      const payload = {
+        rating,
+        comment
+      };
+
+      // Add booking_id if provided (for reminder flow)
+      if (bookingId) {
+        payload.booking_id = bookingId;
+      }
+
       const response = await fetch(
         `http://localhost:5000/api/arenas/${arenaId}/reviews`,
         {
           method: "POST",
-          headers: getAuthHeaders(),
-          body: JSON.stringify({ rating, comment }),
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
         }
       );
-      return await response.json();
+
+      const responseText = await response.text();
+      let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch (e) {
+        result = { message: responseText };
+      }
+
+      if (!response.ok) {
+        throw new Error(result.message || "Failed to submit review");
+      }
+
+      return result;
     } catch (error) {
       console.error("Error submitting review:", error);
       throw error;
@@ -1142,39 +1171,6 @@ export const integrationService = {
     }
   },
 
-  // In integrationService.js - UPDATED submitReview function
-  submitReview: async (arenaId, rating, comment) => {
-    try {
-      const token = localStorage.getItem("token");
-      console.log("Submitting review for arena:", arenaId, "Token exists:", !!token);
-
-      const response = await fetch(
-        `http://localhost:5000/api/arenas/${arenaId}/reviews`,
-        {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${token}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({ rating, comment }),
-        }
-      );
-
-      console.log("Review response status:", response.status);
-
-      const responseData = await response.json();
-      console.log("Review response data:", responseData);
-
-      if (!response.ok) {
-        throw new Error(responseData.message || `Failed to submit review (${response.status})`);
-      }
-
-      return responseData;
-    } catch (error) {
-      console.error("Error submitting review:", error);
-      throw error;
-    }
-  },
 
   // Check for pending reviews
   getPendingReviews: async () => {

@@ -29,6 +29,8 @@ const UserArenaDetails = () => {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [lastBookingId, setLastBookingId] = useState(null);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [selectedBookingId, setSelectedBookingId] = useState(null);
+
 
   useEffect(() => {
     fetchArenaDetails();
@@ -96,9 +98,14 @@ const UserArenaDetails = () => {
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const showForm = urlParams.get('showReviewForm');
+    const bookingId = urlParams.get('bookingId');
 
     if (showForm === 'true') {
       setShowReviewForm(true);
+      if (bookingId) {
+        setSelectedBookingId(parseInt(bookingId));
+      }
+
       // Scroll to review form section
       setTimeout(() => {
         const reviewSection = document.querySelector('.reviews-section');
@@ -430,6 +437,7 @@ const UserArenaDetails = () => {
     }
   };
 
+  // FIXED: handleSubmitReview function
   const handleSubmitReview = async () => {
     if (!newReview.comment.trim()) {
       alert("Please enter a comment");
@@ -441,19 +449,21 @@ const UserArenaDetails = () => {
       return;
     }
 
-    const canProceed = await requireAuth(() => {
-      // This callback will be executed only if user is authenticated
-      // ... rest of your logic
-    }, "leave a review");
-
+    const canProceed = await requireAuth(() => { }, "leave a review");
     if (!canProceed) return;
 
     try {
       setSubmittingReview(true);
+
+      // IMPORTANT: Get the booking_id from a completed booking
+      // You need to pass this from the component state
+      const bookingIdForReview = selectedBookingId; // Add this state variable
+
       await integrationService.submitReview(
         arenaId,
         newReview.rating,
-        newReview.comment
+        newReview.comment,
+        bookingIdForReview // Pass the booking_id
       );
 
       alert("Review submitted successfully!");
@@ -471,9 +481,11 @@ const UserArenaDetails = () => {
     } catch (error) {
       console.error("Error submitting review:", error);
 
-      // ✅ Show specific message for "no booking" error
+      // Show specific message for "no booking" error
       if (error.message.includes("complete a booking")) {
         alert("You need to complete a booking at this arena before you can review it. Please book and play first!");
+      } else if (error.message.includes("already reviewed")) {
+        alert("You have already reviewed this arena!");
       } else {
         alert(error.message || "Failed to submit review.");
       }

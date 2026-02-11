@@ -17,14 +17,14 @@ const ReviewReminderModal = () => {
         try {
             setLoading(true);
 
-            // Check localStorage first (30-day timeout)
+            // Check localStorage first (30-day timeout for "Don't show again")
             const lastDismissed = localStorage.getItem("reviewRemindersDismissedUntil");
             if (lastDismissed && new Date(lastDismissed) > new Date()) {
                 console.log("Reminders dismissed until:", lastDismissed);
                 return;
             }
 
-            // Fetch pending reviews (backend checks review_reminder_shown)
+            // Fetch pending reviews
             const response = await integrationService.getPendingReviews();
 
             if (response?.pending_reviews?.length > 0) {
@@ -40,40 +40,41 @@ const ReviewReminderModal = () => {
 
     const handleDismiss = async (bookingId) => {
         try {
-            // Mark this specific reminder as dismissed
-            await fetch("http://localhost:5000/api/users/reviews/dismiss-reminder", {
-                method: "POST",
-                headers: {
-                    Authorization: `Bearer ${localStorage.getItem("token")}`,
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ booking_id: bookingId }),
-            });
+            await integrationService.dismissReviewReminder(bookingId);
 
-            // Don't show again for 30 days (not 7)
-            const nextMonth = new Date();
-            nextMonth.setDate(nextMonth.getDate() + 30);
-            localStorage.setItem("reviewRemindersDismissedUntil", nextMonth.toISOString());
+            // Don't show again for 7 days (configurable)
+            const nextWeek = new Date();
+            nextWeek.setDate(nextWeek.getDate() + 7);
+            localStorage.setItem("reviewRemindersDismissedUntil", nextWeek.toISOString());
 
-            setIsVisible(false);
-            setPendingReviews([]);
+            // Remove this booking from pending list
+            const updatedPending = pendingReviews.filter(
+                review => review.booking_id !== bookingId
+            );
+
+            if (updatedPending.length === 0) {
+                setIsVisible(false);
+                setPendingReviews([]);
+            } else {
+                setPendingReviews(updatedPending);
+                // Adjust index if needed
+                if (currentReviewIndex >= updatedPending.length) {
+                    setCurrentReviewIndex(updatedPending.length - 1);
+                }
+            }
 
             alert("Reminder dismissed. You can still add a review from the arena details page anytime!");
         } catch (error) {
             console.error("Error dismissing reminder:", error);
+            alert("Failed to dismiss reminder. Please try again.");
         }
     };
+
     const handleSkipAll = async () => {
         try {
-            await fetch("http://localhost:5000/api/users/reviews/skip-all-reminders", {
-                method: "POST",
-                headers: {
-                    Authorization: `Bearer ${localStorage.getItem("token")}`,
-                    "Content-Type": "application/json",
-                },
-            });
+            await integrationService.skipAllReviewReminders();
 
-            // Don't show again for 30 days (not 7)
+            // Don't show again for 30 days
             const nextMonth = new Date();
             nextMonth.setDate(nextMonth.getDate() + 30);
             localStorage.setItem("reviewRemindersDismissedUntil", nextMonth.toISOString());
@@ -84,12 +85,14 @@ const ReviewReminderModal = () => {
             alert("All reminders skipped for 30 days. You can still add reviews from arena details pages!");
         } catch (error) {
             console.error("Error skipping all reminders:", error);
+            alert("Failed to skip reminders. Please try again.");
         }
     };
-    const handleWriteReview = (arenaId) => {
+
+    const handleWriteReview = (arenaId, bookingId) => {
         setIsVisible(false);
-        // ✅ FIX: Navigate to arena details with showReviewForm parameter
-        navigate(`/user/arenas/${arenaId}?showReviewForm=true`);
+        // Navigate to arena details with booking_id parameter
+        navigate(`/user/arenas/${arenaId}?showReviewForm=true&bookingId=${bookingId}`);
     };
 
     const currentReview = pendingReviews[currentReviewIndex];
@@ -148,7 +151,7 @@ const ReviewReminderModal = () => {
                 <div className="px-6 pb-6">
                     <div className="flex flex-col space-y-3">
                         <button
-                            onClick={() => handleWriteReview(currentReview.arena_id)}
+                            onClick={() => handleWriteReview(currentReview.arena_id, currentReview.booking_id)}
                             className="bg-blue-600 text-white font-semibold py-3 rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center"
                         >
                             <span className="mr-2">⭐</span>
@@ -165,22 +168,16 @@ const ReviewReminderModal = () => {
                         {pendingReviews.length > 1 && (
                             <div className="flex justify-between pt-4 border-t">
                                 <button
-                                    onClick={() =>
-                                        setCurrentReviewIndex((prev) =>
-                                            prev > 0 ? prev - 1 : prev
-                                        )
-                                    }
+                                    onClick={() => setCurrentReviewIndex((prev) => Math.max(0, prev - 1))}
                                     disabled={currentReviewIndex === 0}
                                     className="text-blue-600 font-medium disabled:text-gray-400"
                                 >
                                     ← Previous
                                 </button>
                                 <button
-                                    onClick={() =>
-                                        setCurrentReviewIndex((prev) =>
-                                            prev < pendingReviews.length - 1 ? prev + 1 : prev
-                                        )
-                                    }
+                                    onClick={() => setCurrentReviewIndex((prev) =>
+                                        Math.min(pendingReviews.length - 1, prev + 1)
+                                    )}
                                     disabled={currentReviewIndex === pendingReviews.length - 1}
                                     className="text-blue-600 font-medium disabled:text-gray-400"
                                 >
@@ -195,7 +192,7 @@ const ReviewReminderModal = () => {
                             onClick={handleSkipAll}
                             className="text-gray-500 text-sm hover:text-gray-700"
                         >
-                            Don't show these reminders again for 7 days
+                            Don't show these reminders again for 30 days
                         </button>
                     </div>
                 </div>
