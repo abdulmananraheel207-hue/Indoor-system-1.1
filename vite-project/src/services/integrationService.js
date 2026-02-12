@@ -313,15 +313,25 @@ export const integrationService = {
       const token = localStorage.getItem('adminToken');
       console.log('📤 Marking payment for arena:', arenaId, 'with data:', paymentData);
 
-      // Make sure we're sending the correct action
+      if (!token) {
+        throw new Error('No admin token found. Please login again.');
+      }
+
+      // IMPORTANT: Convert amount_paid to number
+      const amountPaid = parseFloat(paymentData.amount_paid);
+
+      if (isNaN(amountPaid) || amountPaid <= 0) {
+        throw new Error('Invalid amount paid');
+      }
+
       const requestData = {
         action: 'mark_paid',
-        amount_paid: paymentData.amount_paid,
+        amount_paid: amountPaid, // Now it's a number, not a string
         notes: paymentData.notes || `Monthly commission payment`,
         notify_owner: true
       };
 
-      console.log('📤 Request data:', requestData);
+      console.log('📤 Request data (with number):', requestData);
 
       const response = await fetch(`http://localhost:5000/api/super-admin/arenas/${arenaId}/enforce-payment`, {
         method: 'POST',
@@ -332,9 +342,8 @@ export const integrationService = {
         body: JSON.stringify(requestData)
       });
 
-      console.log('📡 Response status:', response.status);
-
       const responseText = await response.text();
+      console.log('📡 Response status:', response.status);
       console.log('📡 Raw response:', responseText);
 
       if (!response.ok) {
@@ -1396,6 +1405,102 @@ export const integrationService = {
       throw error;
     }
   },
+  // Add these methods to integrationService.js
+
+  blockOwner: async (ownerId, blockData) => {
+    try {
+      const token = localStorage.getItem('adminToken');
+
+      if (!token) {
+        throw new Error('No admin token found');
+      }
+
+      console.log('🔒 API Call - Block owner:', { ownerId, blockData });
+
+      const response = await fetch(`http://localhost:5000/api/super-admin/owners/${ownerId}/block`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          reason: blockData.reason,
+          block_arenas: blockData.block_arenas !== false,
+          notify_owner: blockData.notify_owner !== false
+        })
+      });
+
+      const responseText = await response.text();
+      console.log('📡 Block owner response:', response.status, responseText);
+
+      if (!response.ok) {
+        let errorMessage = 'Failed to block owner';
+        try {
+          const errorData = JSON.parse(responseText);
+          errorMessage = errorData.message || errorData.error || errorMessage;
+        } catch (e) {
+          errorMessage = responseText || errorMessage;
+        }
+        throw new Error(errorMessage);
+      }
+
+      const result = JSON.parse(responseText);
+      console.log('✅ Owner blocked successfully:', result);
+      return result;
+
+    } catch (error) {
+      console.error('❌ Block owner error:', error);
+      throw error;
+    }
+  },
+
+  // UNBLOCK OWNER - Complete function
+  unblockOwner: async (ownerId, unblockData) => {
+    try {
+      const token = localStorage.getItem('adminToken');
+
+      if (!token) {
+        throw new Error('No admin token found');
+      }
+
+      console.log('🔓 API Call - Unblock owner:', { ownerId, unblockData });
+
+      const response = await fetch(`http://localhost:5000/api/super-admin/owners/${ownerId}/unblock`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          unblock_arenas: true,
+          notify_owner: unblockData.notify_owner !== false
+        })
+      });
+
+      const responseText = await response.text();
+      console.log('📡 Unblock owner response:', response.status, responseText);
+
+      if (!response.ok) {
+        let errorMessage = 'Failed to unblock owner';
+        try {
+          const errorData = JSON.parse(responseText);
+          errorMessage = errorData.message || errorData.error || errorMessage;
+        } catch (e) {
+          errorMessage = responseText || errorMessage;
+        }
+        throw new Error(errorMessage);
+      }
+
+      const result = JSON.parse(responseText);
+      console.log('✅ Owner unblocked successfully:', result);
+      return result;
+
+    } catch (error) {
+      console.error('❌ Unblock owner error:', error);
+      throw error;
+    }
+  },
+
 };
 
 export default integrationService;

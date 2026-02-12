@@ -1,10 +1,10 @@
-
 import React, { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 
 const OwnerAuth = (props) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [blockedInfo, setBlockedInfo] = useState(null);
   const navigate = useNavigate();
 
   const [formData, setFormData] = useState({
@@ -19,12 +19,14 @@ const OwnerAuth = (props) => {
       [name]: value,
     });
     if (error) setError("");
+    if (blockedInfo) setBlockedInfo(null);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError("");
+    setBlockedInfo(null);
 
     try {
       // 🔥 CRITICAL: Clear ALL previous authentication data
@@ -51,14 +53,18 @@ const OwnerAuth = (props) => {
 
       const data = await response.json();
 
+      // 🚫 CHECK FOR BLOCKED ACCOUNT
+      if (response.status === 403 && data.message === 'ACCOUNT_BLOCKED') {
+        setBlockedInfo(data.details);
+        setLoading(false);
+        return;
+      }
+
       if (response.ok) {
         // Store owner data
         localStorage.setItem("token", data.token);
         localStorage.setItem("userRole", "owner");
         localStorage.setItem("ownerData", JSON.stringify(data.owner || data.user));
-
-        // Don't store as userData - that's for regular users
-        // localStorage.setItem("userData", JSON.stringify(data.owner || data.user));
 
         if (props.onLogin) {
           props.onLogin(data.token, data.owner || data.user);
@@ -76,6 +82,61 @@ const OwnerAuth = (props) => {
     }
   };
 
+  // 🚫 BLOCKED ACCOUNT MESSAGE COMPONENT
+  if (blockedInfo) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-blue-100 flex items-center justify-center py-6 px-3 sm:px-4 md:px-6 lg:px-8">
+        <div className="w-full max-w-xl md:max-w-2xl bg-white p-4 sm:p-6 md:p-8 rounded-2xl shadow-2xl">
+          <div className="text-center">
+            <div className="mx-auto h-20 w-20 bg-red-100 rounded-full flex items-center justify-center mb-4">
+              <svg className="h-10 w-10 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+              </svg>
+            </div>
+
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-gray-900 mb-2">
+              Account Blocked
+            </h2>
+
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4 text-left">
+              <p className="text-red-800 font-medium mb-2">Reason:</p>
+              <p className="text-red-700 text-sm">{blockedInfo.reason}</p>
+
+              <p className="text-red-800 font-medium mt-3 mb-1">Blocked on:</p>
+              <p className="text-red-700 text-sm">{blockedInfo.blocked_date}</p>
+            </div>
+
+            <div className="border-t border-gray-200 pt-4 mt-4">
+              <p className="text-gray-700 font-medium mb-3">Need help? Contact support:</p>
+              <div className="space-y-2 text-sm">
+                <p className="text-gray-600">
+                  📧 {blockedInfo.support_email || 'support@arenafinder.com'}
+                </p>
+                <p className="text-gray-600">
+                  📞 {blockedInfo.support_phone || '+92 300 1234567'}
+                </p>
+              </div>
+
+              <button
+                onClick={() => {
+                  setBlockedInfo(null);
+                  setFormData({
+                    loginEmail: "",
+                    loginPassword: "",
+                  });
+                }}
+                className="mt-6 w-full px-4 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+              >
+                Try Again
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Normal Login Form (Your existing JSX - unchanged)
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-blue-100 flex items-center justify-center py-6 px-3 sm:px-4 md:px-6 lg:px-8">
       <div className="w-full max-w-xl md:max-w-2xl bg-white p-4 sm:p-6 md:p-8 rounded-2xl shadow-2xl">

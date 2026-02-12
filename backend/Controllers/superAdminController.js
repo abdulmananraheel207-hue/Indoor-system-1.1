@@ -581,9 +581,212 @@ const superAdminController = {
         }
     },
 
+    // Add to superAdminController.js
+
+    // Block owner
+    blockOwner: async (req, res) => {
+        try {
+            const { owner_id } = req.params;
+            const { reason, notify_owner, block_arenas } = req.body;
+            const admin_id = req.user?.id;
+
+            console.log('🔒 Blocking owner:', { owner_id, reason, block_arenas, admin_id });
+
+            if (!reason) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Block reason is required'
+                });
+            }
+
+            // Get a connection for transaction
+            const connection = await pool.getConnection();
+
+            try {
+                await connection.query('START TRANSACTION');
+
+                // 1. Block the owner account
+                const [ownerResult] = await connection.execute(
+                    `UPDATE arena_owners 
+                 SET is_blocked = TRUE,
+                     blocked_reason = ?,
+                     blocked_at = NOW()
+                 WHERE owner_id = ?`,
+                    [reason, owner_id]
+                );
+
+                if (ownerResult.affectedRows === 0) {
+                    await connection.query('ROLLBACK');
+                    connection.release();
+                    return res.status(404).json({
+                        success: false,
+                        message: 'Owner not found'
+                    });
+                }
+
+                // 2. Block all arenas of this owner (if requested)
+                if (block_arenas) {
+                    await connection.execute(
+                        `UPDATE arenas 
+                     SET is_blocked = TRUE,
+                         blocked_reason = ?,
+                         blocked_at = NOW()
+                     WHERE owner_id = ? AND is_blocked = FALSE`,
+                        [reason, owner_id]
+                    );
+                }
+
+                // 3. Log admin action
+                await connection.execute(
+                    `INSERT INTO admin_actions 
+                 (admin_id, action_type, target_id, target_type, details, ip_address)
+                 VALUES (?, ?, ?, ?, ?, ?)`,
+                    [
+                        admin_id,
+                        'owner_blocked',
+                        owner_id,
+                        'owner',
+                        JSON.stringify({
+                            reason,
+                            block_arenas,
+                            notify_owner,
+                            timestamp: new Date().toISOString()
+                        }),
+                        req.ip || '127.0.0.1'
+                    ]
+                );
+
+                await connection.query('COMMIT');
+                connection.release();
+
+                // Get updated owner data
+                const [updatedOwner] = await pool.execute(
+                    `SELECT owner_id, arena_name, email, is_blocked, blocked_reason, blocked_at
+                 FROM arena_owners WHERE owner_id = ?`,
+                    [owner_id]
+                );
+
+                res.json({
+                    success: true,
+                    message: 'Owner blocked successfully',
+                    data: updatedOwner[0]
+                });
+
+            } catch (error) {
+                await connection.query('ROLLBACK');
+                connection.release();
+                throw error;
+            }
+
+        } catch (error) {
+            console.error('❌ Block owner error:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Failed to block owner',
+                error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            });
+        }
+    },
+
+    // UNBLOCK OWNER - Complete function
+    unblockOwner: async (req, res) => {
+        try {
+            const { owner_id } = req.params;
+            const { notify_owner, unblock_arenas = true } = req.body;
+            const admin_id = req.user?.id;
+
+            console.log('🔓 Unblocking owner:', { owner_id, unblock_arenas, admin_id });
+
+            // Get a connection for transaction
+            const connection = await pool.getConnection();
+
+            try {
+                await connection.query('START TRANSACTION');
+
+                // 1. Unblock the owner account
+                const [ownerResult] = await connection.execute(
+                    `UPDATE arena_owners 
+                 SET is_blocked = FALSE,
+                     blocked_reason = NULL,
+                     blocked_at = NULL
+                 WHERE owner_id = ?`,
+                    [owner_id]
+                );
+
+                if (ownerResult.affectedRows === 0) {
+                    await connection.query('ROLLBACK');
+                    connection.release();
+                    return res.status(404).json({
+                        success: false,
+                        message: 'Owner not found'
+                    });
+                }
+
+                // 2. Unblock all arenas of this owner
+                if (unblock_arenas) {
+                    await connection.execute(
+                        `UPDATE arenas 
+                     SET is_blocked = FALSE,
+                         blocked_reason = NULL,
+                         blocked_at = NULL
+                     WHERE owner_id = ?`,
+                        [owner_id]
+                    );
+                }
+
+                // 3. Log admin action
+                await connection.execute(
+                    `INSERT INTO admin_actions 
+                 (admin_id, action_type, target_id, target_type, details, ip_address)
+                 VALUES (?, ?, ?, ?, ?, ?)`,
+                    [
+                        admin_id,
+                        'owner_unblocked',
+                        owner_id,
+                        'owner',
+                        JSON.stringify({
+                            unblock_arenas,
+                            notify_owner,
+                            timestamp: new Date().toISOString()
+                        }),
+                        req.ip || '127.0.0.1'
+                    ]
+                );
+
+                await connection.query('COMMIT');
+                connection.release();
+
+                // Get updated owner data
+                const [updatedOwner] = await pool.execute(
+                    `SELECT owner_id, arena_name, email, is_blocked
+                 FROM arena_owners WHERE owner_id = ?`,
+                    [owner_id]
+                );
+
+                res.json({
+                    success: true,
+                    message: 'Owner unblocked successfully',
+                    data: updatedOwner[0]
+                });
+
+            } catch (error) {
+                await connection.query('ROLLBACK');
+                connection.release();
+                throw error;
+            }
+
+        } catch (error) {
+            console.error('❌ Unblock owner error:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Failed to unblock owner',
+                error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            });
+        }
+    },
+
 
     // 4. PAYMENT ENFORCEMENT: Block Arena for Non-Payment
-
     enforcePayment: async (req, res) => {
         try {
             const { arena_id } = req.params;
@@ -605,12 +808,15 @@ const superAdminController = {
                 });
             }
 
-            // Start transaction
-            await pool.execute('START TRANSACTION');
+            // Get a connection from the pool
+            const connection = await pool.getConnection();
 
             try {
-                // Get arena details
-                const [arenas] = await pool.execute(
+                // IMPORTANT: Use query() not execute() for transaction commands
+                await connection.query('START TRANSACTION');
+
+                // Get arena details - execute() is fine for parameterized queries
+                const [arenas] = await connection.execute(
                     `SELECT a.*, ao.email as owner_email, ao.arena_name as owner_name,
                         a.total_commission_due as pending_amount
                  FROM arenas a
@@ -620,7 +826,8 @@ const superAdminController = {
                 );
 
                 if (arenas.length === 0) {
-                    await pool.execute('ROLLBACK');
+                    await connection.query('ROLLBACK');
+                    connection.release();
                     return res.status(404).json({
                         success: false,
                         message: 'Arena not found'
@@ -632,8 +839,12 @@ const superAdminController = {
                 const currentMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
 
                 if (action === 'mark_paid') {
-                    if (!amount_paid || amount_paid <= 0) {
-                        await pool.execute('ROLLBACK');
+                    // Convert to number
+                    const paidAmount = parseFloat(amount_paid);
+
+                    if (isNaN(paidAmount) || paidAmount <= 0) {
+                        await connection.query('ROLLBACK');
+                        connection.release();
                         return res.status(400).json({
                             success: false,
                             message: 'Valid amount_paid is required'
@@ -644,16 +855,16 @@ const superAdminController = {
                     const dueDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
 
                     // 1. Update arena's commission due
-                    const [updateResult] = await pool.execute(
+                    await connection.execute(
                         `UPDATE arenas 
                      SET total_commission_due = GREATEST(0, total_commission_due - ?),
                          last_payment_date = NOW()
                      WHERE arena_id = ?`,
-                        [amount_paid, arena_id]
+                        [paidAmount, arena_id]
                     );
 
                     // 2. Record payment in commission_payments table
-                    await pool.execute(
+                    await connection.execute(
                         `INSERT INTO commission_payments 
                      (arena_id, owner_id, amount_due, amount_paid, due_date, 
                       payment_date, status, marked_by_admin_id, notes)
@@ -661,8 +872,8 @@ const superAdminController = {
                         [
                             arena_id,
                             arena.owner_id,
-                            arena.total_commission_due, // Original due amount
-                            amount_paid,
+                            arena.total_commission_due,
+                            paidAmount,
                             dueDate,
                             admin_id,
                             notes || `Monthly commission payment marked by admin`
@@ -670,7 +881,7 @@ const superAdminController = {
                     );
 
                     // 3. Log admin action
-                    await pool.execute(
+                    await connection.execute(
                         `INSERT INTO admin_actions 
                      (admin_id, action_type, target_id, target_type, details, ip_address)
                      VALUES (?, ?, ?, ?, ?, ?)`,
@@ -680,7 +891,7 @@ const superAdminController = {
                             arena_id,
                             'arena',
                             JSON.stringify({
-                                amount_paid,
+                                amount_paid: paidAmount,
                                 previous_due: arena.total_commission_due,
                                 arena_name: arena.name,
                                 owner_name: arena.owner_name,
@@ -690,15 +901,9 @@ const superAdminController = {
                         ]
                     );
 
-                    // 4. Send notification to owner if requested
-                    if (notify_owner) {
-                        // You can implement email/notification here
-                        console.log(`📧 Would send payment notification to owner: ${arena.owner_email}`);
-                    }
-
                 } else if (action === 'block_for_non_payment') {
                     // Block arena
-                    await pool.execute(
+                    await connection.execute(
                         `UPDATE arenas 
                      SET is_blocked = TRUE, 
                          blocked_reason = ?, 
@@ -708,7 +913,7 @@ const superAdminController = {
                     );
 
                     // Log admin action
-                    await pool.execute(
+                    await connection.execute(
                         `INSERT INTO admin_actions 
                      (admin_id, action_type, target_id, target_type, details, ip_address)
                      VALUES (?, ?, ?, ?, ?, ?)`,
@@ -730,7 +935,7 @@ const superAdminController = {
 
                 } else if (action === 'unblock') {
                     // Unblock arena
-                    await pool.execute(
+                    await connection.execute(
                         `UPDATE arenas 
                      SET is_blocked = FALSE, 
                          blocked_reason = NULL, 
@@ -740,7 +945,7 @@ const superAdminController = {
                     );
 
                     // Log admin action
-                    await pool.execute(
+                    await connection.execute(
                         `INSERT INTO admin_actions 
                      (admin_id, action_type, target_id, target_type, details, ip_address)
                      VALUES (?, ?, ?, ?, ?, ?)`,
@@ -759,15 +964,17 @@ const superAdminController = {
                     );
 
                 } else {
-                    await pool.execute('ROLLBACK');
+                    await connection.query('ROLLBACK');
+                    connection.release();
                     return res.status(400).json({
                         success: false,
                         message: `Unknown action: ${action}`
                     });
                 }
 
-                // Commit transaction
-                await pool.execute('COMMIT');
+                // Commit transaction - use query() not execute()
+                await connection.query('COMMIT');
+                connection.release();
 
                 // Get updated arena info
                 const [updatedArena] = await pool.execute(
@@ -787,12 +994,13 @@ const superAdminController = {
                         arena_name: updatedArena[0]?.name || arena.name,
                         owner_name: updatedArena[0]?.owner_name || arena.owner_name,
                         remaining_due: updatedArena[0]?.total_commission_due || 0,
-                        is_blocked: updatedArena[0]?.is_blocked || arena.is_blocked
+                        is_blocked: updatedArena[0]?.is_blocked || false
                     }
                 });
 
             } catch (error) {
-                await pool.execute('ROLLBACK');
+                await connection.query('ROLLBACK');
+                connection.release();
                 console.error('❌ Transaction error:', error);
                 throw error;
             }

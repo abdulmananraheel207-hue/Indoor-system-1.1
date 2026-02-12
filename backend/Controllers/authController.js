@@ -5,7 +5,6 @@ const crypto = require("crypto");
 
 const authController = {
   // User Registration
-  // User Registration
   registerUser: async (req, res) => {
     try {
       // Accept both phone and phone_number from frontend
@@ -76,6 +75,7 @@ const authController = {
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
+
   // Arena Owner Registration
   registerOwner: async (req, res) => {
     try {
@@ -280,7 +280,6 @@ const authController = {
   },
 
   // Login for all user types
-  // Login for all user types
   login: async (req, res) => {
     try {
       const { email, password, userType } = req.body;
@@ -298,7 +297,6 @@ const authController = {
           break;
         case "admin":
           table = "admins";
-          // Default role, will be overwritten with actual role from database
           role = "admin";
           break;
         case "manager":
@@ -327,6 +325,21 @@ const authController = {
 
       user = users[0];
 
+      // 🚫 CHECK IF OWNER IS BLOCKED - ADDED HERE
+      if (userType === "owner" && (user.is_blocked === 1 || user.is_blocked === true)) {
+        console.log('🚫 Blocked owner attempted login:', user.owner_id, user.email);
+        return res.status(403).json({
+          success: false,
+          message: 'ACCOUNT_BLOCKED',
+          details: {
+            reason: user.blocked_reason || 'Your account has been blocked due to non-payment or violation of terms.',
+            blocked_date: user.blocked_at ? new Date(user.blocked_at).toLocaleDateString() : 'Recently',
+            support_email: 'support@arenafinder.com',
+            support_phone: '+92 300 1234567'
+          }
+        });
+      }
+
       // Verify password
       const isValidPassword = await bcrypt.compare(
         password,
@@ -348,14 +361,14 @@ const authController = {
       let actualRole = role;
       if (table === "admins") {
         // Get the actual role from the database
-        actualRole = user.role || "admin"; // Use the role column from admins table
+        actualRole = user.role || "admin";
       }
 
       // Generate token
       const tokenPayload = {
         id: user.user_id || user.owner_id || user.admin_id || user.manager_id,
         email: user.email,
-        role: actualRole, // Use the actual role
+        role: actualRole,
       };
 
       // Add owner_id for managers
@@ -400,7 +413,7 @@ const authController = {
           name: user.name,
           username: user.username,
           email: user.email,
-          role: actualRole, // This will be 'super_admin', 'admin', or 'moderator'
+          role: actualRole,
           is_super_admin: user.is_super_admin || false,
           permissions: user.permissions || null,
         };

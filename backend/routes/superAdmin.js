@@ -21,5 +21,10 @@ router.get('/export/financial-report', superAdminController.exportFinancialRepor
 
 // 4. PAYMENT ENFORCEMENT ROUTES
 router.post('/arenas/:arena_id/enforce-payment', superAdminController.enforcePayment);
+// Block owner
+router.post('/owners/:owner_id/block', superAdminController.blockOwner);
+
+// Unblock owner
+router.post('/owners/:owner_id/unblock', superAdminController.unblockOwner);
 
 module.exports = router;
