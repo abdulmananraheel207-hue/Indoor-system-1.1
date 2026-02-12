@@ -1,17 +1,24 @@
+// File: OwnerCalendar.jsx - UPDATED for both Owner and Manager roles
 import React, { useState, useEffect } from "react";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { ownerAPI } from "../../services/api";
 
-const OwnerCalendar = ({ arenas = [] }) => {
+const OwnerCalendar = ({ arenas = [], isOwner, permissions = {} }) => {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedArena, setSelectedArena] = useState("");
-  const [selectedCourt, setSelectedCourt] = useState(""); // ADD STATE FOR COURT
-  const [courts, setCourts] = useState([]); // ADD STATE FOR COURTS LIST
+  const [selectedCourt, setSelectedCourt] = useState("");
+  const [courts, setCourts] = useState([]);
   const [timeSlots, setTimeSlots] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
+
+  // Permission checks
+  const canViewCalendar = isOwner || permissions.view_calendar;
+  const canManageCalendar = isOwner || permissions.manage_calendar;
+  const canViewArena = isOwner || permissions.view_arena;
+  const canManageArena = isOwner || permissions.manage_arena;
 
   // Add new slot form state
   const [showAddSlotForm, setShowAddSlotForm] = useState(false);
@@ -36,25 +43,41 @@ const OwnerCalendar = ({ arenas = [] }) => {
 
   // Fetch courts when arena changes
   useEffect(() => {
-    if (selectedArena) {
+    if (selectedArena && (canViewArena || canManageArena)) {
       fetchCourts();
     }
-  }, [selectedArena]);
+  }, [selectedArena, canViewArena, canManageArena]);
 
   // Fetch time slots when date or court changes
   useEffect(() => {
-    if (selectedArena) {
+    if (selectedArena && canViewCalendar) {
       fetchTimeSlots();
     }
-  }, [selectedDate, selectedArena, selectedCourt]);
+  }, [selectedDate, selectedArena, selectedCourt, canViewCalendar]);
 
   const fetchCourts = async () => {
     try {
-      const response = await ownerAPI.getCourts(selectedArena);
-      if (response.data && response.data.length > 0) {
-        setCourts(response.data);
+      const token = localStorage.getItem("token");
+      const userRole = localStorage.getItem("userRole");
+
+      let response;
+      if (userRole === "owner") {
+        response = await ownerAPI.getCourts(selectedArena);
+      } else {
+        // Manager endpoint for courts
+        response = await fetch(
+          `http://localhost:5000/api/managers/courts/${selectedArena}`,
+          {
+            headers: { Authorization: `Bearer ${token}` }
+          }
+        ).then(res => res.json());
+      }
+
+      const courtsData = response.data || response || [];
+      if (courtsData.length > 0) {
+        setCourts(courtsData);
         // Auto-select first court
-        setSelectedCourt(response.data[0].court_id);
+        setSelectedCourt(courtsData[0].court_id);
       } else {
         setCourts([]);
         setSelectedCourt("");
@@ -67,16 +90,36 @@ const OwnerCalendar = ({ arenas = [] }) => {
   };
 
   const fetchTimeSlots = async () => {
+    if (!canViewCalendar) return;
+
     try {
       setLoading(true);
       const dateStr = selectedDate.toISOString().split("T")[0];
+      const token = localStorage.getItem("token");
+      const userRole = localStorage.getItem("userRole");
 
-      // Pass court_id to API if selected
-      const response = await ownerAPI.getTimeSlots(
-        selectedArena,
-        dateStr,
-        selectedCourt || undefined
-      );
+      let response;
+      if (userRole === "owner") {
+        response = await ownerAPI.getTimeSlots(
+          selectedArena,
+          dateStr,
+          selectedCourt || undefined
+        );
+      } else {
+        // Manager endpoint for time slots
+        const params = new URLSearchParams({
+          date: dateStr,
+          ...(selectedCourt && { court_id: selectedCourt })
+        });
+
+        const fetchResponse = await fetch(
+          `http://localhost:5000/api/managers/calendar?arena_id=${selectedArena}&${params}`,
+          {
+            headers: { Authorization: `Bearer ${token}` }
+          }
+        );
+        response = { data: await fetchResponse.json() };
+      }
 
       if (response.data && response.data.length > 0) {
         setTimeSlots(response.data);
@@ -107,7 +150,6 @@ const OwnerCalendar = ({ arenas = [] }) => {
     const endHour = parseInt(closingTime.split(":")[0]);
     const endMinute = parseInt(closingTime.split(":")[1]);
 
-    // Generate auto slots
     while (
       currentHour < endHour ||
       (currentHour === endHour && currentMinute < endMinute)
@@ -120,7 +162,6 @@ const OwnerCalendar = ({ arenas = [] }) => {
         endMinuteCalc -= 60;
       }
 
-      // Stop if exceeds closing time
       if (
         endHourCalc > endHour ||
         (endHourCalc === endHour && endMinuteCalc > endMinute)
@@ -140,9 +181,9 @@ const OwnerCalendar = ({ arenas = [] }) => {
         end_time: endTimeStr,
         price: basePrice,
         is_blocked: false,
-        is_auto: true, // Mark as auto-generated
+        is_auto: true,
         slot_id: `auto_${startTimeStr}_${endTimeStr}`,
-        court_id: selectedCourt, // Include court_id in auto-generated slots
+        court_id: selectedCourt,
       });
 
       currentHour = endHourCalc;
@@ -153,6 +194,11 @@ const OwnerCalendar = ({ arenas = [] }) => {
   };
 
   const handleAddSlot = () => {
+    if (!canManageCalendar) {
+      alert("❌ You don't have permission to add time slots");
+      return;
+    }
+
     if (!newSlot.start_time || !newSlot.end_time) {
       alert("Please enter start and end time");
       return;
@@ -179,12 +225,11 @@ const OwnerCalendar = ({ arenas = [] }) => {
       end_time: newSlot.end_time,
       price: newSlot.price || 500,
       is_blocked: false,
-      is_auto: false, // Mark as manually added
+      is_auto: false,
       slot_id: `manual_${Date.now()}`,
-      court_id: selectedCourt, // Include court_id in manual slots
+      court_id: selectedCourt,
     };
 
-    // Add to beginning or sort by time
     const updatedSlots = [...timeSlots, newSlotObj].sort((a, b) =>
       a.start_time.localeCompare(b.start_time)
     );
@@ -195,6 +240,11 @@ const OwnerCalendar = ({ arenas = [] }) => {
   };
 
   const handleEditSlot = (slot) => {
+    if (!canManageCalendar) {
+      alert("❌ You don't have permission to edit time slots");
+      return;
+    }
+
     setEditingSlot(slot);
     setEditForm({
       price: slot.price,
@@ -203,6 +253,11 @@ const OwnerCalendar = ({ arenas = [] }) => {
   };
 
   const handleUpdateSlot = () => {
+    if (!canManageCalendar) {
+      alert("❌ You don't have permission to update time slots");
+      return;
+    }
+
     if (!editingSlot) return;
 
     const updatedSlots = timeSlots.map((slot) =>
@@ -214,6 +269,11 @@ const OwnerCalendar = ({ arenas = [] }) => {
   };
 
   const handleDeleteSlot = (slotId) => {
+    if (!canManageCalendar) {
+      alert("❌ You don't have permission to delete time slots");
+      return;
+    }
+
     if (!window.confirm("Are you sure you want to delete this time slot?"))
       return;
 
@@ -231,6 +291,11 @@ const OwnerCalendar = ({ arenas = [] }) => {
   };
 
   const handleBlockAll = () => {
+    if (!canManageCalendar) {
+      alert("❌ You don't have permission to block time slots");
+      return;
+    }
+
     const updatedSlots = timeSlots.map((slot) => ({
       ...slot,
       is_blocked: true,
@@ -239,6 +304,11 @@ const OwnerCalendar = ({ arenas = [] }) => {
   };
 
   const handleUnblockAll = () => {
+    if (!canManageCalendar) {
+      alert("❌ You don't have permission to unblock time slots");
+      return;
+    }
+
     const updatedSlots = timeSlots.map((slot) => ({
       ...slot,
       is_blocked: false,
@@ -246,52 +316,72 @@ const OwnerCalendar = ({ arenas = [] }) => {
     setTimeSlots(updatedSlots);
   };
 
-const handleSaveChanges = async () => {
-  if (!selectedArena) {
-    alert("Please select an arena first");
-    return;
-  }
+  const handleSaveChanges = async () => {
+    if (!canManageCalendar) {
+      alert("❌ You don't have permission to save time slot changes");
+      return;
+    }
 
-  setSaving(true);
-  try {
-    const dateStr = selectedDate.toISOString().split("T")[0];
-    
-    // Ensure all slots have the correct court_id
-    const processedSlots = timeSlots.map((slot) => ({
-      start_time: slot.start_time.includes(":00") ? slot.start_time : slot.start_time + ":00",
-      end_time: slot.end_time.includes(":00") ? slot.end_time : slot.end_time + ":00",
-      price: parseInt(slot.price) || 500,
-      is_blocked: slot.is_blocked || false,
-      court_id: slot.court_id || selectedCourt, // Make sure court_id is included
-    }));
+    if (!selectedArena) {
+      alert("Please select an arena first");
+      return;
+    }
 
-    const payload = {
-      date: dateStr,
-      action: "update_slots", // Explicitly specify the action
-      slots: processedSlots,
-      court_id: selectedCourt || undefined, // Include top-level court_id as fallback
-    };
+    setSaving(true);
+    try {
+      const dateStr = selectedDate.toISOString().split("T")[0];
+      const userRole = localStorage.getItem("userRole");
+      const token = localStorage.getItem("token");
 
-    console.log("Saving payload:", payload); // For debugging
-    
-    await ownerAPI.updateTimeSlots(selectedArena, payload);
-    setSuccessMessage("Time slots saved successfully!");
-    setTimeout(() => setSuccessMessage(""), 3000);
-    
-    // Refresh the slots after saving
-    setTimeout(() => {
-      fetchTimeSlots();
-    }, 1000);
-    
-  } catch (error) {
-    console.error("Error saving time slots:", error);
-    alert(error.response?.data?.message || "Failed to save time slots");
-  } finally {
-    setSaving(false);
-  }
-};
+      const processedSlots = timeSlots.map((slot) => ({
+        start_time: slot.start_time.includes(":00") ? slot.start_time : slot.start_time + ":00",
+        end_time: slot.end_time.includes(":00") ? slot.end_time : slot.end_time + ":00",
+        price: parseInt(slot.price) || 500,
+        is_blocked: slot.is_blocked || false,
+        court_id: slot.court_id || selectedCourt,
+      }));
 
+      const payload = {
+        date: dateStr,
+        action: "update_slots",
+        slots: processedSlots,
+        court_id: selectedCourt || undefined,
+      };
 
+      if (userRole === "owner") {
+        await ownerAPI.updateTimeSlots(selectedArena, payload);
+      } else {
+        // Manager endpoint for updating slots
+        await fetch(
+          `http://localhost:5000/api/managers/calendar/slots`,
+          {
+            method: "PUT",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              arena_id: selectedArena,
+              ...payload
+            }),
+          }
+        );
+      }
+
+      setSuccessMessage("Time slots saved successfully!");
+      setTimeout(() => setSuccessMessage(""), 3000);
+
+      setTimeout(() => {
+        fetchTimeSlots();
+      }, 1000);
+
+    } catch (error) {
+      console.error("Error saving time slots:", error);
+      alert(error.response?.data?.message || "Failed to save time slots");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const formatDate = (date) => {
     return date.toLocaleDateString("en-US", {
@@ -310,11 +400,38 @@ const handleSaveChanges = async () => {
     return courts.find((c) => c.court_id == selectedCourt);
   };
 
+  // If user doesn't have permission to view calendar
+  if (!canViewCalendar) {
+    return (
+      <div className="bg-white rounded-xl shadow p-8 text-center">
+        <svg className="w-16 h-16 mx-auto text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+        </svg>
+        <h3 className="mt-4 text-lg font-medium text-gray-900">Access Denied</h3>
+        <p className="mt-1 text-sm text-gray-500">
+          You don't have permission to view the calendar.
+        </p>
+        <p className="mt-2 text-xs text-gray-400">
+          Required permission: view_calendar
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-6xl mx-auto">
-      <h1 className="text-xl font-bold text-gray-900 mb-4 md:text-2xl md:mb-6">
-        Calendar & Time Slot Management
-      </h1>
+      <div className="flex justify-between items-center mb-4">
+        <div>
+          <h1 className="text-xl font-bold text-gray-900 md:text-2xl">
+            Calendar & Time Slot Management
+          </h1>
+          {!isOwner && (
+            <p className="text-sm text-gray-600 mt-1">
+              {canManageCalendar ? "You can manage time slots" : "View-only access"}
+            </p>
+          )}
+        </div>
+      </div>
 
       {successMessage && (
         <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
@@ -348,9 +465,10 @@ const handleSaveChanges = async () => {
               value={selectedArena}
               onChange={(e) => {
                 setSelectedArena(e.target.value);
-                setSelectedCourt(""); // Reset court when arena changes
+                setSelectedCourt("");
               }}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              disabled={!canViewArena && !canManageArena}
             >
               <option value="">Select an arena</option>
               {arenas.map((arena) => (
@@ -359,8 +477,6 @@ const handleSaveChanges = async () => {
                 </option>
               ))}
             </select>
-
-
           </div>
 
           <div>
@@ -370,7 +486,7 @@ const handleSaveChanges = async () => {
             <select
               value={selectedCourt}
               onChange={(e) => setSelectedCourt(e.target.value)}
-              disabled={!selectedArena || courts.length === 0}
+              disabled={!selectedArena || courts.length === 0 || (!canViewArena && !canManageArena)}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
             >
               {courts.length === 0 ? (
@@ -383,11 +499,6 @@ const handleSaveChanges = async () => {
                 ))
               )}
             </select>
-            {courts.length === 1 && (
-              <p className="text-xs text-gray-500 mt-1">
-                Single-court arena - court selection not needed
-              </p>
-            )}
           </div>
 
           <div>
@@ -459,27 +570,31 @@ const handleSaveChanges = async () => {
           <div>
             <h2 className="text-lg font-medium text-gray-900">Time Slots</h2>
             <p className="text-sm text-gray-600">
-              Auto-generated slots are based on your arena's operating hours
+              {canManageCalendar
+                ? "Auto-generated slots are based on your arena's operating hours"
+                : "View only - You cannot modify time slots"}
             </p>
           </div>
-          <div className="flex space-x-2">
-            <button
-              onClick={handleBlockAll}
-              className="px-3 py-1.5 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200"
-            >
-              Block All
-            </button>
-            <button
-              onClick={handleUnblockAll}
-              className="px-3 py-1.5 text-sm bg-green-100 text-green-700 rounded hover:bg-green-200"
-            >
-              Unblock All
-            </button>
-          </div>
+          {canManageCalendar && (
+            <div className="flex space-x-2">
+              <button
+                onClick={handleBlockAll}
+                className="px-3 py-1.5 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200"
+              >
+                Block All
+              </button>
+              <button
+                onClick={handleUnblockAll}
+                className="px-3 py-1.5 text-sm bg-green-100 text-green-700 rounded hover:bg-green-200"
+              >
+                Unblock All
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* Add New Slot Form */}
-        {showAddSlotForm && (
+        {/* Add New Slot Form - Only show if user can manage calendar */}
+        {canManageCalendar && showAddSlotForm && (
           <div className="p-4 border-b bg-blue-50">
             <h3 className="font-medium text-blue-900 mb-3">
               Add New Time Slot
@@ -582,36 +697,40 @@ const handleSaveChanges = async () => {
                   </div>
                 </div>
 
-                <div className="flex space-x-2">
-                  <button
-                    onClick={() => handleEditSlot(slot)}
-                    className="px-3 py-1 text-sm bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
-                  >
-                    Edit
-                  </button>
-                  {!slot.is_auto && (
+                {canManageCalendar && (
+                  <div className="flex space-x-2">
                     <button
-                      onClick={() => handleDeleteSlot(slot.slot_id)}
-                      className="px-3 py-1 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200"
+                      onClick={() => handleEditSlot(slot)}
+                      className="px-3 py-1 text-sm bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
                     >
-                      Delete
+                      Edit
                     </button>
-                  )}
-                </div>
+                    {!slot.is_auto && (
+                      <button
+                        onClick={() => handleDeleteSlot(slot.slot_id)}
+                        className="px-3 py-1 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             ))
           )}
         </div>
 
-        {/* Add Slot Button */}
-        <div className="p-4 border-t">
-          <button
-            onClick={() => setShowAddSlotForm(true)}
-            className="w-full py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50"
-          >
-            + Add Custom Time Slot
-          </button>
-        </div>
+        {/* Add Slot Button - Only show if user can manage calendar */}
+        {canManageCalendar && (
+          <div className="p-4 border-t">
+            <button
+              onClick={() => setShowAddSlotForm(true)}
+              className="w-full py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50"
+            >
+              + Add Custom Time Slot
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Action Buttons */}
@@ -632,20 +751,22 @@ const handleSaveChanges = async () => {
             </div>
           </div>
 
-          <div className="flex space-x-3">
-            <button
-              onClick={handleSaveChanges}
-              disabled={saving || !selectedArena}
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-300"
-            >
-              {saving ? "Saving..." : "Save Changes"}
-            </button>
-          </div>
+          {canManageCalendar && (
+            <div className="flex space-x-3">
+              <button
+                onClick={handleSaveChanges}
+                disabled={saving || !selectedArena}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-300"
+              >
+                {saving ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Edit Slot Modal */}
-      {editingSlot && (
+      {/* Edit Slot Modal - Only show if user can manage calendar */}
+      {canManageCalendar && editingSlot && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white w-full max-w-md rounded-xl shadow-lg">
             <div className="p-4 border-b flex justify-between items-center">
@@ -716,5 +837,5 @@ const handleSaveChanges = async () => {
     </div>
   );
 };
-// hello
+
 export default OwnerCalendar;

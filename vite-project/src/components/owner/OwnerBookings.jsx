@@ -1,36 +1,44 @@
-// File: OwnerBookings.jsx - UPDATED VERSION
+// File: OwnerBookings.jsx - UPDATED for both Owner and Manager roles
 import React, { useState, useEffect } from "react";
 import integrationService from "../../services/integrationService";
 
-const OwnerBookings = () => {
+const OwnerBookings = ({ isOwner, permissions = {} }) => {
   const [bookings, setBookings] = useState([]);
   const [filteredBookings, setFilteredBookings] = useState([]);
   const [statusFilter, setStatusFilter] = useState("all");
-  const [typeFilter, setTypeFilter] = useState("upcoming"); // upcoming, past, history
+  const [typeFilter, setTypeFilter] = useState("upcoming");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [stats, setStats] = useState({});
-  const [activeTab, setActiveTab] = useState("upcoming"); // upcoming, history
+  const [activeTab, setActiveTab] = useState("upcoming");
+
+  // Permission checks
+  const canViewBookings = isOwner || permissions.view_bookings;
+  const canManageBookings = isOwner || permissions.manage_bookings;
+  const canViewFinancial = isOwner || permissions.view_financial;
 
   useEffect(() => {
-    fetchBookings();
-    fetchStats();
-    const interval = setInterval(fetchBookings, 10000);
-    return () => clearInterval(interval);
+    if (canViewBookings) {
+      fetchBookings();
+      fetchStats();
+      const interval = setInterval(fetchBookings, 10000);
+      return () => clearInterval(interval);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter, typeFilter, dateFrom, dateTo, activeTab]);
+  }, [statusFilter, typeFilter, dateFrom, dateTo, activeTab, canViewBookings]);
 
   const fetchBookings = async () => {
+    if (!canViewBookings) return;
+
     setLoading(true);
     setError(null);
     try {
       const filters = {};
       if (statusFilter !== "all") filters.status = statusFilter;
 
-      // Set type based on active tab
       if (activeTab === "upcoming") {
         filters.type = "upcoming";
       } else if (activeTab === "history") {
@@ -40,17 +48,29 @@ const OwnerBookings = () => {
       if (dateFrom) filters.date_from = dateFrom;
       if (dateTo) filters.date_to = dateTo;
 
-      const data = await integrationService.getOwnerBookingRequests(filters);
+      let data;
+      if (isOwner) {
+        data = await integrationService.getOwnerBookingRequests(filters);
+      } else {
+        // Manager endpoint - you'll need to implement this
+        const token = localStorage.getItem("token");
+        const response = await fetch(
+          `http://localhost:5000/api/managers/bookings?${new URLSearchParams(filters)}`,
+          {
+            headers: { Authorization: `Bearer ${token}` }
+          }
+        );
+        data = await response.json();
+      }
+
       const bookingsData = Array.isArray(data) ? data : data.bookings || [];
 
-      // For upcoming tab, filter out completed/cancelled/rejected
       if (activeTab === "upcoming") {
         const upcomingOnly = bookingsData.filter(b =>
           b.status === 'pending' || b.status === 'accepted'
         );
         setFilteredBookings(upcomingOnly);
       } else if (activeTab === "history") {
-        // For history tab, show all status except pending/accepted
         const historyOnly = bookingsData.filter(b =>
           b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected'
         );
@@ -67,21 +87,56 @@ const OwnerBookings = () => {
   };
 
   const fetchStats = async () => {
+    if (!canViewFinancial) return;
+
     try {
-      const data = await integrationService.getOwnerBookingStats("month");
-      setStats(data.period_stats || {});
+      if (isOwner) {
+        const data = await integrationService.getOwnerBookingStats("month");
+        setStats(data.period_stats || {});
+      } else {
+        // Manager stats endpoint
+        const token = localStorage.getItem("token");
+        const response = await fetch(
+          "http://localhost:5000/api/managers/stats?period=month",
+          {
+            headers: { Authorization: `Bearer ${token}` }
+          }
+        );
+        const data = await response.json();
+        setStats(data || {});
+      }
     } catch (error) {
       console.error("Error fetching stats:", error);
     }
   };
 
   const handleAcceptBooking = async (bookingId) => {
+    if (!canManageBookings) {
+      alert("❌ You don't have permission to accept bookings");
+      return;
+    }
+
     if (!window.confirm("Are you sure you want to accept this booking?"))
       return;
 
     try {
       setLoading(true);
-      await integrationService.acceptBookingRequest(bookingId);
+
+      if (isOwner) {
+        await integrationService.acceptBookingRequest(bookingId);
+      } else {
+        const token = localStorage.getItem("token");
+        await fetch(
+          `http://localhost:5000/api/managers/bookings/${bookingId}/accept`,
+          {
+            method: "PUT",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          }
+        );
+      }
 
       // Update local state
       setBookings((prev) =>
@@ -90,7 +145,6 @@ const OwnerBookings = () => {
         )
       );
 
-      // Refresh the filtered list
       if (activeTab === "upcoming") {
         setFilteredBookings((prev) =>
           prev.map((b) =>
@@ -110,12 +164,32 @@ const OwnerBookings = () => {
   };
 
   const handleRejectBooking = async (bookingId) => {
+    if (!canManageBookings) {
+      alert("❌ You don't have permission to reject bookings");
+      return;
+    }
+
     if (!window.confirm("Are you sure you want to reject this booking?"))
       return;
 
     try {
       setLoading(true);
-      await integrationService.rejectBookingRequest(bookingId);
+
+      if (isOwner) {
+        await integrationService.rejectBookingRequest(bookingId);
+      } else {
+        const token = localStorage.getItem("token");
+        await fetch(
+          `http://localhost:5000/api/managers/bookings/${bookingId}/reject`,
+          {
+            method: "PUT",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          }
+        );
+      }
 
       // Update local state
       setBookings((prev) =>
@@ -124,7 +198,6 @@ const OwnerBookings = () => {
         )
       );
 
-      // Remove from upcoming tab, will appear in history tab
       if (activeTab === "upcoming") {
         setFilteredBookings((prev) =>
           prev.filter((b) => b.booking_id !== bookingId)
@@ -142,30 +215,34 @@ const OwnerBookings = () => {
   };
 
   const handleCompleteBooking = async (bookingId) => {
+    if (!canManageBookings) {
+      alert("❌ You don't have permission to complete bookings");
+      return;
+    }
+
     if (!window.confirm("Mark this booking as completed?")) return;
 
     try {
       const token = localStorage.getItem("token");
-      const response = await fetch(
-        `http://localhost:5000/api/owners/bookings/${bookingId}/complete`,
-        {
-          method: "PUT",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
+      const endpoint = isOwner
+        ? `http://localhost:5000/api/owners/bookings/${bookingId}/complete`
+        : `http://localhost:5000/api/managers/bookings/${bookingId}/complete`;
+
+      const response = await fetch(endpoint, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
 
       if (response.ok) {
-        // Update local state
         setBookings((prev) =>
           prev.map((b) =>
             b.booking_id === bookingId ? { ...b, status: "completed" } : b
           )
         );
 
-        // Remove from upcoming tab, will appear in history tab
         if (activeTab === "upcoming") {
           setFilteredBookings((prev) =>
             prev.filter((b) => b.booking_id !== bookingId)
@@ -184,13 +261,10 @@ const OwnerBookings = () => {
     }
   };
 
-  // Add this new function to check if booking time has passed
   const isBookingTimePassed = (booking) => {
     if (!booking.date || !booking.end_time) return false;
-
     const bookingDateTime = new Date(`${booking.date}T${booking.end_time}`);
     const now = new Date();
-
     return bookingDateTime < now;
   };
 
@@ -212,9 +286,9 @@ const OwnerBookings = () => {
   };
 
   const formatCurrency = (amount) => {
-    return new Intl.NumberFormat("en-IN", {
+    return new Intl.NumberFormat("en-PK", {
       style: "currency",
-      currency: "INR",
+      currency: "PKR",
       minimumFractionDigits: 0,
     }).format(amount || 0);
   };
@@ -246,57 +320,86 @@ const OwnerBookings = () => {
     }
   };
 
+  // If user doesn't have permission to view bookings
+  if (!canViewBookings) {
+    return (
+      <div className="bg-white rounded-xl shadow p-8 text-center">
+        <svg className="w-16 h-16 mx-auto text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+        </svg>
+        <h3 className="mt-4 text-lg font-medium text-gray-900">Access Denied</h3>
+        <p className="mt-1 text-sm text-gray-500">
+          You don't have permission to view bookings.
+        </p>
+        <p className="mt-2 text-xs text-gray-400">
+          Required permission: view_bookings
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-xl font-bold text-gray-900 md:text-2xl">
-          Booking Management
-        </h1>
-        <div className="text-sm text-gray-600">
-          Total Revenue:{" "}
-          <span className="font-bold text-green-600">
-            {formatCurrency(stats.total_revenue)}
-          </span>
+        <div>
+          <h1 className="text-xl font-bold text-gray-900 md:text-2xl">
+            {isOwner ? "Booking Management" : "Booking Management"}
+          </h1>
+          {!isOwner && (
+            <p className="text-sm text-gray-600 mt-1">
+              {canManageBookings ? "You can accept/reject bookings" : "View-only access"}
+            </p>
+          )}
         </div>
+        {canViewFinancial && (
+          <div className="text-sm text-gray-600">
+            Total Revenue:{" "}
+            <span className="font-bold text-green-600">
+              {formatCurrency(stats.total_revenue || 0)}
+            </span>
+          </div>
+        )}
       </div>
 
-      {/* Stats Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <div className="bg-white p-4 rounded-xl shadow">
-          <div className="text-sm text-gray-500">Pending</div>
-          <div className="text-2xl font-bold">
-            {stats.pending_bookings || 0}
+      {/* Stats Overview - Only show if has financial permission */}
+      {canViewFinancial && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+          <div className="bg-white p-4 rounded-xl shadow">
+            <div className="text-sm text-gray-500">Pending</div>
+            <div className="text-2xl font-bold">
+              {stats.pending_bookings || 0}
+            </div>
+          </div>
+          <div className="bg-white p-4 rounded-xl shadow">
+            <div className="text-sm text-gray-500">Accepted</div>
+            <div className="text-2xl font-bold">
+              {stats.accepted_bookings || 0}
+            </div>
+          </div>
+          <div className="bg-white p-4 rounded-xl shadow">
+            <div className="text-sm text-gray-500">Completed</div>
+            <div className="text-2xl font-bold">
+              {stats.completed_bookings || 0}
+            </div>
+          </div>
+          <div className="bg-white p-4 rounded-xl shadow">
+            <div className="text-sm text-gray-500">Cancelled</div>
+            <div className="text-2xl font-bold">
+              {stats.cancelled_bookings || 0}
+            </div>
           </div>
         </div>
-        <div className="bg-white p-4 rounded-xl shadow">
-          <div className="text-sm text-gray-500">Accepted</div>
-          <div className="text-2xl font-bold">
-            {stats.accepted_bookings || 0}
-          </div>
-        </div>
-        <div className="bg-white p-4 rounded-xl shadow">
-          <div className="text-sm text-gray-500">Completed</div>
-          <div className="text-2xl font-bold">
-            {stats.completed_bookings || 0}
-          </div>
-        </div>
-        <div className="bg-white p-4 rounded-xl shadow">
-          <div className="text-sm text-gray-500">Cancelled</div>
-          <div className="text-2xl font-bold">
-            {stats.cancelled_bookings || 0}
-          </div>
-        </div>
-      </div>
+      )}
 
-      {/* Main Tabs - Upcoming vs History */}
+      {/* Main Tabs */}
       <div className="bg-white rounded-xl shadow mb-6">
         <div className="border-b">
           <div className="flex">
             <button
               onClick={() => setActiveTab("upcoming")}
               className={`flex-1 px-6 py-3 text-sm font-medium ${activeTab === "upcoming"
-                ? "border-b-2 border-blue-500 text-blue-600"
-                : "text-gray-500 hover:text-gray-700"
+                  ? "border-b-2 border-blue-500 text-blue-600"
+                  : "text-gray-500 hover:text-gray-700"
                 }`}
             >
               Upcoming Bookings
@@ -304,8 +407,8 @@ const OwnerBookings = () => {
             <button
               onClick={() => setActiveTab("history")}
               className={`flex-1 px-6 py-3 text-sm font-medium ${activeTab === "history"
-                ? "border-b-2 border-blue-500 text-blue-600"
-                : "text-gray-500 hover:text-gray-700"
+                  ? "border-b-2 border-blue-500 text-blue-600"
+                  : "text-gray-500 hover:text-gray-700"
                 }`}
             >
               Booking History
@@ -313,7 +416,7 @@ const OwnerBookings = () => {
           </div>
         </div>
 
-        {/* Filters - Only show for upcoming tab */}
+        {/* Filters - Only for upcoming tab */}
         {activeTab === "upcoming" && (
           <div className="bg-white p-4 border-b">
             <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
@@ -455,10 +558,11 @@ const OwnerBookings = () => {
                           <div className="text-sm font-semibold text-gray-900">
                             {formatCurrency(booking.total_amount)}
                           </div>
-                          <div className="text-xs text-gray-500">
-                            Commission:{" "}
-                            {formatCurrency(booking.commission_amount || 0)}
-                          </div>
+                          {canViewFinancial && booking.commission_amount > 0 && (
+                            <div className="text-xs text-gray-500">
+                              Commission: {formatCurrency(booking.commission_amount || 0)}
+                            </div>
+                          )}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <span
@@ -472,7 +576,7 @@ const OwnerBookings = () => {
                         <td className="px-4 py-3 whitespace-nowrap text-sm font-medium">
                           {activeTab === "upcoming" ? (
                             <div className="flex flex-col space-y-1 md:flex-row md:space-x-2 md:space-y-0">
-                              {booking.status === "pending" && (
+                              {booking.status === "pending" && canManageBookings && (
                                 <>
                                   <button
                                     onClick={() =>
@@ -492,7 +596,7 @@ const OwnerBookings = () => {
                                   </button>
                                 </>
                               )}
-                              {booking.status === "accepted" && (
+                              {booking.status === "accepted" && canManageBookings && (
                                 <button
                                   onClick={() =>
                                     handleCompleteBooking(booking.booking_id)
@@ -510,7 +614,6 @@ const OwnerBookings = () => {
                               </button>
                             </div>
                           ) : (
-                            // For history tab, show completion/cancellation date
                             <div className="text-xs text-gray-500">
                               {booking.cancellation_time || booking.booking_date}
                             </div>
@@ -577,12 +680,20 @@ const OwnerBookings = () => {
                           {formatCurrency(booking.total_amount)}
                         </span>
                       </div>
+                      {canViewFinancial && booking.commission_amount > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Commission:</span>
+                          <span className="font-medium">
+                            {formatCurrency(booking.commission_amount)}
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     {activeTab === "upcoming" && (
                       <div className="mt-4 pt-3 border-t">
                         <div className="flex flex-wrap gap-2">
-                          {booking.status === "pending" && (
+                          {booking.status === "pending" && canManageBookings && (
                             <>
                               <button
                                 onClick={() =>
@@ -602,7 +713,7 @@ const OwnerBookings = () => {
                               </button>
                             </>
                           )}
-                          {booking.status === "accepted" && (
+                          {booking.status === "accepted" && canManageBookings && (
                             <button
                               onClick={() =>
                                 handleCompleteBooking(booking.booking_id)
@@ -626,6 +737,16 @@ const OwnerBookings = () => {
               </div>
             </>
           )}
+        </div>
+
+        {/* Footer note - Role specific */}
+        <div className="px-4 py-3 bg-gray-50 border-t text-center">
+          <p className="text-xs text-gray-500">
+            {canManageBookings
+              ? "Pending bookings can be accepted or rejected"
+              : "View-only access - You cannot modify bookings"
+            }
+          </p>
         </div>
       </div>
 
@@ -727,14 +848,16 @@ const OwnerBookings = () => {
                     {formatCurrency(selectedBooking.total_amount)}
                   </p>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Commission
-                  </label>
-                  <p className="mt-1 text-sm text-gray-900">
-                    {formatCurrency(selectedBooking.commission_amount || 0)}
-                  </p>
-                </div>
+                {canViewFinancial && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Commission
+                    </label>
+                    <p className="mt-1 text-sm text-gray-900">
+                      {formatCurrency(selectedBooking.commission_amount || 0)}
+                    </p>
+                  </div>
+                )}
               </div>
               <div className="pt-4 border-t">
                 <div className="flex justify-end">

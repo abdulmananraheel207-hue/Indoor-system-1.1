@@ -1957,6 +1957,85 @@ const ownerController = {
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
+
+  // Add this to ownerController.js
+
+  // Delete manager permanently
+  // Add this to ownerController.js - Delete manager permanently
+  deleteManager: async (req, res) => {
+    try {
+      const { manager_id } = req.params;
+      const owner_id = req.user.id;
+
+      console.log(`🗑️ Delete request: Manager ID ${manager_id}, Owner ID ${owner_id}`);
+
+      // First verify this manager exists and belongs to this owner
+      const [managerCheck] = await pool.execute(
+        `SELECT manager_id, name, email, is_active 
+       FROM arena_managers 
+       WHERE manager_id = ? AND owner_id = ?`,
+        [manager_id, owner_id]
+      );
+
+      if (managerCheck.length === 0) {
+        console.log(`❌ Manager ${manager_id} not found or doesn't belong to owner ${owner_id}`);
+        return res.status(404).json({
+          success: false,
+          message: "Manager not found or you don't have permission to delete this manager"
+        });
+      }
+
+      const manager = managerCheck[0];
+      console.log(`✅ Found manager: ${manager.name} (${manager.email})`);
+
+      // SOFT DELETE - Since you don't have deleted_at column, just deactivate
+      // This keeps the record but prevents login
+      const [deleteResult] = await pool.execute(
+        `UPDATE arena_managers 
+       SET 
+         is_active = 0,
+         email = CONCAT('deleted_', manager_id, '_', email) -- Make email unique for future reuse
+       WHERE manager_id = ? AND owner_id = ?`,
+        [manager_id, owner_id]
+      );
+
+      console.log(`✅ Delete result:`, deleteResult);
+
+      if (deleteResult.affectedRows === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Failed to delete manager"
+        });
+      }
+
+      res.json({
+        success: true,
+        message: `Manager "${manager.name}" has been permanently deleted`,
+        deleted_manager: {
+          id: manager.manager_id,
+          name: manager.name,
+          email: manager.email
+        }
+      });
+
+    } catch (error) {
+      console.error("💥 Error deleting manager:", error);
+
+      // Handle specific database errors
+      if (error.code === 'ER_DUP_ENTRY') {
+        return res.status(400).json({
+          success: false,
+          message: "Error deleting manager. Please try again."
+        });
+      }
+
+      res.status(500).json({
+        success: false,
+        message: "Server error while deleting manager",
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  },
   getTimeSlotsForDate: async (req, res) => {
     try {
       const { arena_id } = req.params;
@@ -2239,10 +2318,14 @@ const ownerController = {
     }
   },
   // Get all managers
+  // Update this existing function in ownerController.js
   getManagers: async (req, res) => {
     try {
       const [managers] = await pool.execute(
-        "SELECT * FROM arena_managers WHERE owner_id = ? ORDER BY created_at DESC",
+        `SELECT * FROM arena_managers 
+       WHERE owner_id = ? 
+         AND email NOT LIKE 'deleted_%'  -- Exclude soft-deleted managers
+       ORDER BY created_at DESC`,
         [req.user.id]
       );
 
@@ -2252,8 +2335,7 @@ const ownerController = {
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
-
-  // Update manager permissions
+  // Update your existing updateManager function
   updateManager: async (req, res) => {
     try {
       const { manager_id } = req.params;
@@ -2264,15 +2346,16 @@ const ownerController = {
         delete permissions.view_managers;
       }
 
-      // Verify owner owns this manager
+      // Verify owner owns this manager AND it's not deleted
       const [managerCheck] = await pool.execute(
-        "SELECT manager_id FROM arena_managers WHERE manager_id = ? AND owner_id = ?",
+        `SELECT manager_id FROM arena_managers 
+       WHERE manager_id = ? AND owner_id = ? 
+         AND email NOT LIKE 'deleted_%'`,  // Don't allow updating deleted managers
         [manager_id, req.user.id]
       );
 
       if (managerCheck.length === 0) {
-        return res
-          .status(404)
+        return res.status(404)
           .json({ message: "Manager not found or access denied" });
       }
 
@@ -2296,9 +2379,7 @@ const ownerController = {
       values.push(manager_id);
 
       await pool.execute(
-        `UPDATE arena_managers SET ${updateFields.join(
-          ", "
-        )} WHERE manager_id = ?`,
+        `UPDATE arena_managers SET ${updateFields.join(", ")} WHERE manager_id = ?`,
         values
       );
 

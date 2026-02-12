@@ -1,4 +1,4 @@
-// File: OwnerManagers.jsx - UPDATED (View Managers permission removed)
+// File: OwnerManagers.jsx - UPDATED (Added delete manager functionality)
 import React, { useState, useEffect } from "react";
 
 const OwnerManagers = () => {
@@ -13,6 +13,7 @@ const OwnerManagers = () => {
     permissions: {},
   });
   const [loading, setLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(null); // Track which manager is being deleted
 
   // Define all available permissions - REMOVED view_managers
   const availablePermissions = [
@@ -86,6 +87,58 @@ const OwnerManagers = () => {
       }
     } catch (error) {
       console.error("Error fetching managers:", error);
+    }
+  };
+
+  const handleDeleteManager = async (managerId, managerName) => {
+    // Show confirmation dialog with warning
+    if (!window.confirm(
+      `⚠️ ARE YOU SURE?\n\nYou are about to permanently delete manager "${managerName}".\n\n` +
+      `This action:\n` +
+      `• Cannot be undone\n` +
+      `• Will remove all manager data\n` +
+      `• Will prevent this manager from ever logging in again\n\n` +
+      `If you just want to prevent login temporarily, use "Deactivate" instead.\n\n` +
+      `Do you still want to delete this manager?`
+    )) {
+      return;
+    }
+
+    // Double confirmation for safety
+    if (!window.confirm(
+      `FINAL WARNING:\n\nType "DELETE" to confirm permanent deletion of ${managerName}`
+    )) {
+      return;
+    }
+
+    setDeleteLoading(managerId);
+
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        `http://localhost:5000/api/owners/managers/${managerId}`,
+        {
+          method: "DELETE", // Using DELETE method
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      const data = await response.json();
+
+      if (response.ok) {
+        alert(`✅ Manager "${managerName}" has been permanently deleted.`);
+        fetchManagers(); // Refresh the list
+      } else {
+        alert(data.message || "Failed to delete manager. Please try again.");
+      }
+    } catch (error) {
+      console.error("Error deleting manager:", error);
+      alert("An error occurred while deleting. Please check your connection and try again.");
+    } finally {
+      setDeleteLoading(null);
     }
   };
 
@@ -529,63 +582,80 @@ const OwnerManagers = () => {
                         </span>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm font-medium">
-                        <div className="flex space-x-3">
-                          <button
-                            onClick={() => handleEditManager(manager)}
-                            className="text-blue-600 hover:text-blue-900"
-                          >
-                            Edit Permissions
-                          </button>
-                          <button
-                            onClick={async () => {
-                              if (
-                                window.confirm(
-                                  `Are you sure you want to ${manager.is_active
-                                    ? "deactivate"
-                                    : "activate"
-                                  } this manager?`
-                                )
-                              ) {
-                                try {
-                                  const token = localStorage.getItem("token");
-                                  const response = await fetch(
-                                    `http://localhost:5000/api/owners/managers/${manager.manager_id}`,
-                                    {
-                                      method: "PUT",
-                                      headers: {
-                                        Authorization: `Bearer ${token}`,
-                                        "Content-Type": "application/json",
-                                      },
-                                      body: JSON.stringify({
-                                        is_active: !manager.is_active,
-                                      }),
-                                    }
-                                  );
-
-                                  if (response.ok) {
-                                    alert(
-                                      `Manager ${manager.is_active
-                                        ? "deactivated"
-                                        : "activated"
-                                      } successfully`
+                        <div className="flex flex-col space-y-2">
+                          <div className="flex space-x-3">
+                            <button
+                              onClick={() => handleEditManager(manager)}
+                              className="text-blue-600 hover:text-blue-900"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (
+                                  window.confirm(
+                                    `Are you sure you want to ${manager.is_active
+                                      ? "deactivate"
+                                      : "activate"
+                                    } this manager?`
+                                  )
+                                ) {
+                                  try {
+                                    const token = localStorage.getItem("token");
+                                    const response = await fetch(
+                                      `http://localhost:5000/api/owners/managers/${manager.manager_id}`,
+                                      {
+                                        method: "PUT",
+                                        headers: {
+                                          Authorization: `Bearer ${token}`,
+                                          "Content-Type": "application/json",
+                                        },
+                                        body: JSON.stringify({
+                                          is_active: !manager.is_active,
+                                        }),
+                                      }
                                     );
-                                    fetchManagers();
+
+                                    if (response.ok) {
+                                      alert(
+                                        `Manager ${manager.is_active
+                                          ? "deactivated"
+                                          : "activated"
+                                        } successfully`
+                                      );
+                                      fetchManagers();
+                                    }
+                                  } catch (error) {
+                                    console.error(
+                                      "Error updating manager:",
+                                      error
+                                    );
                                   }
-                                } catch (error) {
-                                  console.error(
-                                    "Error updating manager:",
-                                    error
-                                  );
                                 }
+                              }}
+                              className={
+                                manager.is_active
+                                  ? "text-yellow-600 hover:text-yellow-900"
+                                  : "text-green-600 hover:text-green-900"
                               }
-                            }}
-                            className={
-                              manager.is_active
-                                ? "text-red-600 hover:text-red-900"
-                                : "text-green-600 hover:text-green-900"
-                            }
+                            >
+                              {manager.is_active ? "Deactivate" : "Activate"}
+                            </button>
+                          </div>
+                          {/* DELETE BUTTON - Desktop */}
+                          <button
+                            onClick={() => handleDeleteManager(manager.manager_id, manager.name)}
+                            disabled={deleteLoading === manager.manager_id}
+                            className="text-red-600 hover:text-red-900 text-left flex items-center"
                           >
-                            {manager.is_active ? "Deactivate" : "Activate"}
+                            {deleteLoading === manager.manager_id ? (
+                              <>
+                                <span className="inline-block animate-spin rounded-full h-3 w-3 border-b-2 border-red-600 mr-1"></span>
+                                Deleting...
+                              </>
+                            ) : (
+                              "Delete Permanently"
+                            )}
                           </button>
                         </div>
                       </td>
@@ -697,11 +767,29 @@ const OwnerManagers = () => {
                           }
                         }}
                         className={`px-3 py-1.5 text-sm rounded text-center ${manager.is_active
-                            ? "bg-red-100 text-red-700 hover:bg-red-200"
+                            ? "bg-yellow-100 text-yellow-700 hover:bg-yellow-200"
                             : "bg-green-100 text-green-700 hover:bg-green-200"
                           }`}
                       >
                         {manager.is_active ? "Deactivate" : "Activate"}
+                      </button>
+                      {/* DELETE BUTTON - Mobile */}
+                      <button
+                        onClick={() => handleDeleteManager(manager.manager_id, manager.name)}
+                        disabled={deleteLoading === manager.manager_id}
+                        className={`px-3 py-1.5 text-sm rounded text-center ${deleteLoading === manager.manager_id
+                            ? "bg-red-100 text-red-400 cursor-not-allowed"
+                            : "bg-red-100 text-red-700 hover:bg-red-200"
+                          }`}
+                      >
+                        {deleteLoading === manager.manager_id ? (
+                          <>
+                            <span className="inline-block animate-spin rounded-full h-3 w-3 border-b-2 border-red-700 mr-1"></span>
+                            Deleting...
+                          </>
+                        ) : (
+                          "Delete Permanently"
+                        )}
                       </button>
                     </div>
                   </div>
@@ -712,15 +800,16 @@ const OwnerManagers = () => {
         )}
       </div>
 
-      {/* Information Box - Updated */}
+      {/* Information Box - Updated with Delete info */}
       <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg md:mt-6 md:p-4">
         <h3 className="text-sm font-medium text-blue-900 mb-2">
-          About Manager Permissions
+          About Manager Management
         </h3>
         <ul className="text-xs text-blue-700 space-y-1 md:text-sm">
           <li>• Managers can only access features you explicitly permit</li>
           <li>• Financial data access is controlled separately through "View Financial" permission</li>
-          <li>• Deactivated managers cannot login to the system</li>
+          <li>• <span className="font-semibold">Deactivate:</span> Temporarily prevents login - you can reactivate later</li>
+          <li>• <span className="font-semibold text-red-700">Delete Permanently:</span> Completely removes manager from system - cannot be undone</li>
           <li className="font-medium">• Managers CANNOT view other managers - this is owner-only access</li>
         </ul>
       </div>

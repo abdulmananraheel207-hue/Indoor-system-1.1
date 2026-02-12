@@ -1,7 +1,8 @@
+// File: ManagerAuth.jsx - FIXED version that works with your backend
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-const ManagerLogin = () => {
+const ManagerLogin = ({ onLogin }) => {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [loading, setLoading] = useState(false);
@@ -14,6 +15,7 @@ const ManagerLogin = () => {
         setError("");
 
         try {
+            // 🔥 Use the correct manager login endpoint
             const response = await fetch("http://localhost:5000/api/managers/login", {
                 method: "POST",
                 headers: {
@@ -23,17 +25,28 @@ const ManagerLogin = () => {
             });
 
             const data = await response.json();
+            console.log("Manager login response:", { status: response.status, data });
 
             if (response.ok && data.success) {
-                // Store token and manager data
+                // Clear any existing auth data
+                localStorage.removeItem('token');
+                localStorage.removeItem('userRole');
+                localStorage.removeItem('userData');
+                localStorage.removeItem('ownerData');
+
+                // Store manager data
                 localStorage.setItem("token", data.token);
                 localStorage.setItem("userRole", "manager");
+                localStorage.setItem("userData", JSON.stringify(data.manager));
                 localStorage.setItem("managerData", JSON.stringify(data.manager));
 
                 console.log("✅ Manager login successful:", data.manager);
 
-                // 🔥 FIX: Navigate to manager dashboard
-                navigate("/manager/dashboard");
+                if (onLogin) {
+                    onLogin(data.token, data.manager);
+                } else {
+                    navigate("/manager/dashboard");
+                }
             } else {
                 setError(data.message || "Login failed");
             }

@@ -104,6 +104,8 @@ router.put("/bookings/:booking_id/complete", ownerController.completeBooking);
 router.get("/managers", ownerController.getManagers);
 router.post("/managers", ownerController.addManager);
 router.put("/managers/:manager_id", ownerController.updateManager);
+// Add this to your owners.js routes file
+router.delete("/managers/:manager_id", ownerController.deleteManager);
 
 // Reports
 router.get("/reports/export", ownerController.exportBookingData);

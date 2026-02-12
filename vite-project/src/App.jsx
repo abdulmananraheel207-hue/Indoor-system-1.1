@@ -9,21 +9,20 @@ import {
 import UserAuth from "./components/auth/UserAuth";
 import OwnerAuth from "./components/auth/OwnerAuth";
 import AdminAuth from "./components/auth/AdminAuth";
-import ManagerAuth from "./components/auth/ManagerAuth";
 import GuestAuth from "./components/auth/GuestAuth";
 import UserHome from "./components/user/UserHome";
 import UserTeams from "./components/user/UserTeams";
 import UserBooking from "./components/user/UserBooking";
 import UserProfile from "./components/user/UserProfile";
-import OwnerDashboard from "./components/owner/OwnerDashboard";
+import OwnerDashboard from "./components/owner/OwnerDashboard"; // THIS NOW WORKS FOR BOTH OWNER AND MANAGER
 import OwnerRegistration from "./components/owner/OwnerRegistration";
-import ManagerDashboard from "./components/manager/ManagerDashboard";
 import UserArenaDetails from "./components/user/UserArenaDetails";
 import UserBookingChat from "./components/user/UserBookingChat";
 import integrationService from "./services/integrationService";
 import ReviewReminderModal from "./components/user/ReviewReminderModal";
 import SuperAdminDashboard from "./components/superadmin/superAdminDashboard";
 import ManagerLogin from "./components/auth/ManagerAuth";
+// REMOVED: ManagerLogin import - using OwnerAuth for manager login instead
 
 const useAuth = () => {
   const [authState, setAuthState] = useState({
@@ -119,6 +118,7 @@ const useAuth = () => {
     localStorage.removeItem("userRole");
     localStorage.removeItem("userData");
     localStorage.removeItem("isGuest");
+    localStorage.removeItem("dashboardStats"); // Clear cached stats
     setAuthState({
       isAuthenticated: false,
       userRole: null,
@@ -127,15 +127,19 @@ const useAuth = () => {
     });
   };
 
-  const adminLogin = (token) => {
+  const adminLogin = (token, adminData) => {
     localStorage.removeItem("isGuest");
     localStorage.setItem("adminToken", token);
     localStorage.setItem("userRole", "admin");
+    if (adminData) {
+      localStorage.setItem("adminUser", JSON.stringify(adminData));
+    }
     checkAuthStatus();
   };
 
   const adminLogout = () => {
     localStorage.removeItem("adminToken");
+    localStorage.removeItem("adminUser");
     localStorage.removeItem("token");
     localStorage.removeItem("userRole");
     localStorage.removeItem("isGuest");
@@ -197,7 +201,7 @@ function App() {
     return <OwnerAuth onLogin={handleLogin} />;
   };
 
-  // Manager auth wrapper
+  // Manager auth wrapper - USING THE SAME OwnerAuth COMPONENT
   const ManagerAuthWrapper = () => {
     const navigate = useNavigate();
 
@@ -208,7 +212,7 @@ function App() {
       }, 50);
     };
 
-    return <ManagerAuth onLogin={handleLogin} />;
+    return <ManagerLogin onLogin={handleLogin} />;
   };
 
   // Admin auth wrapper
@@ -239,7 +243,7 @@ function App() {
     return <AdminAuth onLogin={handleLogin} />;
   };
 
-  // Guest auth wrapper - UPDATED
+  // Guest auth wrapper
   const GuestAuthWrapper = () => {
     const navigate = useNavigate();
 
@@ -253,7 +257,7 @@ function App() {
     return <GuestAuth onLogin={handleGuestLogin} />;
   };
 
-  // Protected Route Component - UPDATED with guest handling
+  // Protected Route Component
   const ProtectedRoute = ({ children, requiredRole }) => {
     if (auth.isLoading) {
       return (
@@ -296,7 +300,7 @@ function App() {
     return children;
   };
 
-  // User Dashboard Layout - UPDATED with guest handling
+  // User Dashboard Layout
   const UserDashboard = () => {
     const navigate = useNavigate();
     const [currentTab, setCurrentTab] = useState("home");
@@ -382,7 +386,7 @@ function App() {
           </div>
         </header>
 
-        {/* Guest Banner - Show only for guests */}
+        {/* Guest Banner */}
         {isGuest && (
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
             <div className="bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl p-6 text-white shadow-lg">
@@ -524,7 +528,7 @@ function App() {
             </div>
           </button>
 
-          {/* Guest View Card - UPDATED */}
+          {/* Guest View Card */}
           <button
             onClick={() => {
               auth.guestLogin();
@@ -620,10 +624,8 @@ function App() {
         <Route path="/auth/manager" element={<ManagerAuthWrapper />} />
         <Route path="/auth/guest" element={<GuestAuthWrapper />} />
         <Route path="/owner/register" element={<OwnerRegistration />} />
-        <Route path="/manager/login" element={<ManagerLogin />} />
-        <Route path="/manager/dashboard" element={<ManagerDashboard />} />
 
-        {/* Protected User Routes - Now accessible to guests too */}
+        {/* Protected User Routes */}
         <Route
           path="/user/dashboard"
           element={
@@ -651,7 +653,7 @@ function App() {
           }
         />
 
-        {/* Protected Owner Routes */}
+        {/* Protected Owner Routes - Uses OwnerDashboard component */}
         <Route
           path="/owner/dashboard"
           element={
@@ -661,12 +663,12 @@ function App() {
           }
         />
 
-        {/* Protected Manager Routes */}
+        {/* Protected Manager Routes - USES THE SAME OwnerDashboard COMPONENT */}
         <Route
           path="/manager/dashboard"
           element={
             <ProtectedRoute requiredRole="manager">
-              <ManagerDashboard />
+              <OwnerDashboard /> {/* Same component, different role */}
             </ProtectedRoute>
           }
         />

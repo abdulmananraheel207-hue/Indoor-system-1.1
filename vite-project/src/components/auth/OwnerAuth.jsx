@@ -1,3 +1,4 @@
+// File: OwnerAuth.jsx - FIXED for your backend
 import React, { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 
@@ -29,16 +30,16 @@ const OwnerAuth = (props) => {
     setBlockedInfo(null);
 
     try {
-      // 🔥 CRITICAL: Clear ALL previous authentication data
-      localStorage.clear(); // Or selectively clear:
-      // localStorage.removeItem('token');
-      // localStorage.removeItem('userRole');
-      // localStorage.removeItem('userData');
-      // localStorage.removeItem('ownerData');
-      // localStorage.removeItem('adminToken');
-      // localStorage.removeItem('adminUser');
-      // localStorage.removeItem('admin');
+      // Clear previous auth data
+      localStorage.removeItem('token');
+      localStorage.removeItem('userRole');
+      localStorage.removeItem('userData');
+      localStorage.removeItem('ownerData');
+      localStorage.removeItem('managerData');
+      localStorage.removeItem('adminToken');
+      localStorage.removeItem('adminUser');
 
+      // 🔥 IMPORTANT: Use the exact format your backend expects
       const response = await fetch("http://localhost:5000/api/auth/login", {
         method: "POST",
         headers: {
@@ -47,13 +48,14 @@ const OwnerAuth = (props) => {
         body: JSON.stringify({
           email: formData.loginEmail,
           password: formData.loginPassword,
-          userType: "owner",
+          userType: "owner" // Your backend expects this for owners
         }),
       });
 
       const data = await response.json();
+      console.log("Login response:", { status: response.status, data });
 
-      // 🚫 CHECK FOR BLOCKED ACCOUNT
+      // Check for blocked account
       if (response.status === 403 && data.message === 'ACCOUNT_BLOCKED') {
         setBlockedInfo(data.details);
         setLoading(false);
@@ -61,15 +63,34 @@ const OwnerAuth = (props) => {
       }
 
       if (response.ok) {
-        // Store owner data
+        // Store token
         localStorage.setItem("token", data.token);
-        localStorage.setItem("userRole", "owner");
-        localStorage.setItem("ownerData", JSON.stringify(data.owner || data.user));
+
+        // Check if this is a manager or owner from the response
+        // Your owner login endpoint might return owner data, not manager
+        // Managers should use the /api/managers/login endpoint
+        const isManager = data.user?.role === "manager" || data.role === "manager";
+
+        if (isManager) {
+          localStorage.setItem("userRole", "manager");
+          localStorage.setItem("userData", JSON.stringify(data.user || data.manager));
+          localStorage.setItem("managerData", JSON.stringify(data.user || data.manager));
+        } else {
+          localStorage.setItem("userRole", "owner");
+          localStorage.setItem("ownerData", JSON.stringify(data.owner || data.user));
+        }
+
+        console.log(`✅ Login successful as ${isManager ? 'manager' : 'owner'}`);
 
         if (props.onLogin) {
-          props.onLogin(data.token, data.owner || data.user);
+          props.onLogin(data.token, isManager ? (data.user || data.manager) : (data.owner || data.user));
         } else {
-          navigate("/owner/dashboard");
+          // Navigate to appropriate dashboard
+          if (isManager) {
+            navigate("/manager/dashboard");
+          } else {
+            navigate("/owner/dashboard");
+          }
         }
       } else {
         setError(data.message || "Login failed");
@@ -82,7 +103,7 @@ const OwnerAuth = (props) => {
     }
   };
 
-  // 🚫 BLOCKED ACCOUNT MESSAGE COMPONENT
+  // Blocked account message
   if (blockedInfo) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-blue-100 flex items-center justify-center py-6 px-3 sm:px-4 md:px-6 lg:px-8">
@@ -136,7 +157,7 @@ const OwnerAuth = (props) => {
     );
   }
 
-  // Normal Login Form (Your existing JSX - unchanged)
+  // Login Form
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-blue-100 flex items-center justify-center py-6 px-3 sm:px-4 md:px-6 lg:px-8">
       <div className="w-full max-w-xl md:max-w-2xl bg-white p-4 sm:p-6 md:p-8 rounded-2xl shadow-2xl">
@@ -161,6 +182,9 @@ const OwnerAuth = (props) => {
           </h2>
           <p className="mt-2 text-sm text-gray-600">
             Manage your arena, bookings, and revenue
+          </p>
+          <p className="mt-1 text-xs text-blue-600">
+            Managers: Please use the Manager Login page
           </p>
         </div>
 
@@ -217,8 +241,8 @@ const OwnerAuth = (props) => {
             type="submit"
             disabled={loading}
             className={`w-full py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white ${loading
-              ? "bg-indigo-400 cursor-not-allowed"
-              : "bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700"
+                ? "bg-indigo-400 cursor-not-allowed"
+                : "bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700"
               } transition-all duration-200 shadow-lg`}
           >
             {loading ? "Processing..." : "Sign In to Owner Portal"}
