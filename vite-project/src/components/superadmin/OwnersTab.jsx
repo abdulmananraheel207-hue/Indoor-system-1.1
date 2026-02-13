@@ -277,20 +277,17 @@ const OwnersTab = ({
         try {
             const ownerArenasToBlock = arenas.filter(a => a.owner_id === ownerId);
             console.log('🔒 Blocking owner:', ownerName, 'Arenas:', ownerArenasToBlock.length);
-            console.log('📦 Block data being sent:', blockData); // ADD THIS
 
             let successCount = 0;
             let errorCount = 0;
 
-            // Block owner account - FIX THIS PART
+            // Block owner account
             try {
-                // MAKE SURE blockData has the correct structure
-                const result = await integrationService.blockOwner(ownerId, {
-                    reason: blockData.reason,        // This should be the reason from modal
-                    block_arenas: blockData.block_arenas,  // This should be true/false
-                    notify_owner: blockData.notify_owner    // This should be true/false
+                await integrationService.blockOwner(ownerId, {
+                    reason: blockData.reason,
+                    notify_owner: blockData.notify_owner,
+                    block_arenas: blockData.block_arenas
                 });
-                console.log('✅ Block owner API result:', result);
                 successCount++;
             } catch (error) {
                 console.error('❌ Failed to block owner account:', error);
@@ -399,7 +396,6 @@ const OwnersTab = ({
                 for (const arena of ownerArenas) {
                     if (arena.pending_commission > 0) {
                         const amount = parseFloat(arena.pending_commission);
-
                         await integrationService.markArenaPayment(arena.arena_id, {
                             amount_paid: amount,
                             notes: `Monthly commission payment for ${selectedOwner?.arena_name || 'owner'}`,
@@ -407,15 +403,11 @@ const OwnersTab = ({
                         });
                     }
                 }
-
                 alert('✅ All commission marked as paid!');
-
                 if (onMarkPaid) {
                     onMarkPaid();
                 }
-
                 setSelectedOwner(null);
-
             } catch (error) {
                 console.error('❌ Mark paid error:', error);
                 alert('❌ Failed to mark as paid: ' + error.message);
@@ -486,7 +478,7 @@ const OwnersTab = ({
                                                             )}
                                                             {!isOwnerBlocked && ownerHasBlockedArenas && (
                                                                 <span className="ml-2 px-2 py-0.5 bg-orange-100 text-orange-800 text-xs rounded-full">
-                                                                    Some Arenas Blocked
+                                                                    Blocked
                                                                 </span>
                                                             )}
                                                         </div>
@@ -580,6 +572,8 @@ const OwnersTab = ({
                                             <CurrencyDollarIcon className="h-4 w-4 mr-2" />
                                             Total Revenue: Rs {(selectedOwner.total_revenue || 0).toLocaleString()}
                                         </div>
+
+                                        {/* Block Reason Display - ADD THIS */}
                                         {selectedOwner.blocked_reason && (
                                             <div className="mt-2 p-3 bg-red-50 rounded-lg">
                                                 <p className="text-xs font-medium text-red-800 mb-1">Block Reason:</p>
@@ -616,9 +610,7 @@ const OwnersTab = ({
                                             disabled={actionLoading}
                                             className="w-full mt-3 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center justify-center"
                                         >
-                                            {actionLoading ? (
-                                                'Processing...'
-                                            ) : (
+                                            {actionLoading ? 'Processing...' : (
                                                 <>
                                                     <CheckCircleIcon className="h-4 w-4 mr-2" />
                                                     Mark All as Paid
@@ -680,7 +672,7 @@ const OwnersTab = ({
                                     </div>
                                 </div>
 
-                                {/* Action Buttons */}
+                                {/* Action Buttons - FIXED: Uses selectedOwner.is_blocked */}
                                 <div className="space-y-3">
                                     {selectedOwner.is_blocked ? (
                                         <button

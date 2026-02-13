@@ -325,7 +325,7 @@ const authController = {
 
       user = users[0];
 
-      // 🚫 CHECK IF OWNER IS BLOCKED - ADDED HERE
+      //  CHECK IF OWNER IS BLOCKED - ADDED HERE
       if (userType === "owner" && (user.is_blocked === 1 || user.is_blocked === true)) {
         console.log('🚫 Blocked owner attempted login:', user.owner_id, user.email);
         return res.status(403).json({

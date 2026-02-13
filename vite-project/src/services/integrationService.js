@@ -1501,6 +1501,318 @@ export const integrationService = {
     }
   },
 
+  // Add to integrationService.js
+  exportFinancialReport: async (startDate, endDate) => {
+    try {
+      const token = localStorage.getItem('adminToken');
+
+      if (!token) {
+        throw new Error('No admin token found');
+      }
+
+      const response = await fetch(
+        `http://localhost:5000/api/super-admin/export/financial-report?format=excel&start_date=${startDate}&end_date=${endDate}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        }
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Export failed');
+      }
+
+      // Get the blob from response
+      const blob = await response.blob();
+
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `financial_report_${startDate}_to_${endDate}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      return { success: true };
+
+    } catch (error) {
+      console.error('❌ Export error:', error);
+      throw error;
+    }
+  },
+
+  getManagerDashboard: async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        "http://localhost:5000/api/managers/dashboard",
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+
+      if (!response.ok) throw new Error("Failed to fetch manager dashboard");
+      return await response.json();
+    } catch (error) {
+      console.error("Error fetching manager dashboard:", error);
+      throw error;
+    }
+  },
+
+  getManagerBookings: async (filters = {}) => {
+    try {
+      const queryParams = new URLSearchParams();
+      Object.keys(filters).forEach(key => {
+        if (filters[key]) queryParams.append(key, filters[key]);
+      });
+
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        `http://localhost:5000/api/managers/bookings?${queryParams.toString()}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+
+      if (!response.ok) throw new Error("Failed to fetch manager bookings");
+      return await response.json();
+    } catch (error) {
+      console.error("Error fetching manager bookings:", error);
+      throw error;
+    }
+  },
+
+  acceptManagerBooking: async (bookingId) => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        `http://localhost:5000/api/managers/bookings/${bookingId}/accept`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+      return await response.json();
+    } catch (error) {
+      console.error("Error accepting booking:", error);
+      throw error;
+    }
+  },
+
+  rejectManagerBooking: async (bookingId, reason) => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        `http://localhost:5000/api/managers/bookings/${bookingId}/reject`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ reason })
+        }
+      );
+      return await response.json();
+    } catch (error) {
+      console.error("Error rejecting booking:", error);
+      throw error;
+    }
+  },
+
+  completeManagerBooking: async (bookingId) => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        `http://localhost:5000/api/managers/bookings/${bookingId}/complete`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+      return await response.json();
+    } catch (error) {
+      console.error("Error completing booking:", error);
+      throw error;
+    }
+  },
+
+  getManagerCalendar: async (arenaId, date, courtId = null) => {
+    try {
+      const params = new URLSearchParams({
+        arena_id: arenaId,
+        date: date
+      });
+
+      if (courtId) params.append("court_id", courtId);
+
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        `http://localhost:5000/api/managers/calendar?${params.toString()}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+
+      if (!response.ok) throw new Error("Failed to fetch calendar");
+      return await response.json();
+    } catch (error) {
+      console.error("Error fetching calendar:", error);
+      throw error;
+    }
+  },
+
+  updateManagerTimeSlots: async (arenaId, date, slots, courtId = null) => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        `http://localhost:5000/api/managers/calendar/slots`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            arena_id: arenaId,
+            date: date,
+            action: "update_slots",
+            slots: slots,
+            court_id: courtId
+          })
+        }
+      );
+      return await response.json();
+    } catch (error) {
+      console.error("Error updating time slots:", error);
+      throw error;
+    }
+  },
+
+  getManagerCourts: async (arenaId) => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        `http://localhost:5000/api/managers/courts/${arenaId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+
+      if (!response.ok) throw new Error("Failed to fetch courts");
+      return await response.json();
+    } catch (error) {
+      console.error("Error fetching courts:", error);
+      throw error;
+    }
+  },
+
+  getManagerArenas: async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        `http://localhost:5000/api/managers/arenas`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+
+      if (!response.ok) throw new Error("Failed to fetch arenas");
+      return await response.json();
+    } catch (error) {
+      console.error("Error fetching arenas:", error);
+      throw error;
+    }
+  },
+
+  getManagerStats: async (period = "month") => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        `http://localhost:5000/api/managers/stats?period=${period}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+
+      if (!response.ok) throw new Error("Failed to fetch stats");
+      return await response.json();
+    } catch (error) {
+      console.error("Error fetching stats:", error);
+      throw error;
+    }
+  },
+
+  getManagerProfile: async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        `http://localhost:5000/api/managers/profile`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+
+      if (!response.ok) throw new Error("Failed to fetch profile");
+      return await response.json();
+    } catch (error) {
+      console.error("Error fetching profile:", error);
+      throw error;
+    }
+  },
+
+  updateManagerProfile: async (data) => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        `http://localhost:5000/api/managers/profile`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(data)
+        }
+      );
+      return await response.json();
+    } catch (error) {
+      console.error("Error updating profile:", error);
+      throw error;
+    }
+  },
+
 };
 
 export default integrationService;

@@ -398,8 +398,8 @@ const OwnerBookings = ({ isOwner, permissions = {} }) => {
             <button
               onClick={() => setActiveTab("upcoming")}
               className={`flex-1 px-6 py-3 text-sm font-medium ${activeTab === "upcoming"
-                  ? "border-b-2 border-blue-500 text-blue-600"
-                  : "text-gray-500 hover:text-gray-700"
+                ? "border-b-2 border-blue-500 text-blue-600"
+                : "text-gray-500 hover:text-gray-700"
                 }`}
             >
               Upcoming Bookings
@@ -407,8 +407,8 @@ const OwnerBookings = ({ isOwner, permissions = {} }) => {
             <button
               onClick={() => setActiveTab("history")}
               className={`flex-1 px-6 py-3 text-sm font-medium ${activeTab === "history"
-                  ? "border-b-2 border-blue-500 text-blue-600"
-                  : "text-gray-500 hover:text-gray-700"
+                ? "border-b-2 border-blue-500 text-blue-600"
+                : "text-gray-500 hover:text-gray-700"
                 }`}
             >
               Booking History

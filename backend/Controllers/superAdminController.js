@@ -35,34 +35,38 @@ const superAdminController = {
         `);
 
             // Get all owners
+            // Get all owners - ADD the missing fields
             const [allOwners] = await pool.execute(`
-            SELECT 
-                ao.owner_id,
-                ao.arena_name,
-                ao.email,
-                ao.phone_number,
-                ao.business_address,
-                ao.google_maps_location,
-                ao.number_of_courts,
-                ao.is_active,
-                ao.total_revenue,
-                ao.created_at,
-                COUNT(DISTINCT a.arena_id) as total_arenas,
-                COUNT(DISTINCT b.booking_id) as total_bookings,
-                COALESCE(SUM(CASE WHEN b.status = 'completed' THEN b.total_amount ELSE 0 END), 0) as revenue_from_bookings,
-                COALESCE(SUM(a.total_commission_due), 0) as total_pending_commission,
-                (
-                    SELECT GROUP_CONCAT(CONCAT(a2.name, ' (Rs ', a2.total_commission_due, ')') SEPARATOR ', ')
-                    FROM arenas a2 
-                    WHERE a2.owner_id = ao.owner_id 
-                    AND a2.total_commission_due > 0
-                ) as pending_arenas
-            FROM arena_owners ao
-            LEFT JOIN arenas a ON ao.owner_id = a.owner_id
-            LEFT JOIN bookings b ON a.arena_id = b.arena_id
-            GROUP BY ao.owner_id
-            ORDER BY ao.owner_id DESC
-        `);
+    SELECT 
+        ao.owner_id,
+        ao.arena_name,
+        ao.email,
+        ao.phone_number,
+        ao.business_address,
+        ao.google_maps_location,
+        ao.number_of_courts,
+        ao.is_active,
+        ao.total_revenue,
+        ao.created_at,
+        ao.is_blocked,          
+        ao.blocked_reason,       
+        ao.blocked_at,          
+        COUNT(DISTINCT a.arena_id) as total_arenas,
+        COUNT(DISTINCT b.booking_id) as total_bookings,
+        COALESCE(SUM(CASE WHEN b.status = 'completed' THEN b.total_amount ELSE 0 END), 0) as revenue_from_bookings,
+        COALESCE(SUM(a.total_commission_due), 0) as total_pending_commission,
+        (
+            SELECT GROUP_CONCAT(CONCAT(a2.name, ' (Rs ', a2.total_commission_due, ')') SEPARATOR ', ')
+            FROM arenas a2 
+            WHERE a2.owner_id = ao.owner_id 
+            AND a2.total_commission_due > 0
+        ) as pending_arenas
+    FROM arena_owners ao
+    LEFT JOIN arenas a ON ao.owner_id = a.owner_id
+    LEFT JOIN bookings b ON a.arena_id = b.arena_id
+    GROUP BY ao.owner_id
+    ORDER BY ao.owner_id DESC
+`);
 
             // Get all users
             const [allUsers] = await pool.execute(`
@@ -1015,36 +1019,42 @@ const superAdminController = {
         }
     },
 
-    // 5. EXPORT REPORTS: Generate Excel/PDF Reports
+
     exportFinancialReport: async (req, res) => {
         try {
             const { report_type, start_date, end_date, format = 'excel' } = req.query;
 
             console.log(`📈 Super Admin exporting ${report_type} report in ${format} format`);
+            console.log(`📅 Date range: ${start_date} to ${end_date}`);
 
-            // Fetch data for the report
+            // Fetch data for the report - FIXED with time_slots table
             const [reportData] = await pool.execute(`
-                SELECT 
-                    DATE(b.booking_date) as date,
-                    a.name as arena_name,
-                    ao.arena_name as owner_name,
-                    u.name as customer_name,
-                    b.booking_id,
-                    b.total_amount,
-                    b.commission_amount,
-                    b.status,
-                    st.name as sport_name,
-                    CONCAT(DATE_FORMAT(b.start_time, '%H:%i'), ' - ', DATE_FORMAT(b.end_time, '%H:%i')) as time_slot
-                FROM bookings b
-                JOIN arenas a ON b.arena_id = a.arena_id
-                JOIN arena_owners ao ON a.owner_id = ao.owner_id
-                JOIN users u ON b.user_id = u.user_id
-                JOIN sports_types st ON b.sport_id = st.sport_id
-                WHERE b.status = 'completed'
-                    AND b.booking_date >= ?
-                    AND b.booking_date <= ?
-                ORDER BY b.booking_date DESC, b.start_time
-            `, [start_date || '2024-01-01', end_date || new Date().toISOString().split('T')[0]]);
+            SELECT 
+                DATE(b.booking_date) as date,
+                a.name as arena_name,
+                ao.arena_name as owner_name,
+                u.name as customer_name,
+                b.booking_id,
+                b.total_amount,
+                b.commission_amount,
+                b.status,
+                st.name as sport_name,
+                ts.start_time,
+                ts.end_time,
+                CONCAT(TIME_FORMAT(ts.start_time, '%H:%i'), ' - ', TIME_FORMAT(ts.end_time, '%H:%i')) as time_slot
+            FROM bookings b
+            JOIN arenas a ON b.arena_id = a.arena_id
+            JOIN arena_owners ao ON a.owner_id = ao.owner_id
+            JOIN users u ON b.user_id = u.user_id
+            JOIN sports_types st ON b.sport_id = st.sport_id
+            LEFT JOIN time_slots ts ON b.slot_id = ts.slot_id
+            WHERE b.status = 'completed'
+                AND b.booking_date >= ?
+                AND b.booking_date <= ?
+            ORDER BY b.booking_date DESC
+        `, [start_date || '2024-01-01', end_date || new Date().toISOString().split('T')[0]]);
+
+            console.log(`📊 Found ${reportData.length} bookings`);
 
             if (format === 'excel') {
                 // Create Excel workbook
@@ -1059,7 +1069,7 @@ const superAdminController = {
                     { header: 'Customer', key: 'customer_name', width: 25 },
                     { header: 'Booking ID', key: 'booking_id', width: 15 },
                     { header: 'Sport', key: 'sport_name', width: 15 },
-                    { header: 'Time Slot', key: 'time_slot', width: 15 },
+                    { header: 'Time Slot', key: 'time_slot', width: 20 },
                     { header: 'Total Amount (Rs)', key: 'total_amount', width: 18 },
                     { header: 'Commission (Rs)', key: 'commission_amount', width: 18 },
                     { header: 'Status', key: 'status', width: 12 }
@@ -1067,12 +1077,23 @@ const superAdminController = {
 
                 // Add data rows
                 reportData.forEach(row => {
-                    worksheet.addRow(row);
+                    worksheet.addRow({
+                        date: row.date,
+                        arena_name: row.arena_name,
+                        owner_name: row.owner_name,
+                        customer_name: row.customer_name,
+                        booking_id: row.booking_id,
+                        sport_name: row.sport_name,
+                        time_slot: row.time_slot || 'N/A',
+                        total_amount: row.total_amount,
+                        commission_amount: row.commission_amount,
+                        status: row.status
+                    });
                 });
 
                 // Add summary row
-                const totalRevenue = reportData.reduce((sum, row) => sum + parseFloat(row.total_amount || 0), 0);
-                const totalCommission = reportData.reduce((sum, row) => sum + parseFloat(row.commission_amount || 0), 0);
+                const totalRevenue = reportData.reduce((sum, row) => sum + (parseFloat(row.total_amount) || 0), 0);
+                const totalCommission = reportData.reduce((sum, row) => sum + (parseFloat(row.commission_amount) || 0), 0);
 
                 worksheet.addRow([]);
                 worksheet.addRow(['SUMMARY', '', '', '', '', '', '', '', '', '']);
@@ -1089,7 +1110,7 @@ const superAdminController = {
 
                 // Set response headers for Excel download
                 res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-                res.setHeader('Content-Disposition', `attachment; filename="financial_report_${Date.now()}.xlsx"`);
+                res.setHeader('Content-Disposition', `attachment; filename="financial_report_${start_date || 'start'}_to_${end_date || 'end'}.xlsx"`);
 
                 // Send the Excel file
                 await workbook.xlsx.write(res);
@@ -1099,8 +1120,8 @@ const superAdminController = {
                 // Return JSON data
                 const summary = {
                     total_bookings: reportData.length,
-                    total_revenue: reportData.reduce((sum, row) => sum + parseFloat(row.total_amount || 0), 0),
-                    total_commission: reportData.reduce((sum, row) => sum + parseFloat(row.commission_amount || 0), 0),
+                    total_revenue: reportData.reduce((sum, row) => sum + (parseFloat(row.total_amount) || 0), 0),
+                    total_commission: reportData.reduce((sum, row) => sum + (parseFloat(row.commission_amount) || 0), 0),
                     period: {
                         start: start_date,
                         end: end_date
@@ -1114,7 +1135,7 @@ const superAdminController = {
                     summary,
                     data: reportData,
                     generated_at: new Date().toISOString(),
-                    generated_by: req.user.name
+                    generated_by: req.user?.name || 'Admin'
                 });
 
             } else {
