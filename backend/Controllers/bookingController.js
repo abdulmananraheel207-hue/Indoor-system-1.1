@@ -605,7 +605,7 @@ const bookingController = {
 
       const booking = bookings[0];
 
-      // Check permissions
+      // Check ions
       let canCancel = false;
       if (req.user.role === "user" && booking.user_id === req.user.id) {
         canCancel = true;
