@@ -15,11 +15,10 @@ const OwnerBookings = ({ isOwner, permissions = {} }) => {
   const [stats, setStats] = useState({});
   const [activeTab, setActiveTab] = useState("upcoming");
 
-  // Permission checks
-  const canViewBookings = isOwner || permissions.view_bookings;
+  // In OwnerBookings.jsx
+  const canViewBookings = isOwner || permissions.manage_bookings; // Management implies viewing
   const canManageBookings = isOwner || permissions.manage_bookings;
-  const canViewFinancial = isOwner || permissions.view_financial;
-
+  const canViewFinancial = isOwner || permissions.view_financials;
   useEffect(() => {
     if (canViewBookings) {
       fetchBookings();

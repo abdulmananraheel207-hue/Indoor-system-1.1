@@ -554,119 +554,141 @@ const OwnerProfile = ({ dashboardData, isOwner, permissions = {} }) => {
         </div>
       </div>
 
-      {/* Security Section - Password Change (Both Owner and Manager) */}
-      <div className="mt-4 bg-white rounded-xl shadow p-4 md:mt-6 md:p-6">
-        <h3 className="text-base font-medium text-gray-900 mb-3 md:text-lg md:mb-4">
-          Security
-        </h3>
+      {/* Security Section - Password Change (Only for Owners) */}
+      {isOwner && (
+        <div className="mt-4 bg-white rounded-xl shadow p-4 md:mt-6 md:p-6">
+          <h3 className="text-base font-medium text-gray-900 mb-3 md:text-lg md:mb-4">
+            Security
+          </h3>
 
-        {/* Error Message */}
-        {passwordError && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-            <div className="flex items-center">
-              <svg className="h-5 w-5 text-red-400 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-              </svg>
-              <p className="text-sm font-medium text-red-800">{passwordError}</p>
+          {/* Error Message */}
+          {passwordError && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <div className="flex items-center">
+                <svg className="h-5 w-5 text-red-400 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+                <p className="text-sm font-medium text-red-800">{passwordError}</p>
+              </div>
             </div>
-          </div>
-        )}
-
-        {/* Success Message */}
-        {passwordSuccess && (
-          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-            <div className="flex items-center">
-              <svg className="h-5 w-5 text-green-400 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-              </svg>
-              <p className="text-sm font-medium text-green-800">{passwordSuccess}</p>
-            </div>
-          </div>
-        )}
-
-        <form onSubmit={handlePasswordChange}>
-          <div className="space-y-3 md:space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Current Password
-              </label>
-              <input
-                type="password"
-                name="current_password"
-                value={passwordData.current_password}
-                onChange={handlePasswordInputChange}
-                placeholder="Enter current password"
-                className="w-full px-3 py-2 text-sm md:text-base border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                New Password
-              </label>
-              <input
-                type="password"
-                name="new_password"
-                value={passwordData.new_password}
-                onChange={handlePasswordInputChange}
-                placeholder="Enter new password (min. 6 characters)"
-                className="w-full px-3 py-2 text-sm md:text-base border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Confirm New Password
-              </label>
-              <input
-                type="password"
-                name="confirm_password"
-                value={passwordData.confirm_password}
-                onChange={handlePasswordInputChange}
-                placeholder="Confirm new password"
-                className="w-full px-3 py-2 text-sm md:text-base border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                required
-              />
-            </div>
-
-            <div className="pt-2">
-              <button
-                type="submit"
-                disabled={passwordLoading}
-                className={`w-full px-4 py-2 text-sm md:text-base text-white rounded-md md:w-auto ${passwordLoading
-                    ? "bg-blue-400 cursor-not-allowed"
-                    : "bg-blue-600 hover:bg-blue-700"
-                  }`}
-              >
-                {passwordLoading ? (
-                  <>
-                    <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></span>
-                    Updating...
-                  </>
-                ) : (
-                  "Update Password"
-                )}
-              </button>
-            </div>
-          </div>
-        </form>
-
-        {/* Password Requirements Note */}
-        <div className="mt-4 pt-4 border-t border-gray-200">
-          <p className="text-xs text-gray-500">
-            <strong>Note:</strong> Password must be at least 6 characters long.
-            Make sure to use a strong password that includes letters, numbers,
-            and special characters.
-          </p>
-          {isManager && (
-            <p className="text-xs text-gray-500 mt-2">
-              <strong>Account Managed By:</strong> Arena Owner
-            </p>
           )}
+
+          {/* Success Message */}
+          {passwordSuccess && (
+            <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+              <div className="flex items-center">
+                <svg className="h-5 w-5 text-green-400 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+                <p className="text-sm font-medium text-green-800">{passwordSuccess}</p>
+              </div>
+            </div>
+          )}
+
+          <form onSubmit={handlePasswordChange}>
+            <div className="space-y-3 md:space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Current Password
+                </label>
+                <input
+                  type="password"
+                  name="current_password"
+                  value={passwordData.current_password}
+                  onChange={handlePasswordInputChange}
+                  placeholder="Enter current password"
+                  className="w-full px-3 py-2 text-sm md:text-base border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  New Password
+                </label>
+                <input
+                  type="password"
+                  name="new_password"
+                  value={passwordData.new_password}
+                  onChange={handlePasswordInputChange}
+                  placeholder="Enter new password (min. 6 characters)"
+                  className="w-full px-3 py-2 text-sm md:text-base border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Confirm New Password
+                </label>
+                <input
+                  type="password"
+                  name="confirm_password"
+                  value={passwordData.confirm_password}
+                  onChange={handlePasswordInputChange}
+                  placeholder="Confirm new password"
+                  className="w-full px-3 py-2 text-sm md:text-base border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  required
+                />
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  disabled={passwordLoading}
+                  className={`w-full px-4 py-2 text-sm md:text-base text-white rounded-md md:w-auto ${passwordLoading
+                      ? "bg-blue-400 cursor-not-allowed"
+                      : "bg-blue-600 hover:bg-blue-700"
+                    }`}
+                >
+                  {passwordLoading ? (
+                    <>
+                      <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></span>
+                      Updating...
+                    </>
+                  ) : (
+                    "Update Password"
+                  )}
+                </button>
+              </div>
+            </div>
+          </form>
+
+          {/* Password Requirements Note */}
+          <div className="mt-4 pt-4 border-t border-gray-200">
+            <p className="text-xs text-gray-500">
+              <strong>Note:</strong> Password must be at least 6 characters long.
+              Make sure to use a strong password that includes letters, numbers,
+              and special characters.
+            </p>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* For managers, show a message */}
+      {!isOwner && (
+        <div className="mt-4 bg-white rounded-xl shadow p-4 md:mt-6 md:p-6">
+          <h3 className="text-base font-medium text-gray-900 mb-3 md:text-lg md:mb-4">
+            Account Information
+          </h3>
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex items-start">
+              <svg className="w-5 h-5 text-blue-600 mt-0.5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div>
+                <p className="text-sm font-medium text-blue-900">Password Management</p>
+                <p className="text-xs text-blue-700 mt-1">
+                  Password changes can only be made by the arena owner. Please contact your arena owner if you need to reset your password.
+                </p>
+                <p className="text-xs text-blue-700 mt-2">
+                  <strong>Owner Email:</strong> {profile?.owner_email || "Not available"}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

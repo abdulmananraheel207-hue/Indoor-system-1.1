@@ -1,4 +1,4 @@
-// File: OwnerDashboard.jsx - UPDATED for both Owner and Manager roles
+// File: OwnerDashboard.jsx - FIXED dashboard access for managers
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import OwnerHome from "./OwnerHome";
@@ -8,11 +8,11 @@ import OwnerManagers from "./OwnerManagers";
 import OwnerProfile from "./OwnerProfile";
 import OwnerArenaSettings from "./OwnerArenaSettings";
 
-// Permission mapping for tabs
+// 🔥 FIX: Updated permission mapping - dashboard is ALWAYS accessible
 const TAB_PERMISSIONS = {
-  home: "view_dashboard",
-  bookings: "view_bookings",
-  calendar: "view_calendar",
+  home: null, // Always accessible for both owner and manager
+  bookings: "manage_bookings",
+  calendar: "manage_calendar",
   arenasettings: "manage_arena",
   managers: null, // Managers should NEVER see this tab
   profile: null,  // Profile is always accessible
@@ -39,15 +39,10 @@ const OwnerDashboard = () => {
     if (isOwner) {
       // Owners have ALL permissions
       return {
-        view_dashboard: true,
-        view_bookings: true,
+        view_financials: true,
         manage_bookings: true,
-        view_calendar: true,
         manage_calendar: true,
-        view_reports: true,
         manage_arena: true,
-        view_financial: true,
-        view_managers: true, // Special permission for owners only
       };
     } else if (isManager) {
       // Get manager permissions from stored user data
@@ -71,11 +66,16 @@ const OwnerDashboard = () => {
   const canAccessTab = (tab) => {
     if (isOwner) return true; // Owners can access everything
 
-    // Managers: Check specific permissions
-    if (tab === "managers") return false; // Managers NEVER see managers tab
-    if (tab === "profile") return true;    // Profile always accessible
-    if (tab === "home") return permissions.view_dashboard || false;
+    // 🔥 FIX: Dashboard (home) is ALWAYS accessible for managers
+    if (tab === "home") return true;
 
+    // Managers: NEVER see managers tab
+    if (tab === "managers") return false;
+
+    // Profile always accessible
+    if (tab === "profile") return true;
+
+    // Check permission for other tabs
     const requiredPermission = TAB_PERMISSIONS[tab];
     return requiredPermission ? permissions[requiredPermission] || false : true;
   };
@@ -99,7 +99,7 @@ const OwnerDashboard = () => {
   useEffect(() => {
     // Redirect if trying to access unauthorized tab
     if (!canAccessTab(currentTab)) {
-      // Find first available tab
+      // Find first available tab (always at least "home" and "profile")
       const firstAvailable = availableTabs[0]?.id || "profile";
       setCurrentTab(firstAvailable);
     }
@@ -199,7 +199,7 @@ const OwnerDashboard = () => {
 
       if (isOwner) {
         endpoint = "http://localhost:5000/api/owners/bookings/stats?period=month";
-      } else if (isManager && permissions.view_financial) {
+      } else if (isManager && permissions.view_financials) {
         endpoint = "http://localhost:5000/api/managers/stats?period=month";
       } else {
         return; // No permission to view stats
@@ -316,7 +316,7 @@ const OwnerDashboard = () => {
               </span>
 
               {/* Only show refresh button if user has permission to view stats */}
-              {(isOwner || permissions.view_financial || permissions.view_dashboard) && (
+              {(isOwner || permissions.view_financials) && (
                 <button
                   onClick={refreshStats}
                   className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 text-sm"
@@ -356,8 +356,8 @@ const OwnerDashboard = () => {
                       if (tab.id === "home") fetchUserData();
                     }}
                     className={`px-3 py-2.5 rounded-lg text-left flex items-center space-x-2 ${currentTab === tab.id
-                        ? "bg-blue-100 text-blue-700"
-                        : "text-gray-700 hover:bg-gray-100"
+                      ? "bg-blue-100 text-blue-700"
+                      : "text-gray-700 hover:bg-gray-100"
                       }`}
                   >
                     <span>{tab.icon}</span>
@@ -377,7 +377,7 @@ const OwnerDashboard = () => {
                     </div>
                   </div>
 
-                  {(isOwner || permissions.view_financial || permissions.view_dashboard) && (
+                  {(isOwner || permissions.view_financials) && (
                     <button
                       onClick={() => {
                         refreshStats();
@@ -403,8 +403,8 @@ const OwnerDashboard = () => {
                   if (tab.id === "home") fetchUserData();
                 }}
                 className={`px-3 py-2 rounded-lg text-sm flex items-center space-x-1 ${currentTab === tab.id
-                    ? "bg-blue-100 text-blue-700"
-                    : "text-gray-700 hover:bg-gray-100"
+                  ? "bg-blue-100 text-blue-700"
+                  : "text-gray-700 hover:bg-gray-100"
                   }`}
               >
                 <span>{tab.icon}</span>
@@ -453,6 +453,7 @@ const OwnerDashboard = () => {
           <OwnerProfile
             dashboardData={userData}
             isOwner={isOwner}
+            permissions={permissions}
           />
         )}
       </main>

@@ -1,10 +1,11 @@
 const pool = require("../db");
 
 const managerController = {
-  // Get dashboard data
+  // In managerController.js - Update getDashboard to return better stats
+
   getDashboard: async (req, res) => {
     try {
-      const { owner_id, permissions } = req.manager;
+      const { owner_id, permissions, id: manager_id } = req.manager;
       const today = new Date().toISOString().split("T")[0];
 
       const dashboardData = {
@@ -15,54 +16,83 @@ const managerController = {
         arenas: [],
       };
 
-      // Only fetch stats if has view_dashboard
-      if (permissions.view_dashboard) {
-        // Today's bookings count
-        const [todayBookings] = await pool.execute(
-          `SELECT COUNT(*) as count 
-                     FROM bookings b
-                     JOIN arenas a ON b.arena_id = a.arena_id
-                     WHERE a.owner_id = ? AND DATE(b.booking_date) = ?`,
+      // 🔥 FIX: Always fetch basic stats regardless of permissions
+      // Today's bookings count
+      const [todayBookings] = await pool.execute(
+        `SELECT COUNT(*) as count 
+       FROM bookings b
+       JOIN arenas a ON b.arena_id = a.arena_id
+       WHERE a.owner_id = ? AND DATE(b.booking_date) = ?`,
+        [owner_id, today]
+      );
+      dashboardData.stats.today_bookings = todayBookings[0].count || 0;
+
+      // Total pending requests count
+      const [pendingCount] = await pool.execute(
+        `SELECT COUNT(*) as count 
+       FROM bookings b
+       JOIN arenas a ON b.arena_id = a.arena_id
+       WHERE a.owner_id = ? AND b.status = 'pending'`,
+        [owner_id]
+      );
+      dashboardData.stats.pending_requests_count = pendingCount[0].count || 0;
+
+      // Total arenas count
+      const [arenasCount] = await pool.execute(
+        "SELECT COUNT(*) as count FROM arenas WHERE owner_id = ? AND is_active = TRUE",
+        [owner_id]
+      );
+      dashboardData.stats.total_arenas = arenasCount[0].count || 0;
+
+      // Today's revenue if has view_financials permission
+      if (permissions.view_financials) {
+        const [todayRevenue] = await pool.execute(
+          `SELECT COALESCE(SUM(b.total_amount), 0) as revenue
+         FROM bookings b
+         JOIN arenas a ON b.arena_id = a.arena_id
+         WHERE a.owner_id = ? 
+           AND DATE(b.booking_date) = ? 
+           AND b.status = 'completed'`,
           [owner_id, today]
         );
-        dashboardData.stats.today_bookings = todayBookings[0].count || 0;
+        dashboardData.stats.today_revenue = todayRevenue[0].revenue || 0;
 
-        // Today's revenue if has view_financial
-        if (permissions.view_financial) {
-          const [todayRevenue] = await pool.execute(
-            `SELECT COALESCE(SUM(b.total_amount), 0) as revenue
-                         FROM bookings b
-                         JOIN arenas a ON b.arena_id = a.arena_id
-                         WHERE a.owner_id = ? 
-                           AND DATE(b.booking_date) = ? 
-                           AND b.status = 'completed'`,
-            [owner_id, today]
-          );
-          dashboardData.stats.today_revenue = todayRevenue[0].revenue || 0;
-        }
+        // Monthly revenue
+        const [monthlyRevenue] = await pool.execute(
+          `SELECT COALESCE(SUM(b.total_amount), 0) as revenue
+         FROM bookings b
+         JOIN arenas a ON b.arena_id = a.arena_id
+         JOIN time_slots ts ON b.slot_id = ts.slot_id
+         WHERE a.owner_id = ? 
+           AND MONTH(ts.date) = MONTH(CURRENT_DATE())
+           AND YEAR(ts.date) = YEAR(CURRENT_DATE())
+           AND b.status = 'completed'`,
+          [owner_id]
+        );
+        dashboardData.stats.monthly_revenue = monthlyRevenue[0].revenue || 0;
       }
 
-      // Only fetch pending requests if has view_bookings or manage_bookings
-      if (permissions.view_bookings || permissions.manage_bookings) {
+      // Only fetch pending requests if has manage_bookings
+      if (permissions.manage_bookings) {
         const [pendingRequests] = await pool.execute(
           `SELECT b.*, u.name as user_name, u.phone_number as user_phone,
-                            st.name as sport_name, a.name as arena_name,
-                            ts.date, ts.start_time, ts.end_time
-                     FROM bookings b
-                     JOIN arenas a ON b.arena_id = a.arena_id
-                     JOIN users u ON b.user_id = u.user_id
-                     JOIN sports_types st ON b.sport_id = st.sport_id
-                     JOIN time_slots ts ON b.slot_id = ts.slot_id
-                     WHERE a.owner_id = ? AND b.status = 'pending'
-                     ORDER BY b.booking_date DESC
-                     LIMIT 10`,
+                 st.name as sport_name, a.name as arena_name,
+                 ts.date, ts.start_time, ts.end_time
+         FROM bookings b
+         JOIN arenas a ON b.arena_id = a.arena_id
+         JOIN users u ON b.user_id = u.user_id
+         JOIN sports_types st ON b.sport_id = st.sport_id
+         JOIN time_slots ts ON b.slot_id = ts.slot_id
+         WHERE a.owner_id = ? AND b.status = 'pending'
+         ORDER BY ts.date ASC, ts.start_time ASC
+         LIMIT 10`,
           [owner_id]
         );
         dashboardData.pending_requests = pendingRequests;
       }
 
-      // Get owner's arenas if has view_arena or manage_arena
-      if (permissions.view_arena || permissions.manage_arena) {
+      // Get owner's arenas if has manage_arena
+      if (permissions.manage_arena) {
         const [arenas] = await pool.execute(
           "SELECT arena_id, name FROM arenas WHERE owner_id = ? AND is_active = TRUE",
           [owner_id]
@@ -70,19 +100,19 @@ const managerController = {
         dashboardData.arenas = arenas;
       }
 
-      // Get recent bookings if has view_bookings
-      if (permissions.view_bookings) {
+      // Get recent bookings if has manage_bookings
+      if (permissions.manage_bookings) {
         const [recentBookings] = await pool.execute(
           `SELECT b.*, u.name as user_name, st.name as sport_name,
-                            a.name as arena_name, ts.date, ts.start_time, ts.end_time
-                     FROM bookings b
-                     JOIN arenas a ON b.arena_id = a.arena_id
-                     JOIN users u ON b.user_id = u.user_id
-                     JOIN sports_types st ON b.sport_id = st.sport_id
-                     JOIN time_slots ts ON b.slot_id = ts.slot_id
-                     WHERE a.owner_id = ?
-                     ORDER BY b.booking_date DESC
-                     LIMIT 5`,
+                 a.name as arena_name, ts.date, ts.start_time, ts.end_time
+         FROM bookings b
+         JOIN arenas a ON b.arena_id = a.arena_id
+         JOIN users u ON b.user_id = u.user_id
+         JOIN sports_types st ON b.sport_id = st.sport_id
+         JOIN time_slots ts ON b.slot_id = ts.slot_id
+         WHERE a.owner_id = ?
+         ORDER BY b.booking_date DESC
+         LIMIT 5`,
           [owner_id]
         );
         dashboardData.recent_bookings = recentBookings;
@@ -94,7 +124,6 @@ const managerController = {
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
-
   // Get bookings
   getBookings: async (req, res) => {
     try {
@@ -526,7 +555,259 @@ const managerController = {
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
+  // In managerController.js - Replace with improved error handling
+  uploadCourtPhotos: async (req, res) => {
+    try {
+      const { court_id } = req.params;
+      const { owner_id, id: manager_id } = req.manager;
+      const files = req.files;
 
+      console.log("📸 Manager uploading court photos:", {
+        court_id,
+        manager_id,
+        owner_id,
+        filesCount: files?.length,
+        files: files ? files.map(f => ({ originalname: f.originalname, filename: f.filename })) : []
+      });
+
+      if (!files || files.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: "No files uploaded"
+        });
+      }
+
+      // Verify court belongs to owner's arena
+      const [courtCheck] = await pool.execute(
+        `SELECT cd.court_id, cd.court_name, cd.arena_id
+       FROM court_details cd
+       JOIN arenas a ON cd.arena_id = a.arena_id
+       WHERE cd.court_id = ? AND a.owner_id = ?`,
+        [court_id, owner_id]
+      );
+
+      if (courtCheck.length === 0) {
+        return res.status(403).json({
+          success: false,
+          message: "Court not found or you don't have permission"
+        });
+      }
+
+      // Check photo limit (max 3)
+      const [existingPhotos] = await pool.execute(
+        "SELECT COUNT(*) as count FROM court_images WHERE court_id = ?",
+        [court_id]
+      );
+
+      const currentCount = existingPhotos[0].count;
+      if (currentCount + files.length > 3) {
+        return res.status(400).json({
+          success: false,
+          message: `Maximum 3 photos per court. You have ${currentCount}, trying to add ${files.length}.`
+        });
+      }
+
+      const connection = await pool.getConnection();
+      await connection.beginTransaction();
+
+      try {
+        // Check existing primary image
+        const [existingPrimary] = await connection.execute(
+          "SELECT image_id FROM court_images WHERE court_id = ? AND is_primary = TRUE",
+          [court_id]
+        );
+
+        const uploadedImages = [];
+
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const image_url = file.path;
+          const cloudinary_id = file.filename;
+
+          // Set first image as primary if no primary exists
+          const is_primary = existingPrimary.length === 0 && i === 0;
+
+          // Check if uploaded_by_manager_id column exists
+          try {
+            // First try with uploaded_by_manager_id
+            const [result] = await connection.execute(
+              `INSERT INTO court_images 
+             (court_id, image_url, cloudinary_id, is_primary, uploaded_by_manager_id, uploaded_at)
+             VALUES (?, ?, ?, ?, ?, NOW())`,
+              [court_id, image_url, cloudinary_id, is_primary, manager_id]
+            );
+
+            uploadedImages.push({
+              image_id: result.insertId,
+              image_url,
+              cloudinary_id,
+              is_primary,
+              court_id: parseInt(court_id),
+              uploaded_by_manager_id: manager_id,
+            });
+          } catch (insertError) {
+            // If column doesn't exist, try without uploaded_by_manager_id
+            if (insertError.code === 'ER_BAD_FIELD_ERROR') {
+              console.log("⚠️ uploaded_by_manager_id column doesn't exist, inserting without it");
+              const [result] = await connection.execute(
+                `INSERT INTO court_images 
+               (court_id, image_url, cloudinary_id, is_primary, uploaded_at)
+               VALUES (?, ?, ?, ?, NOW())`,
+                [court_id, image_url, cloudinary_id, is_primary]
+              );
+
+              uploadedImages.push({
+                image_id: result.insertId,
+                image_url,
+                cloudinary_id,
+                is_primary,
+                court_id: parseInt(court_id),
+                uploaded_by_manager_id: null,
+              });
+            } else {
+              throw insertError;
+            }
+          }
+        }
+
+        await connection.commit();
+
+        res.json({
+          success: true,
+          message: `${uploadedImages.length} photo(s) uploaded successfully`,
+          count: uploadedImages.length,
+          images: uploadedImages,
+        });
+
+      } catch (error) {
+        await connection.rollback();
+        console.error("Transaction error:", error);
+        throw error;
+      } finally {
+        connection.release();
+      }
+
+    } catch (error) {
+      console.error("❌ Error uploading court photos:", error);
+      res.status(500).json({
+        success: false,
+        message: "Server error",
+        error: error.message,
+        code: error.code
+      });
+    }
+  },
+
+  // In managerController.js - Add deleteCourtPhoto
+  // In managerController.js - Update deleteCourtPhoto for full control
+  deleteCourtPhoto: async (req, res) => {
+    try {
+      const { court_id, photo_id } = req.params;
+      const { owner_id, id: manager_id, permissions } = req.manager;
+
+      console.log("🗑️ Manager deleting court photo:", {
+        court_id,
+        photo_id,
+        manager_id,
+        owner_id,
+        permissions
+      });
+
+      // First, get photo details with uploader info
+      const [photoDetails] = await pool.execute(
+        `SELECT ci.*, cd.arena_id 
+       FROM court_images ci
+       JOIN court_details cd ON ci.court_id = cd.court_id
+       JOIN arenas a ON cd.arena_id = a.arena_id
+       WHERE ci.image_id = ? AND ci.court_id = ? AND a.owner_id = ?`,
+        [photo_id, court_id, owner_id]
+      );
+
+      if (photoDetails.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Photo not found or access denied"
+        });
+      }
+
+      const photo = photoDetails[0];
+
+      // 🔥 NEW: Manager with manage_arena permission can delete ANY photo
+      // No need to check if they uploaded it
+      const canDelete = permissions.manage_arena === true;
+
+      if (!canDelete) {
+        return res.status(403).json({
+          success: false,
+          message: "Permission denied: manage_arena required to delete photos"
+        });
+      }
+
+      const connection = await pool.getConnection();
+      await connection.beginTransaction();
+
+      try {
+        // Delete from database
+        await connection.execute(
+          "DELETE FROM court_images WHERE image_id = ? AND court_id = ?",
+          [photo_id, court_id]
+        );
+
+        // If we deleted the primary photo, set a new primary if available
+        if (photo.is_primary) {
+          const [remainingPhotos] = await connection.execute(
+            "SELECT image_id FROM court_images WHERE court_id = ? ORDER BY uploaded_at LIMIT 1",
+            [court_id]
+          );
+
+          if (remainingPhotos.length > 0) {
+            await connection.execute(
+              "UPDATE court_images SET is_primary = TRUE WHERE image_id = ?",
+              [remainingPhotos[0].image_id]
+            );
+          }
+        }
+
+        await connection.commit();
+
+        // Optionally delete from Cloudinary
+        if (photo.cloudinary_id && process.env.CLOUDINARY_CLOUD_NAME) {
+          try {
+            const cloudinary = require("cloudinary").v2;
+            await cloudinary.uploader.destroy(photo.cloudinary_id);
+            console.log(`Deleted from Cloudinary: ${photo.cloudinary_id}`);
+          } catch (cloudinaryError) {
+            console.warn("Could not delete from Cloudinary:", cloudinaryError.message);
+          }
+        }
+
+        res.json({
+          success: true,
+          message: "Photo deleted successfully",
+          deleted_photo: {
+            image_id: photo.image_id,
+            image_url: photo.image_url,
+            was_primary: photo.is_primary,
+            uploaded_by_manager_id: photo.uploaded_by_manager_id
+          }
+        });
+
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      } finally {
+        connection.release();
+      }
+
+    } catch (error) {
+      console.error("Error deleting court photo:", error);
+      res.status(500).json({
+        success: false,
+        message: "Server error",
+        error: error.message
+      });
+    }
+  },
   // Get stats
   getStats: async (req, res) => {
     try {
