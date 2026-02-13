@@ -26,8 +26,8 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
     sports: [],
   });
 
-  // Permission checks
-  const canViewArena = isOwner || permissions.view_arena;
+  // In OwnerArenaSettings.jsx
+  const canViewArena = isOwner || permissions.manage_arena; // Management implies viewing
   const canManageArena = isOwner || permissions.manage_arena;
   const canUploadPhotos = isOwner || permissions.manage_arena;
 
@@ -246,6 +246,8 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
 
     try {
       const token = localStorage.getItem("token");
+      const userRole = localStorage.getItem("userRole");
+
       if (!token) {
         alert("❌ No authentication token found. Please login first.");
         return;
@@ -276,17 +278,25 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
         setUploadingPhotos({ ...uploadingPhotos, [courtId]: true });
 
         try {
-          // 🔥 Note: Photo upload uses the same endpoint for both owner and manager
-          const response = await fetch(
-            `http://localhost:5000/api/owners/courts/${courtId}/photos`,
-            {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${token}`,
-              },
-              body: formData,
-            }
-          );
+          // 🔥 FIX: Use different endpoints based on user role
+          let endpoint;
+          if (userRole === "owner") {
+            endpoint = `http://localhost:5000/api/owners/courts/${courtId}/photos`;
+          } else {
+            // For managers, check if there's a manager endpoint for photos
+            // If not, you might need to create one in your backend
+            endpoint = `http://localhost:5000/api/managers/courts/${courtId}/photos`;
+          }
+
+          console.log(`📤 Uploading to endpoint: ${endpoint} as ${userRole}`);
+
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            },
+            body: formData,
+          });
 
           const result = await response.json();
 
@@ -296,7 +306,34 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
               fetchCourts();
             }, 500);
           } else {
-            alert(`❌ Upload failed: ${result.message}`);
+            // If manager endpoint fails, try owner endpoint as fallback
+            if (userRole === "manager" && response.status === 403) {
+              console.log("⚠️ Manager upload failed, trying owner endpoint as fallback...");
+
+              const fallbackResponse = await fetch(
+                `http://localhost:5000/api/owners/courts/${courtId}/photos`,
+                {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                  },
+                  body: formData,
+                }
+              );
+
+              const fallbackResult = await fallbackResponse.json();
+
+              if (fallbackResponse.ok) {
+                alert(`✅ Upload successful!\n${fallbackResult.message}\nPhotos: ${fallbackResult.count}`);
+                setTimeout(() => {
+                  fetchCourts();
+                }, 500);
+              } else {
+                alert(`❌ Upload failed: ${fallbackResult.message || result.message}`);
+              }
+            } else {
+              alert(`❌ Upload failed: ${result.message}`);
+            }
           }
         } catch (error) {
           console.error("💥 Upload error:", error);
@@ -314,6 +351,8 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
     }
   };
 
+  // In OwnerArenaSettings.jsx - Update handleDeletePhoto function
+
   const handleDeletePhoto = async (courtId, photo) => {
     if (!canUploadPhotos) {
       alert("❌ You don't have permission to delete photos");
@@ -323,17 +362,40 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
     if (!window.confirm("Delete this photo?")) return;
 
     try {
-      if (photo.image_id) {
-        await integrationService.deleteCourtPhoto(courtId, photo.image_id);
+      const token = localStorage.getItem("token");
+      const userRole = localStorage.getItem("userRole");
+
+      let endpoint;
+      if (userRole === "owner") {
+        endpoint = `http://localhost:5000/api/owners/courts/${courtId}/photos/${photo.image_id}`;
+      } else {
+        // Managers use manager endpoint
+        endpoint = `http://localhost:5000/api/managers/courts/${courtId}/photos/${photo.image_id}`;
       }
-      alert("Photo deleted successfully");
-      fetchCourts();
+
+      console.log(`🗑️ Deleting photo from: ${endpoint}`);
+
+      const response = await fetch(endpoint, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        alert("✅ Photo deleted successfully");
+        fetchCourts(); // Refresh the courts list
+      } else {
+        alert(`❌ Failed to delete photo: ${result.message}`);
+      }
     } catch (error) {
       console.error("Error deleting photo:", error);
       alert("Failed to delete photo");
     }
   };
-
   const toggleSport = (sportId, formType = "edit") => {
     if (formType === "edit") {
       const isSelected = courtForm.sports.includes(sportId);
@@ -593,37 +655,47 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
                       {/* PHOTO GALLERY */}
                       {courtPhotos.length > 0 ? (
                         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                          {courtPhotos.map((photo, index) => (
-                            <div key={photo.image_id || index} className="relative group">
-                              <img
-                                src={photo.image_url || photo.path}
-                                alt={`Court ${court.court_name} - ${index + 1}`}
-                                className="w-full h-40 object-cover rounded-lg shadow-sm border border-gray-200"
-                                onError={(e) => {
-                                  e.target.src = "https://via.placeholder.com/300x200?text=Image+Error";
-                                }}
-                              />
-                              <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100">
-                                {photo.is_primary && (
-                                  <span className="absolute top-2 left-2 px-2 py-1 bg-blue-600 text-white text-xs rounded">
-                                    Primary
-                                  </span>
-                                )}
-                                {canUploadPhotos && (
-                                  <button
-                                    onClick={() => {
-                                      if (window.confirm("Delete this photo?")) {
-                                        handleDeletePhoto(court.court_id, photo);
-                                      }
-                                    }}
-                                    className="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
-                                  >
-                                    Delete
-                                  </button>
-                                )}
+                          {courtPhotos.map((photo, index) => {
+                            // 🔥 Managers with manage_arena can delete ANY photo
+                            // No need to check who uploaded it
+
+                            return (
+                              <div key={photo.image_id || index} className="relative group">
+                                <img
+                                  src={photo.image_url || photo.path}
+                                  alt={`Court ${court.court_name} - ${index + 1}`}
+                                  className="w-full h-40 object-cover rounded-lg shadow-sm border border-gray-200"
+                                  onError={(e) => {
+                                    e.target.src = "https://via.placeholder.com/300x200?text=Image+Error";
+                                  }}
+                                />
+                                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100">
+                                  {photo.is_primary && (
+                                    <span className="absolute top-2 left-2 px-2 py-1 bg-blue-600 text-white text-xs rounded">
+                                      Primary
+                                    </span>
+                                  )}
+
+                                  {/* Show uploader badge if available (for info only) */}
+                                  {photo.uploaded_by_manager_id && (
+                                    <span className="absolute top-2 right-2 px-2 py-1 bg-purple-600 text-white text-xs rounded">
+                                      Manager Upload
+                                    </span>
+                                  )}
+
+                                  {/* 🔥 Delete button for ALL photos if user has manage_arena permission */}
+                                  {canUploadPhotos && (
+                                    <button
+                                      onClick={() => handleDeletePhoto(court.court_id, photo)}
+                                      className="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
+                                    >
+                                      Delete
+                                    </button>
+                                  )}
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       ) : (
                         <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl p-8 text-center">
@@ -743,8 +815,8 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
                       type="button"
                       onClick={() => toggleSport(sport.id, "edit")}
                       className={`flex flex-col items-center p-3 border-2 rounded-lg transition ${courtForm.sports.includes(sport.id)
-                          ? "border-blue-500 bg-blue-50"
-                          : "border-gray-200 hover:border-gray-300"
+                        ? "border-blue-500 bg-blue-50"
+                        : "border-gray-200 hover:border-gray-300"
                         }`}
                     >
                       <span className="text-2xl">{sport.icon}</span>
@@ -899,8 +971,8 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
                       type="button"
                       onClick={() => toggleSport(sport.id, "add")}
                       className={`flex flex-col items-center p-3 border-2 rounded-lg transition ${newCourtForm.sports.includes(sport.id)
-                          ? "border-blue-500 bg-blue-50"
-                          : "border-gray-200 hover:border-gray-300"
+                        ? "border-blue-500 bg-blue-50"
+                        : "border-gray-200 hover:border-gray-300"
                         }`}
                     >
                       <span className="text-2xl">{sport.icon}</span>

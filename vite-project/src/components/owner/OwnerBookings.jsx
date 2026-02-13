@@ -15,11 +15,10 @@ const OwnerBookings = ({ isOwner, permissions = {} }) => {
   const [stats, setStats] = useState({});
   const [activeTab, setActiveTab] = useState("upcoming");
 
-  // Permission checks
-  const canViewBookings = isOwner || permissions.view_bookings;
+  // In OwnerBookings.jsx
+  const canViewBookings = isOwner || permissions.manage_bookings; // Management implies viewing
   const canManageBookings = isOwner || permissions.manage_bookings;
-  const canViewFinancial = isOwner || permissions.view_financial;
-
+  const canViewFinancial = isOwner || permissions.view_financials;
   useEffect(() => {
     if (canViewBookings) {
       fetchBookings();
@@ -398,8 +397,8 @@ const OwnerBookings = ({ isOwner, permissions = {} }) => {
             <button
               onClick={() => setActiveTab("upcoming")}
               className={`flex-1 px-6 py-3 text-sm font-medium ${activeTab === "upcoming"
-                  ? "border-b-2 border-blue-500 text-blue-600"
-                  : "text-gray-500 hover:text-gray-700"
+                ? "border-b-2 border-blue-500 text-blue-600"
+                : "text-gray-500 hover:text-gray-700"
                 }`}
             >
               Upcoming Bookings
@@ -407,8 +406,8 @@ const OwnerBookings = ({ isOwner, permissions = {} }) => {
             <button
               onClick={() => setActiveTab("history")}
               className={`flex-1 px-6 py-3 text-sm font-medium ${activeTab === "history"
-                  ? "border-b-2 border-blue-500 text-blue-600"
-                  : "text-gray-500 hover:text-gray-700"
+                ? "border-b-2 border-blue-500 text-blue-600"
+                : "text-gray-500 hover:text-gray-700"
                 }`}
             >
               Booking History

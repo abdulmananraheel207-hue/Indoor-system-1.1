@@ -3,6 +3,7 @@ const express = require("express");
 const router = express.Router();
 const managerController = require("../Controllers/managerController");
 const managerAuth = require("../middleware/managerAuth");
+const { uploadCourtImages } = require("../middleware/upload");
 
 // Manager authentication routes (public)
 const pool = require("../db");
@@ -65,6 +66,7 @@ router.post("/login", async (req, res) => {
         console.log("Manager login successful:", manager.manager_id);
 
         // Create JWT token
+        // In the login endpoint
         const token = jwt.sign(
             {
                 id: manager.manager_id,
@@ -72,10 +74,11 @@ router.post("/login", async (req, res) => {
                 name: manager.name,
                 email: manager.email,
                 role: "manager",
-                permissions: permissions,
+                permissions: permissions, // Now only contains 4 permissions max
                 arena_name: manager.owner_arena_name
             },
-            process.env.JWT_SECRET || "your-secret-key",
+            process.env.JWT_SECRET || "09631e3f99caf686f08d48965782fcdb751c691bb08d610e51d893c300b6e694e86a3645ef38a94a414fd11f8d077292057c0ca7e94a6fb3db33cc2197891e35",
+
             { expiresIn: "24h" }
         );
 
@@ -113,150 +116,161 @@ router.post("/login", async (req, res) => {
 // All protected routes require manager authentication
 router.use(managerAuth.verifyToken);
 
-// Dashboard - requires view_dashboard
+// Dashboard - accessible if has any permission (or specific check for financials)
 router.get("/dashboard",
     (req, res, next) => {
-        if (req.manager.permissions.view_dashboard) {
+        // If they have ANY permission, they can view dashboard
+        const { view_financials, manage_bookings, manage_calendar, manage_arena } = req.manager.permissions;
+        if (view_financials || manage_bookings || manage_calendar || manage_arena) {
             next();
         } else {
-            res.status(403).json({
-                message: "Permission denied: view_dashboard required"
-            });
+            res.status(403).json({ message: "No permissions to access dashboard" });
         }
     },
     managerController.getDashboard
 );
 
-// Bookings management with permission checks
+// Bookings management - requires manage_bookings
 router.get("/bookings",
     (req, res, next) => {
-        if (req.manager.permissions.view_bookings || req.manager.permissions.manage_bookings) {
+        if (req.manager.permissions.manage_bookings) {
             next();
         } else {
-            res.status(403).json({
-                message: "Permission denied: view_bookings required"
-            });
+            res.status(403).json({ message: "Permission denied: manage_bookings required" });
         }
     },
     managerController.getBookings
 );
 
-router.post("/bookings/:booking_id/accept",
+router.put("/bookings/:booking_id/accept",
     (req, res, next) => {
         if (req.manager.permissions.manage_bookings) {
             next();
         } else {
-            res.status(403).json({
-                message: "Permission denied: manage_bookings required"
-            });
+            res.status(403).json({ message: "Permission denied: manage_bookings required" });
         }
     },
     managerController.acceptBooking
 );
 
-router.post("/bookings/:booking_id/reject",
+// Reject booking - use PUT
+router.put("/bookings/:booking_id/reject",
     (req, res, next) => {
         if (req.manager.permissions.manage_bookings) {
             next();
         } else {
-            res.status(403).json({
-                message: "Permission denied: manage_bookings required"
-            });
+            res.status(403).json({ message: "Permission denied: manage_bookings required" });
         }
     },
     managerController.rejectBooking
 );
 
-// Complete booking - new route
 router.put("/bookings/:booking_id/complete",
     (req, res, next) => {
         if (req.manager.permissions.manage_bookings) {
             next();
         } else {
-            res.status(403).json({
-                message: "Permission denied: manage_bookings required"
-            });
+            res.status(403).json({ message: "Permission denied: manage_bookings required" });
         }
     },
     managerController.completeBooking
 );
 
-// Calendar - requires view_calendar
-// In managers.js - Update the getCalendar route
+// Calendar - requires manage_calendar
 router.get("/calendar",
     (req, res, next) => {
-        if (req.manager.permissions.view_calendar || req.manager.permissions.manage_calendar) {
+        if (req.manager.permissions.manage_calendar) {
             next();
         } else {
-            res.status(403).json({
-                message: "Permission denied: view_calendar required"
-            });
+            res.status(403).json({ message: "Permission denied: manage_calendar required" });
         }
     },
     (req, res) => {
-        // Forward to controller with query params
         req.query.arena_id = req.query.arena_id;
         req.query.date = req.query.date;
-        req.query.court_id = req.query.court_id; // Make sure court_id is passed
+        req.query.court_id = req.query.court_id;
         managerController.getCalendar(req, res);
     }
 );
-// Update time slots - requires manage_calendar
+
 router.put("/calendar/slots",
     (req, res, next) => {
         if (req.manager.permissions.manage_calendar) {
             next();
         } else {
-            res.status(403).json({
-                message: "Permission denied: manage_calendar required"
-            });
+            res.status(403).json({ message: "Permission denied: manage_calendar required" });
         }
     },
     managerController.updateTimeSlots
 );
 
-// Arena and court management
+// Arena settings - requires manage_arena
 router.get("/arenas",
     (req, res, next) => {
-        if (req.manager.permissions.view_arena || req.manager.permissions.manage_arena) {
+        if (req.manager.permissions.manage_arena) {
             next();
         } else {
-            res.status(403).json({
-                message: "Permission denied: view_arena required"
-            });
+            res.status(403).json({ message: "Permission denied: manage_arena required" });
         }
     },
     managerController.getArenas
 );
 
-// Courts - requires manage_arena
 router.get("/courts/:arena_id",
     (req, res, next) => {
         if (req.manager.permissions.manage_arena) {
             next();
         } else {
-            res.status(403).json({
-                message: "Permission denied: manage_arena required"
-            });
+            res.status(403).json({ message: "Permission denied: manage_arena required" });
         }
     },
     managerController.getCourts
 );
 
-// Stats and reports
+// Financial stats - requires view_financials
 router.get("/stats",
     (req, res, next) => {
-        if (req.manager.permissions.view_financial || req.manager.permissions.view_dashboard) {
+        if (req.manager.permissions.view_financials) {
             next();
         } else {
-            res.status(403).json({
-                message: "Permission denied: view_financial required"
-            });
+            res.status(403).json({ message: "Permission denied: view_financials required" });
         }
     },
     managerController.getStats
 );
+// In managers.js - Add this route
 
+// Upload court photos - requires manage_arena
+router.post("/courts/:court_id/photos",
+    (req, res, next) => {
+        if (req.manager.permissions.manage_arena) {
+            next();
+        } else {
+            res.status(403).json({
+                success: false,
+                message: "Permission denied: manage_arena required"
+            });
+        }
+    },
+    uploadCourtImages,
+    managerController.uploadCourtPhotos
+);
+// In managers.js - Add delete route after the upload route
+
+// Delete court photo - requires manage_arena
+router.delete("/courts/:court_id/photos/:photo_id",
+    (req, res, next) => {
+        if (req.manager.permissions.manage_arena) {
+            next();
+        } else {
+            res.status(403).json({
+                success: false,
+                message: "Permission denied: manage_arena required"
+            });
+        }
+    },
+    managerController.deleteCourtPhoto
+);
 // Profile management (always accessible)
 router.get("/profile", managerController.getProfile);
 router.put("/profile", managerController.updateProfile);

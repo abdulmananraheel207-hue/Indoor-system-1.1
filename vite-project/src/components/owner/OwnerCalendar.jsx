@@ -1,4 +1,3 @@
-// File: OwnerCalendar.jsx - UPDATED for both Owner and Manager roles
 import React, { useState, useEffect } from "react";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
@@ -14,11 +13,14 @@ const OwnerCalendar = ({ arenas = [], isOwner, permissions = {} }) => {
   const [saving, setSaving] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
 
-  // Permission checks
-  const canViewCalendar = isOwner || permissions.view_calendar;
+  // 🔥 FIX: Define ALL permission checks at the top
+  // With simplified permissions, manage_calendar implies viewing
   const canManageCalendar = isOwner || permissions.manage_calendar;
-  const canViewArena = isOwner || permissions.view_arena;
+  const canViewCalendar = canManageCalendar; // Management implies viewing
+
+  // For arena access - manage_arena implies viewing
   const canManageArena = isOwner || permissions.manage_arena;
+  const canViewArena = canManageArena; // Management implies viewing
 
   // Add new slot form state
   const [showAddSlotForm, setShowAddSlotForm] = useState(false);
@@ -43,10 +45,10 @@ const OwnerCalendar = ({ arenas = [], isOwner, permissions = {} }) => {
 
   // Fetch courts when arena changes
   useEffect(() => {
-    if (selectedArena && (canViewArena || canManageArena)) {
+    if (selectedArena && canViewArena) {
       fetchCourts();
     }
-  }, [selectedArena, canViewArena, canManageArena]);
+  }, [selectedArena, canViewArena]);
 
   // Fetch time slots when date or court changes
   useEffect(() => {
@@ -412,7 +414,7 @@ const OwnerCalendar = ({ arenas = [], isOwner, permissions = {} }) => {
           You don't have permission to view the calendar.
         </p>
         <p className="mt-2 text-xs text-gray-400">
-          Required permission: view_calendar
+          Required permission: manage_calendar
         </p>
       </div>
     );

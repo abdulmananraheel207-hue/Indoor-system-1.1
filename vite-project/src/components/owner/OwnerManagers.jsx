@@ -1,10 +1,19 @@
-// File: OwnerManagers.jsx - UPDATED (Added delete manager functionality)
+// In OwnerManagers.jsx - Add edit credentials modal
+
 import React, { useState, useEffect } from "react";
 
 const OwnerManagers = () => {
   const [managers, setManagers] = useState([]);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showEditCredentials, setShowEditCredentials] = useState(null); // Store manager being edited
   const [editingManager, setEditingManager] = useState(null);
+  const [credentialsForm, setCredentialsForm] = useState({
+    name: "",
+    email: "",
+    phone_number: "",
+    password: "",
+    confirm_password: ""
+  });
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -13,49 +22,29 @@ const OwnerManagers = () => {
     permissions: {},
   });
   const [loading, setLoading] = useState(false);
-  const [deleteLoading, setDeleteLoading] = useState(null); // Track which manager is being deleted
+  const [deleteLoading, setDeleteLoading] = useState(null);
 
   // Define all available permissions - REMOVED view_managers
   const availablePermissions = [
     {
-      id: "view_dashboard",
-      name: "View Dashboard",
-      description: "Can view dashboard statistics",
-    },
-    {
-      id: "view_bookings",
-      name: "View Bookings",
-      description: "Can view all bookings",
+      id: "view_financials",
+      name: "View Financials",
+      description: "Can view revenue, commissions, and financial reports",
     },
     {
       id: "manage_bookings",
       name: "Manage Bookings",
-      description: "Can accept/reject bookings",
-    },
-    {
-      id: "view_calendar",
-      name: "View Calendar",
-      description: "Can view calendar and time slots",
+      description: "Can view, accept, reject, and complete all bookings",
     },
     {
       id: "manage_calendar",
       name: "Manage Calendar",
-      description: "Can block/unblock time slots",
-    },
-    {
-      id: "view_reports",
-      name: "View Reports",
-      description: "Can view financial reports",
+      description: "Can view and block/unblock time slots",
     },
     {
       id: "manage_arena",
-      name: "Manage Arena",
-      description: "Can edit arena details, courts, and photos",
-    },
-    {
-      id: "view_financial",
-      name: "View Financial",
-      description: "Can view revenue and commission data",
+      name: "Manage Arena Settings",
+      description: "Can edit arena details, courts, and upload photos",
     },
   ];
 
@@ -90,21 +79,90 @@ const OwnerManagers = () => {
     }
   };
 
+  // 🔥 NEW: Handle edit credentials
+  const handleEditCredentials = (manager) => {
+    setShowEditCredentials(manager);
+    setCredentialsForm({
+      name: manager.name || "",
+      email: manager.email || "",
+      phone_number: manager.phone_number || "",
+      password: "",
+      confirm_password: ""
+    });
+  };
+
+  // 🔥 NEW: Save credentials
+  const handleSaveCredentials = async () => {
+    if (!showEditCredentials) return;
+
+    // Validate
+    if (credentialsForm.password && credentialsForm.password.length < 6) {
+      alert("Password must be at least 6 characters long");
+      return;
+    }
+
+    if (credentialsForm.password && credentialsForm.password !== credentialsForm.confirm_password) {
+      alert("Passwords do not match");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const token = localStorage.getItem("token");
+
+      // Prepare update data
+      const updateData = {
+        name: credentialsForm.name,
+        email: credentialsForm.email,
+        phone_number: credentialsForm.phone_number
+      };
+
+      // Only include password if provided
+      if (credentialsForm.password) {
+        updateData.password = credentialsForm.password;
+      }
+
+      const response = await fetch(
+        `http://localhost:5000/api/owners/managers/${showEditCredentials.manager_id}/credentials`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(updateData),
+        }
+      );
+
+      const data = await response.json();
+
+      if (response.ok) {
+        alert("✅ Manager credentials updated successfully");
+        setShowEditCredentials(null);
+        fetchManagers();
+      } else {
+        alert(data.message || "Failed to update manager");
+      }
+    } catch (error) {
+      console.error("Error updating manager credentials:", error);
+      alert("An error occurred");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleDeleteManager = async (managerId, managerName) => {
-    // Show confirmation dialog with warning
     if (!window.confirm(
       `⚠️ ARE YOU SURE?\n\nYou are about to permanently delete manager "${managerName}".\n\n` +
       `This action:\n` +
       `• Cannot be undone\n` +
       `• Will remove all manager data\n` +
       `• Will prevent this manager from ever logging in again\n\n` +
-      `If you just want to prevent login temporarily, use "Deactivate" instead.\n\n` +
       `Do you still want to delete this manager?`
     )) {
       return;
     }
 
-    // Double confirmation for safety
     if (!window.confirm(
       `FINAL WARNING:\n\nType "DELETE" to confirm permanent deletion of ${managerName}`
     )) {
@@ -118,7 +176,7 @@ const OwnerManagers = () => {
       const response = await fetch(
         `http://localhost:5000/api/owners/managers/${managerId}`,
         {
-          method: "DELETE", // Using DELETE method
+          method: "DELETE",
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
@@ -130,7 +188,7 @@ const OwnerManagers = () => {
 
       if (response.ok) {
         alert(`✅ Manager "${managerName}" has been permanently deleted.`);
-        fetchManagers(); // Refresh the list
+        fetchManagers();
       } else {
         alert(data.message || "Failed to delete manager. Please try again.");
       }
@@ -158,6 +216,14 @@ const OwnerManagers = () => {
         [name]: value,
       });
     }
+  };
+
+  const handleCredentialsInputChange = (e) => {
+    const { name, value } = e.target;
+    setCredentialsForm({
+      ...credentialsForm,
+      [name]: value,
+    });
   };
 
   const handleSelectAllPermissions = (checked) => {
@@ -472,8 +538,8 @@ const OwnerManagers = () => {
                   type="submit"
                   disabled={loading}
                   className={`px-4 py-2 text-sm rounded-md text-white ${loading
-                      ? "bg-blue-400 cursor-not-allowed"
-                      : "bg-blue-600 hover:bg-blue-700"
+                    ? "bg-blue-400 cursor-not-allowed"
+                    : "bg-blue-600 hover:bg-blue-700"
                     }`}
                 >
                   {loading ? (
@@ -489,6 +555,121 @@ const OwnerManagers = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 🔥 NEW: Edit Credentials Modal */}
+      {showEditCredentials && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto z-50 p-3">
+          <div className="relative top-20 mx-auto p-4 border w-full max-w-md shadow-lg rounded-md bg-white">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-medium text-gray-900">
+                Edit Manager Credentials
+              </h2>
+              <button
+                onClick={() => setShowEditCredentials(null)}
+                className="text-gray-400 hover:text-gray-500 text-xl"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Full Name
+                </label>
+                <input
+                  type="text"
+                  name="name"
+                  value={credentialsForm.name}
+                  onChange={handleCredentialsInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Email Address
+                </label>
+                <input
+                  type="email"
+                  name="email"
+                  value={credentialsForm.email}
+                  onChange={handleCredentialsInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Phone Number
+                </label>
+                <input
+                  type="tel"
+                  name="phone_number"
+                  value={credentialsForm.phone_number}
+                  onChange={handleCredentialsInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="+1234567890"
+                />
+              </div>
+
+              <div className="pt-2 border-t">
+                <p className="text-sm font-medium text-gray-700 mb-2">
+                  Change Password (leave blank to keep current)
+                </p>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">
+                      New Password
+                    </label>
+                    <input
+                      type="password"
+                      name="password"
+                      value={credentialsForm.password}
+                      onChange={handleCredentialsInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="Minimum 6 characters"
+                      minLength="6"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">
+                      Confirm New Password
+                    </label>
+                    <input
+                      type="password"
+                      name="confirm_password"
+                      value={credentialsForm.confirm_password}
+                      onChange={handleCredentialsInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="Confirm new password"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-3 pt-4">
+                <button
+                  onClick={() => setShowEditCredentials(null)}
+                  className="px-4 py-2 text-sm border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveCredentials}
+                  disabled={loading}
+                  className={`px-4 py-2 text-sm rounded-md text-white ${loading
+                    ? "bg-blue-400 cursor-not-allowed"
+                    : "bg-blue-600 hover:bg-blue-700"
+                    }`}
+                >
+                  {loading ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -565,7 +746,7 @@ const OwnerManagers = () => {
                           {getPermissionCount(manager)} permissions
                         </div>
                         <div className="text-xs text-gray-500 mt-1">
-                          {manager.permissions?.view_financial
+                          {manager.permissions?.view_financials
                             ? "Includes financial access"
                             : "No financial access"}
                         </div>
@@ -588,7 +769,14 @@ const OwnerManagers = () => {
                               onClick={() => handleEditManager(manager)}
                               className="text-blue-600 hover:text-blue-900"
                             >
-                              Edit
+                              Permissions
+                            </button>
+                            {/* 🔥 NEW: Edit Credentials Button */}
+                            <button
+                              onClick={() => handleEditCredentials(manager)}
+                              className="text-green-600 hover:text-green-900"
+                            >
+                              Edit Details
                             </button>
                             <button
                               onClick={async () => {
@@ -642,7 +830,6 @@ const OwnerManagers = () => {
                               {manager.is_active ? "Deactivate" : "Activate"}
                             </button>
                           </div>
-                          {/* DELETE BUTTON - Desktop */}
                           <button
                             onClick={() => handleDeleteManager(manager.manager_id, manager.name)}
                             disabled={deleteLoading === manager.manager_id}
@@ -665,7 +852,7 @@ const OwnerManagers = () => {
               </table>
             </div>
 
-            {/* Mobile Card View */}
+            {/* Mobile Card View - Add Edit Details button here too */}
             <div className="md:hidden space-y-3 p-3">
               {managers.map((manager) => (
                 <div
@@ -728,6 +915,13 @@ const OwnerManagers = () => {
                       >
                         Edit Permissions
                       </button>
+                      {/* 🔥 NEW: Edit Details Button for Mobile */}
+                      <button
+                        onClick={() => handleEditCredentials(manager)}
+                        className="px-3 py-1.5 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200 text-center"
+                      >
+                        Edit Details
+                      </button>
                       <button
                         onClick={async () => {
                           if (
@@ -767,19 +961,18 @@ const OwnerManagers = () => {
                           }
                         }}
                         className={`px-3 py-1.5 text-sm rounded text-center ${manager.is_active
-                            ? "bg-yellow-100 text-yellow-700 hover:bg-yellow-200"
-                            : "bg-green-100 text-green-700 hover:bg-green-200"
+                          ? "bg-yellow-100 text-yellow-700 hover:bg-yellow-200"
+                          : "bg-green-100 text-green-700 hover:bg-green-200"
                           }`}
                       >
                         {manager.is_active ? "Deactivate" : "Activate"}
                       </button>
-                      {/* DELETE BUTTON - Mobile */}
                       <button
                         onClick={() => handleDeleteManager(manager.manager_id, manager.name)}
                         disabled={deleteLoading === manager.manager_id}
                         className={`px-3 py-1.5 text-sm rounded text-center ${deleteLoading === manager.manager_id
-                            ? "bg-red-100 text-red-400 cursor-not-allowed"
-                            : "bg-red-100 text-red-700 hover:bg-red-200"
+                          ? "bg-red-100 text-red-400 cursor-not-allowed"
+                          : "bg-red-100 text-red-700 hover:bg-red-200"
                           }`}
                       >
                         {deleteLoading === manager.manager_id ? (
@@ -800,17 +993,17 @@ const OwnerManagers = () => {
         )}
       </div>
 
-      {/* Information Box - Updated with Delete info */}
+      {/* Information Box */}
       <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg md:mt-6 md:p-4">
         <h3 className="text-sm font-medium text-blue-900 mb-2">
           About Manager Management
         </h3>
         <ul className="text-xs text-blue-700 space-y-1 md:text-sm">
           <li>• Managers can only access features you explicitly permit</li>
-          <li>• Financial data access is controlled separately through "View Financial" permission</li>
+          <li>• Financial data access is controlled separately through "View Financials" permission</li>
           <li>• <span className="font-semibold">Deactivate:</span> Temporarily prevents login - you can reactivate later</li>
+          <li>• <span className="font-semibold">Edit Details:</span> Update manager's name, email, phone, and password</li>
           <li>• <span className="font-semibold text-red-700">Delete Permanently:</span> Completely removes manager from system - cannot be undone</li>
-          <li className="font-medium">• Managers CANNOT view other managers - this is owner-only access</li>
         </ul>
       </div>
     </div>

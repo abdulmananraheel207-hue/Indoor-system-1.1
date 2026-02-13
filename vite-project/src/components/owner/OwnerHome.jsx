@@ -1,14 +1,33 @@
 // File: OwnerHome.jsx - UPDATED for both Owner and Manager roles
+// File: OwnerHome.jsx - FIXED to show today's bookings for managers
+
 import React, { useState, useEffect } from "react";
 
 const OwnerHome = ({
-  userData,  // Changed from ownerData to userData (works for both roles)
+  userData,
   refreshData,
   refreshStats,
   isOwner,
   permissions = {}
 }) => {
-  const [stats, setStats] = useState(userData?.dashboard || userData?.stats || {});
+  // 🔥 FIX: Handle both owner and manager data structures
+  const [stats, setStats] = useState(() => {
+    if (isOwner) {
+      return userData?.dashboard || {};
+    } else {
+      // Manager - combine stats from both places
+      return {
+        today_bookings: userData?.stats?.today_bookings || 0,
+        today_revenue: userData?.stats?.today_revenue || 0,
+        monthly_revenue: userData?.stats?.monthly_revenue || 0,
+        pending_requests_count: userData?.pending_requests?.length ||
+          userData?.pending_bookings?.length || 0,
+        total_arenas: userData?.arenas?.length || 0,
+        ...userData?.stats
+      };
+    }
+  });
+
   const [recentActivity, setRecentActivity] = useState(
     userData?.pending_requests || userData?.pending_bookings || []
   );
@@ -16,26 +35,35 @@ const OwnerHome = ({
   const [statsLoading, setStatsLoading] = useState(false);
 
   // Permission checks
-  const canViewFinancial = isOwner || permissions.view_financial;
+  const canViewFinancial = isOwner || permissions.view_financials;
   const canManageBookings = isOwner || permissions.manage_bookings;
-  const canViewBookings = isOwner || permissions.view_bookings;
+
+  // 🔥 FIX: For managers, if they have manage_bookings, they can view bookings
+  const canViewBookings = canManageBookings;
 
   useEffect(() => {
     if (userData) {
-      // Handle different API response structures for Owner vs Manager
+      // Handle different API response structures
       if (isOwner) {
         setStats(userData.dashboard || {});
         setRecentActivity(userData.pending_requests || []);
       } else {
         // Manager dashboard response structure
-        setStats(userData.stats || {});
-        setRecentActivity(userData.pending_bookings || []);
+        setStats({
+          today_bookings: userData?.stats?.today_bookings || 0,
+          today_revenue: userData?.stats?.today_revenue || 0,
+          monthly_revenue: userData?.stats?.monthly_revenue || 0,
+          pending_requests_count: userData?.pending_requests?.length ||
+            userData?.pending_bookings?.length || 0,
+          total_arenas: userData?.arenas?.length || 0,
+          ...userData?.stats
+        });
+        setRecentActivity(userData.pending_requests || userData.pending_bookings || []);
       }
     }
   }, [userData, isOwner]);
 
   const formatCurrency = (amount) => {
-    // Changed to PKR for Pakistan
     return new Intl.NumberFormat("en-PK", {
       style: "currency",
       currency: "PKR",
@@ -64,6 +92,8 @@ const OwnerHome = ({
     });
   };
 
+  // In OwnerHome.jsx - Update handleAcceptBooking function
+
   const handleAcceptBooking = async (bookingId) => {
     if (!canManageBookings) {
       alert("❌ You don't have permission to accept bookings");
@@ -78,13 +108,15 @@ const OwnerHome = ({
       const token = localStorage.getItem("token");
       const userRole = localStorage.getItem("userRole");
 
-      // Different endpoints based on role
+      // 🔥 FIX: Use PUT instead of POST
       const endpoint = userRole === "owner"
         ? `http://localhost:5000/api/owners/bookings/${bookingId}/accept`
         : `http://localhost:5000/api/managers/bookings/${bookingId}/accept`;
 
+      console.log(`📤 Accepting booking at: ${endpoint}`);
+
       const response = await fetch(endpoint, {
-        method: "PUT",
+        method: "PUT", // Changed from POST to PUT
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
@@ -92,12 +124,10 @@ const OwnerHome = ({
       });
 
       if (response.ok) {
-        // Remove from pending requests
         setRecentActivity((prev) =>
           prev.filter((b) => b.booking_id !== bookingId)
         );
 
-        // Update stats
         const updatedStats = {
           ...stats,
           pending_requests_count: Math.max((stats.pending_requests_count || 1) - 1, 0),
@@ -105,7 +135,6 @@ const OwnerHome = ({
         };
         setStats(updatedStats);
 
-        // Save updated stats to localStorage
         const statsToSave = {
           ...updatedStats,
           lastUpdated: new Date().toISOString()
@@ -114,7 +143,6 @@ const OwnerHome = ({
 
         alert("✅ Booking accepted successfully!");
 
-        // Refresh full data if needed
         if (refreshData) refreshData();
         if (refreshStats) refreshStats();
       } else {
@@ -129,6 +157,7 @@ const OwnerHome = ({
     }
   };
 
+  // Similarly update handleRejectBooking
   const handleRejectBooking = async (bookingId) => {
     if (!canManageBookings) {
       alert("❌ You don't have permission to reject bookings");
@@ -143,13 +172,14 @@ const OwnerHome = ({
       const token = localStorage.getItem("token");
       const userRole = localStorage.getItem("userRole");
 
-      // Different endpoints based on role
       const endpoint = userRole === "owner"
         ? `http://localhost:5000/api/owners/bookings/${bookingId}/reject`
         : `http://localhost:5000/api/managers/bookings/${bookingId}/reject`;
 
+      console.log(`📤 Rejecting booking at: ${endpoint}`);
+
       const response = await fetch(endpoint, {
-        method: "PUT",
+        method: "PUT", // Changed from POST to PUT
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
@@ -157,19 +187,16 @@ const OwnerHome = ({
       });
 
       if (response.ok) {
-        // Remove from pending requests
         setRecentActivity((prev) =>
           prev.filter((b) => b.booking_id !== bookingId)
         );
 
-        // Update stats
         const updatedStats = {
           ...stats,
           pending_requests_count: Math.max((stats.pending_requests_count || 1) - 1, 0)
         };
         setStats(updatedStats);
 
-        // Save updated stats to localStorage
         const statsToSave = {
           ...updatedStats,
           lastUpdated: new Date().toISOString()
@@ -178,7 +205,6 @@ const OwnerHome = ({
 
         alert("✅ Booking rejected successfully");
 
-        // Refresh full data if needed
         if (refreshData) refreshData();
         if (refreshStats) refreshStats();
       } else {
@@ -192,7 +218,6 @@ const OwnerHome = ({
       setLoading(false);
     }
   };
-
   const handleRefreshAll = async () => {
     setStatsLoading(true);
     try {
@@ -203,32 +228,24 @@ const OwnerHome = ({
     }
   };
 
-  // Check if any booking time has passed
   const isBookingTimePassed = (booking) => {
     if (!booking.date || !booking.end_time) return false;
-
     const bookingDateTime = new Date(`${booking.date}T${booking.end_time}:00`);
     const now = new Date();
-
     return bookingDateTime < now;
   };
 
-  // Get days until booking
   const getDaysUntilBooking = (booking) => {
     if (!booking.date) return null;
-
     const bookingDate = new Date(booking.date);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     bookingDate.setHours(0, 0, 0, 0);
-
     const diffTime = bookingDate - today;
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
     return diffDays;
   };
 
-  // Get role-based display text
   const getRoleTitle = () => {
     if (isOwner) return "Dashboard Overview";
     return "Manager Dashboard";
@@ -269,26 +286,24 @@ const OwnerHome = ({
         </button>
       </div>
 
-      {/* Stats Overview - Conditional based on permissions */}
+      {/* 🔥 FIX: Stats Overview - Show today's bookings for managers too */}
       <div className="grid grid-cols-2 gap-3 mb-6 md:grid-cols-2 lg:grid-cols-4 md:gap-6">
-        {/* Today's Bookings - Always visible if user has view_bookings or view_dashboard */}
-        {(isOwner || permissions.view_bookings || permissions.view_dashboard) && (
-          <div className="bg-white p-4 rounded-xl shadow">
-            <div className="flex items-center">
-              <div className="p-2 bg-blue-100 rounded-lg mr-3">
-                <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500">Today's Bookings</p>
-                <p className="text-xl font-bold text-gray-900">
-                  {stats.today_bookings || 0}
-                </p>
-              </div>
+        {/* Today's Bookings - Show for everyone */}
+        <div className="bg-white p-4 rounded-xl shadow">
+          <div className="flex items-center">
+            <div className="p-2 bg-blue-100 rounded-lg mr-3">
+              <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">Today's Bookings</p>
+              <p className="text-xl font-bold text-gray-900">
+                {stats.today_bookings || 0}
+              </p>
             </div>
           </div>
-        )}
+        </div>
 
         {/* Today's Revenue - Only if has financial permission */}
         {(isOwner || canViewFinancial) && (

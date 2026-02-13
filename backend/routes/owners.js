@@ -106,6 +106,12 @@ router.post("/managers", ownerController.addManager);
 router.put("/managers/:manager_id", ownerController.updateManager);
 // Add this to your owners.js routes file
 router.delete("/managers/:manager_id", ownerController.deleteManager);
+// In owners.js - Add this route
+
+// Update manager credentials
+router.put("/managers/:manager_id/credentials",
+  ownerController.updateManagerCredentials
+);
 
 // Reports
 router.get("/reports/export", ownerController.exportBookingData);
@@ -117,5 +123,7 @@ router.put("/profile/password", ownerController.updateOwnerPassword);
 
 // Cleanup
 router.post("/cleanup/expired-locks", ownerController.cleanupExpiredLocks);
+
+
 
 module.exports = router;
