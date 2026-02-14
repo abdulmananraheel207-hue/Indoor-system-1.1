@@ -76,33 +76,33 @@ const authController = {
     }
   },
 
-  // Arena Owner Registration
+
+
   registerOwner: async (req, res) => {
     try {
       console.log("Register owner request body:", req.body);
       console.log("Register owner headers:", req.headers);
 
       const {
-        arena_name,
+        owner_name,           // New field from step 1
+        personal_number,      // New field from step 1
+        arena_name,           // Moved to step 2
         email,
         password,
-        phone_number,
-        business_address,
-        google_maps_location,
+        phone_number,         // Moved to step 2
+        business_address,     // Moved to step 2
+        google_maps_location, // Moved to step 2
         number_of_courts,
         agreed_to_terms,
       } = req.body;
 
       // Log each field
       console.log("Fields received:");
-      console.log(
-        "- agreed_to_terms:",
-        agreed_to_terms,
-        "type:",
-        typeof agreed_to_terms
-      );
-      console.log("- email:", email);
+      console.log("- owner_name:", owner_name);
+      console.log("- personal_number:", personal_number);
       console.log("- arena_name:", arena_name);
+      console.log("- agreed_to_terms:", agreed_to_terms, "type:", typeof agreed_to_terms);
+      console.log("- email:", email);
 
       // Check if owner exists
       const [existingOwner] = await pool.execute(
@@ -136,13 +136,15 @@ const authController = {
       // Hash password
       const hashedPassword = await bcrypt.hash(password, 10);
 
-      // Insert owner
+      // Insert owner - Updated with new fields
       const [result] = await pool.execute(
         `INSERT INTO arena_owners 
-        (arena_name, email, password_hash, phone_number, business_address, 
+        (owner_name, personal_number, arena_name, email, password_hash, phone_number, business_address, 
          google_maps_location, number_of_courts, agreed_to_terms) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
+          owner_name || null,           // New field
+          personal_number || null,       // New field
           arena_name,
           email,
           hashedPassword,
@@ -166,9 +168,11 @@ const authController = {
         token,
         owner: {
           id: result.insertId,
+          owner_name,
           arena_name,
           email,
           phone_number,
+          personal_number,
           role: "owner",
         },
       });
@@ -250,8 +254,8 @@ const authController = {
 
       // Insert manager
       const [result] = await pool.execute(
-        `INSERT INTO arena_managers (owner_id, name, email, password_hash, phone_number, permissions) 
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO arena_managers (owner_id, name, email, password_hash, phone_number, permissions, is_active) 
+         VALUES (?, ?, ?, ?, ?, ?, TRUE)`,
         [
           owner_id,
           name,
@@ -283,35 +287,112 @@ const authController = {
   login: async (req, res) => {
     try {
       const { email, password, userType } = req.body;
-      let user, role, table;
+      let user, table;
 
       // Determine which table to query based on userType
       switch (userType) {
         case "user":
           table = "users";
-          role = "user";
           break;
         case "owner":
           table = "arena_owners";
-          role = "owner";
           break;
         case "admin":
           table = "admins";
-          role = "admin";
           break;
         case "manager":
-          table = "arena_managers";
-          role = "manager";
-          break;
+          // For managers, we need to join with owners table to check if owner is blocked
+          const [managers] = await pool.execute(`
+            SELECT 
+                m.*,
+                o.owner_id,
+                o.arena_name as owner_name,
+                o.is_blocked as owner_is_blocked,
+                o.blocked_reason as owner_blocked_reason,
+                o.blocked_at as owner_blocked_at
+            FROM arena_managers m
+            JOIN arena_owners o ON m.owner_id = o.owner_id
+            WHERE m.email = ? AND m.is_active = TRUE
+          `, [email]);
+
+          if (managers.length === 0) {
+            return res.status(401).json({ message: "Invalid credentials" });
+          }
+
+          user = managers[0];
+
+          // 🚫 CHECK IF OWNER IS BLOCKED FIRST
+          if (user.owner_is_blocked === 1 || user.owner_is_blocked === true) {
+            console.log('🚫 Blocked owner - manager login denied:', {
+              manager_id: user.manager_id,
+              owner_id: user.owner_id,
+              owner_name: user.owner_name
+            });
+
+            return res.status(403).json({
+              success: false,
+              message: 'OWNER_BLOCKED',
+              details: {
+                reason: user.owner_blocked_reason || 'The arena owner account has been blocked',
+                blocked_date: user.owner_blocked_at ?
+                  new Date(user.owner_blocked_at).toLocaleDateString() : 'Recently',
+                owner_name: user.owner_name,
+                support_email: 'support@arenafinder.com',
+                support_phone: '+92 300 1234567'
+              }
+            });
+          }
+
+          // Verify password
+          const isValidManagerPassword = await bcrypt.compare(password, user.password_hash);
+          if (!isValidManagerPassword) {
+            return res.status(401).json({ message: "Invalid credentials" });
+          }
+
+          // Update last login
+          await pool.execute(
+            `UPDATE arena_managers SET last_login = NOW() WHERE manager_id = ?`,
+            [user.manager_id]
+          );
+
+          // Generate token
+          const managerToken = jwt.sign(
+            {
+              id: user.manager_id,
+              email: user.email,
+              role: "manager",
+              owner_id: user.owner_id,
+              name: user.name
+            },
+            process.env.JWT_SECRET || "your-secret-key",
+            { expiresIn: "7d" }
+          );
+
+          // Remove sensitive data
+          delete user.password_hash;
+
+          return res.json({
+            message: "Login successful",
+            token: managerToken,
+            user: {
+              id: user.manager_id,
+              name: user.name,
+              email: user.email,
+              phone_number: user.phone_number,
+              role: "manager",
+              owner_id: user.owner_id,
+              owner_name: user.owner_name,
+              permissions: user.permissions
+            }
+          });
+
         default:
           return res.status(400).json({ message: "Invalid user type" });
       }
 
-      // Find user
+      // For non-manager users (user, owner, admin)
       let query;
-      if (table === "arena_managers") {
-        query = `SELECT * FROM ${table} WHERE email = ? AND is_active = TRUE`;
-      } else if (table === "arena_owners") {
+      if (table === "arena_owners") {
         query = `SELECT * FROM ${table} WHERE email = ? AND is_active = TRUE`;
       } else {
         query = `SELECT * FROM ${table} WHERE email = ?`;
@@ -325,7 +406,7 @@ const authController = {
 
       user = users[0];
 
-      //  CHECK IF OWNER IS BLOCKED - ADDED HERE
+      // CHECK IF OWNER IS BLOCKED
       if (userType === "owner" && (user.is_blocked === 1 || user.is_blocked === true)) {
         console.log('🚫 Blocked owner attempted login:', user.owner_id, user.email);
         return res.status(403).json({
@@ -341,10 +422,7 @@ const authController = {
       }
 
       // Verify password
-      const isValidPassword = await bcrypt.compare(
-        password,
-        user.password_hash
-      );
+      const isValidPassword = await bcrypt.compare(password, user.password_hash);
       if (!isValidPassword) {
         return res.status(401).json({ message: "Invalid credentials" });
       }
@@ -358,23 +436,17 @@ const authController = {
       }
 
       // Determine actual role from database for admins
-      let actualRole = role;
+      let actualRole = userType;
       if (table === "admins") {
-        // Get the actual role from the database
         actualRole = user.role || "admin";
       }
 
       // Generate token
       const tokenPayload = {
-        id: user.user_id || user.owner_id || user.admin_id || user.manager_id,
+        id: user.user_id || user.owner_id || user.admin_id,
         email: user.email,
         role: actualRole,
       };
-
-      // Add owner_id for managers
-      if (actualRole === "manager") {
-        tokenPayload.owner_id = user.owner_id;
-      }
 
       // Add admin-specific info
       if (table === "admins") {
@@ -384,7 +456,7 @@ const authController = {
 
       const token = jwt.sign(
         tokenPayload,
-        process.env.JWT_SECRET || "your-secret-key",
+        process.env.JWT_SECRET || "09631e3f99caf686f08d48965782fcdb751c691bb08d610e51d893c300b6e694e86a3645ef38a94a414fd11f8d077292057c0ca7e94a6fb3db33cc2197891e35",
         { expiresIn: "7d" }
       );
 
@@ -417,16 +489,6 @@ const authController = {
           is_super_admin: user.is_super_admin || false,
           permissions: user.permissions || null,
         };
-      } else if (actualRole === "manager") {
-        userData = {
-          id: user.manager_id,
-          name: user.name,
-          email: user.email,
-          phone_number: user.phone_number,
-          permissions: user.permissions,
-          owner_id: user.owner_id,
-          role: actualRole,
-        };
       }
 
       res.json({
@@ -434,6 +496,7 @@ const authController = {
         token,
         user: userData,
       });
+
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Server error", error: error.message });

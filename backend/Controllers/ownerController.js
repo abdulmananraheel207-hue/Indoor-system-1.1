@@ -6,16 +6,20 @@ const decisionService = require("../utils/bookingDecisionService");
 
 const ownerController = {
   // Complete owner registration with arena, courts, sports, and time slots
+  // In ownerController.js - Complete registerOwnerComplete function
+
   registerOwnerComplete: async (req, res) => {
     try {
       const {
-        // Owner details
-        arena_name,
+        // Owner details - UPDATED
+        owner_name,           // New field from step 1
+        personal_number,      // New field from step 1
+        arena_name,           // Moved to step 2
         email,
         password,
-        phone_number,
-        business_address,
-        google_maps_location,
+        phone_number,         // Moved to step 2 (business phone)
+        business_address,     // Moved to step 2
+        google_maps_location, // Moved to step 2
         number_of_courts,
         agreed_to_terms,
 
@@ -44,8 +48,9 @@ const ownerController = {
         },
       } = req.body;
 
-      // Validate required fields
+      // Validate required fields - UPDATED validation
       if (
+        !owner_name ||          // Added validation
         !arena_name ||
         !email ||
         !password ||
@@ -54,7 +59,7 @@ const ownerController = {
       ) {
         return res.status(400).json({
           message:
-            "Missing required fields: arena_name, email, password, phone_number, business_address",
+            "Missing required fields: owner_name, arena_name, email, password, phone_number, business_address",
         });
       }
 
@@ -64,7 +69,7 @@ const ownerController = {
         });
       }
 
-      // Normalize phone number for Pakistani format
+      // Normalize business phone number for Pakistani format
       let normalizedPhone = phone_number.trim().replace(/[\s\-()]/g, "");
 
       if (normalizedPhone.startsWith("0")) {
@@ -82,8 +87,32 @@ const ownerController = {
       if (!phoneRegex.test(normalizedPhone)) {
         return res.status(400).json({
           message:
-            "Please enter a valid Pakistani mobile number (e.g., 03001234567, +923001234567)",
+            "Please enter a valid Pakistani mobile number for business (e.g., 03001234567, +923001234567)",
         });
+      }
+
+      // Normalize personal number if provided
+      let normalizedPersonalNumber = null;
+      if (personal_number) {
+        normalizedPersonalNumber = personal_number.trim().replace(/[\s\-()]/g, "");
+        if (normalizedPersonalNumber.startsWith("0")) {
+          normalizedPersonalNumber = "+92" + normalizedPersonalNumber.substring(1);
+        } else if (
+          normalizedPersonalNumber.startsWith("92") &&
+          !normalizedPersonalNumber.startsWith("+92")
+        ) {
+          normalizedPersonalNumber = "+" + normalizedPersonalNumber;
+        } else if (!normalizedPersonalNumber.startsWith("+")) {
+          normalizedPersonalNumber = "+92" + normalizedPersonalNumber;
+        }
+
+        // Validate personal number if provided
+        if (!phoneRegex.test(normalizedPersonalNumber)) {
+          return res.status(400).json({
+            message:
+              "Please enter a valid Pakistani mobile number for personal contact",
+          });
+        }
       }
 
       // Check if email already exists
@@ -101,20 +130,22 @@ const ownerController = {
       await connection.beginTransaction();
 
       try {
-        // 1. Create owner record
+        // 1. Create owner record - UPDATED with new fields
         const hashedPassword = await bcrypt.hash(password, 10);
 
         const [ownerResult] = await connection.execute(
           `INSERT INTO arena_owners 
-           (arena_name, email, password_hash, phone_number, 
+           (owner_name, personal_number, arena_name, email, password_hash, phone_number, 
             business_address, google_maps_location, 
             number_of_courts, agreed_to_terms, is_active)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)`,
           [
+            owner_name,                       // New field
+            normalizedPersonalNumber,          // New field
             arena_name,
             email,
             hashedPassword,
-            normalizedPhone,
+            normalizedPhone,                   // Business phone
             business_address,
             google_maps_location || null,
             parseInt(number_of_courts) || 1,
@@ -141,6 +172,7 @@ const ownerController = {
 
         const arena_id = arenaResult.insertId;
 
+        // 3. Add sports to arena
         if (sports.length > 0) {
           // Validate sport IDs exist
           const placeholders = sports.map(() => "?").join(",");
@@ -159,14 +191,13 @@ const ownerController = {
           // Add arena sports
           for (const sport_id of sports) {
             await connection.execute(
-              `INSERT INTO arena_sports (arena_id, sport_id)
-   VALUES (?, ?)`,
+              `INSERT INTO arena_sports (arena_id, sport_id) VALUES (?, ?)`,
               [arena_id, sport_id]
             );
           }
         }
 
-        // 3. Create court details (if courts array provided)
+        // 4. Create court details (if courts array provided)
         let courtData = courts;
         if (courts.length === 0) {
           // Auto-generate courts based on number_of_courts
@@ -208,15 +239,14 @@ const ownerController = {
           if (courtSports && courtSports.length > 0) {
             for (const sport_id of courtSports) {
               await connection.execute(
-                `INSERT INTO court_sports (court_id, sport_id)
-                 VALUES (?, ?)`,
+                `INSERT INTO court_sports (court_id, sport_id) VALUES (?, ?)`,
                 [court_id, sport_id]
               );
             }
           }
         }
 
-        // 4. Generate and create time slots for next 30 days
+        // 5. Generate time slots
         const timeSlots = generateTimeSlots(
           opening_time,
           closing_time,
@@ -244,8 +274,8 @@ const ownerController = {
               for (const slot of timeSlots) {
                 await connection.execute(
                   `INSERT INTO time_slots 
-       (arena_id, court_id, sport_id, date, start_time, end_time, price, is_available)
-       VALUES (?, ?, NULL, ?, ?, ?, ?, TRUE)`,
+                   (arena_id, court_id, sport_id, date, start_time, end_time, price, is_available)
+                   VALUES (?, ?, NULL, ?, ?, ?, ?, TRUE)`,
                   [
                     arena_id,
                     court.court_id,
@@ -260,7 +290,7 @@ const ownerController = {
           }
         }
 
-        // 5. Store time slots configuration in owner record
+        // 6. Store time slots configuration in owner record
         const timeSlotsConfig = JSON.stringify({
           opening_time,
           closing_time,
@@ -283,9 +313,11 @@ const ownerController = {
           { expiresIn: "7d" }
         );
 
-        // Get owner data
+        // Get owner data - UPDATED to include new fields
         const [ownerData] = await connection.execute(
-          "SELECT owner_id, arena_name, email, phone_number, business_address, created_at FROM arena_owners WHERE owner_id = ?",
+          `SELECT owner_id, owner_name, arena_name, email, phone_number, 
+                  personal_number, business_address, created_at 
+           FROM arena_owners WHERE owner_id = ?`,
           [owner_id]
         );
 

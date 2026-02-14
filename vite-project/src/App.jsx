@@ -22,7 +22,6 @@ import integrationService from "./services/integrationService";
 import ReviewReminderModal from "./components/user/ReviewReminderModal";
 import SuperAdminDashboard from "./components/superadmin/superAdminDashboard";
 import ManagerLogin from "./components/auth/ManagerAuth";
-// REMOVED: ManagerLogin import - using OwnerAuth for manager login instead
 
 const useAuth = () => {
   const [authState, setAuthState] = useState({
