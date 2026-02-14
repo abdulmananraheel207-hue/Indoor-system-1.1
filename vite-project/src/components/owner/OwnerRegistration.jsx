@@ -1,6 +1,7 @@
-
 import React, { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
+import PhoneInput from 'react-phone-number-input';
+import 'react-phone-number-input/style.css';
 
 const OwnerRegistration = () => {
     const navigate = useNavigate();
@@ -9,16 +10,18 @@ const OwnerRegistration = () => {
     const [error, setError] = useState("");
     const [formData, setFormData] = useState({
         // Step 1: Owner Basic Info
-        arena_name: "",
+        owner_name: "",           // New field (replaces arena_name)
+        personal_number: "",      // New field
         email: "",
         password: "",
         confirm_password: "",
-        phone_number: "",
-        business_address: "",
-        google_maps_location: "",
         agreed_to_terms: false,
 
-        // Step 2: Arena Details
+        // Step 2: Arena Details - MOVED FIELDS HERE
+        arena_name: "",           // Moved from step 1
+        phone_number: "",         // Moved from step 1 (business phone)
+        business_address: "",     // Moved from step 1
+        google_maps_location: "", // Moved from step 1
         description: "",
         number_of_courts: 1,
         base_price_per_hour: 500,
@@ -67,6 +70,24 @@ const OwnerRegistration = () => {
         if (error) setError("");
     };
 
+    // Handle phone number changes for personal number
+    const handlePersonalNumberChange = (value) => {
+        setFormData({
+            ...formData,
+            personal_number: value
+        });
+        if (error) setError("");
+    };
+
+    // Handle phone number changes for business phone
+    const handleBusinessPhoneChange = (value) => {
+        setFormData({
+            ...formData,
+            phone_number: value  // Keep using phone_number for backend compatibility
+        });
+        if (error) setError("");
+    };
+
     const handleCourtChange = (index, field, value) => {
         const updatedCourts = [...formData.courts];
         updatedCourts[index] = {
@@ -95,25 +116,27 @@ const OwnerRegistration = () => {
     const validateStep = (step) => {
         switch (step) {
             case 1:
-                if (!formData.arena_name.trim()) return "Arena name is required";
+                // UPDATED validation for step 1
+                if (!formData.owner_name.trim()) return "Owner name is required";
                 if (!formData.email.trim()) return "Email is required";
                 if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) return "Invalid email format";
                 if (!formData.password) return "Password is required";
                 if (formData.password.length < 6) return "Password must be at least 6 characters";
                 if (formData.password !== formData.confirm_password) return "Passwords don't match";
 
-                // Validate Pakistani phone number
-                const phoneRegex = /^(?:\+92|0|92)?[0-9]{10}$/;
-                if (!phoneRegex.test(formData.phone_number.replace(/[\s\-()]/g, ""))) {
-                    return "Please enter a valid Pakistani phone number (e.g., 03001234567)";
-                }
-
-                if (!formData.business_address.trim()) return "Business address is required";
-                if (!formData.google_maps_location.trim()) return "Google Maps location is required";
+                // Personal number is optional, no validation needed as PhoneInput handles format
                 if (!formData.agreed_to_terms) return "You must agree to terms and conditions";
                 return null;
 
             case 2:
+                // NEW validation for step 2 (moved fields)
+                if (!formData.arena_name.trim()) return "Arena name is required";
+
+                // Business phone is required
+                if (!formData.phone_number) return "Business phone number is required";
+
+                if (!formData.business_address.trim()) return "Business address is required";
+                if (!formData.google_maps_location.trim()) return "Google Maps location is required";
                 if (!formData.description.trim()) return "Arena description is required";
                 if (formData.number_of_courts < 1) return "Number of courts must be at least 1";
                 if (!formData.base_price_per_hour || formData.base_price_per_hour <= 0)
@@ -198,19 +221,28 @@ const OwnerRegistration = () => {
         setError("");
 
         try {
-            // Prepare the data for the API
+            // Prepare the data for the API - UPDATED with new field mapping
             const registrationData = {
-                arena_name: formData.arena_name,
+                // Step 1 fields
+                owner_name: formData.owner_name,
+                personal_number: formData.personal_number,
                 email: formData.email,
                 password: formData.password,
+                agreed_to_terms: formData.agreed_to_terms,
+
+                // Step 2 fields (moved from step 1)
+                arena_name: formData.arena_name,
                 phone_number: formData.phone_number,
                 business_address: formData.business_address,
                 google_maps_location: formData.google_maps_location,
-                number_of_courts: formData.number_of_courts,
-                agreed_to_terms: formData.agreed_to_terms,
                 description: formData.description,
+                number_of_courts: formData.number_of_courts,
                 base_price_per_hour: formData.base_price_per_hour,
+
+                // Step 4 fields
                 sports: formData.selected_sports,
+
+                // Step 3 fields
                 courts: formData.courts.map(court => ({
                     court_number: court.court_number,
                     court_name: court.court_name,
@@ -219,6 +251,8 @@ const OwnerRegistration = () => {
                     description: court.description,
                     sports: court.sports
                 })),
+
+                // Step 5 fields
                 opening_time: formData.opening_time,
                 closing_time: formData.closing_time,
                 slot_duration: formData.slot_duration,
@@ -307,41 +341,39 @@ const OwnerRegistration = () => {
 
                 {/* Form Content */}
                 <div className="bg-white rounded-xl shadow-lg p-6">
-                    {/* Step 1: Owner Basic Info */}
+                    {/* Step 1: Owner Basic Info - UPDATED */}
                     {step === 1 && (
                         <div className="space-y-6">
                             <h2 className="text-xl font-semibold text-gray-900">Owner Information</h2>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                                        Arena Name *
-                                    </label>
-                                    <input
-                                        type="text"
-                                        name="arena_name"
-                                        required
-                                        value={formData.arena_name}
-                                        onChange={handleInputChange}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                        placeholder="e.g., Sports Arena Lahore"
-                                    />
-                                </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Owner Name *
+                                </label>
+                                <input
+                                    type="text"
+                                    name="owner_name"
+                                    required
+                                    value={formData.owner_name}
+                                    onChange={handleInputChange}
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    placeholder="e.g., John Doe"
+                                />
+                            </div>
 
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                                        Email Address *
-                                    </label>
-                                    <input
-                                        type="email"
-                                        name="email"
-                                        required
-                                        value={formData.email}
-                                        onChange={handleInputChange}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                        placeholder="owner@arena.com"
-                                    />
-                                </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Email Address *
+                                </label>
+                                <input
+                                    type="email"
+                                    name="email"
+                                    required
+                                    value={formData.email}
+                                    onChange={handleInputChange}
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    placeholder="owner@arena.com"
+                                />
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -379,18 +411,69 @@ const OwnerRegistration = () => {
 
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Phone Number *
+                                    Personal Number (Optional)
+                                </label>
+                                <PhoneInput
+                                    international
+                                    defaultCountry="PK"
+                                    value={formData.personal_number}
+                                    onChange={handlePersonalNumberChange}
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    placeholder="Enter phone number"
+                                />
+                                <p className="mt-1 text-sm text-gray-500">Your personal contact number with country code</p>
+                            </div>
+
+                            <div className="flex items-start">
+                                <input
+                                    type="checkbox"
+                                    name="agreed_to_terms"
+                                    required
+                                    checked={formData.agreed_to_terms}
+                                    onChange={handleInputChange}
+                                    className="h-4 w-4 mt-1 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                                />
+                                <label className="ml-2 block text-sm text-gray-900">
+                                    I agree to the Terms and Conditions for arena owners
+                                </label>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Step 2: Arena Details - UPDATED with moved fields */}
+                    {step === 2 && (
+                        <div className="space-y-6">
+                            <h2 className="text-xl font-semibold text-gray-900">Arena Details</h2>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Arena Name *
                                 </label>
                                 <input
-                                    type="tel"
-                                    name="phone_number"
+                                    type="text"
+                                    name="arena_name"
                                     required
-                                    value={formData.phone_number}
+                                    value={formData.arena_name}
                                     onChange={handleInputChange}
                                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                    placeholder="03001234567"
+                                    placeholder="e.g., Sports Arena Lahore"
                                 />
-                                <p className="mt-1 text-sm text-gray-500">Pakistani mobile number format</p>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Business Phone Number *
+                                </label>
+                                <PhoneInput
+                                    international
+                                    defaultCountry="PK"
+                                    required
+                                    value={formData.phone_number}
+                                    onChange={handleBusinessPhoneChange}
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    placeholder="Enter phone number"
+                                />
+                                <p className="mt-1 text-sm text-gray-500">Business contact number for customers with country code</p>
                             </div>
 
                             <div>
@@ -422,27 +505,6 @@ const OwnerRegistration = () => {
                                     placeholder="Full address of your arena"
                                 />
                             </div>
-
-                            <div className="flex items-start">
-                                <input
-                                    type="checkbox"
-                                    name="agreed_to_terms"
-                                    required
-                                    checked={formData.agreed_to_terms}
-                                    onChange={handleInputChange}
-                                    className="h-4 w-4 mt-1 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                                />
-                                <label className="ml-2 block text-sm text-gray-900">
-                                    I agree to the Terms and Conditions for arena owners
-                                </label>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Step 2: Arena Details */}
-                    {step === 2 && (
-                        <div className="space-y-6">
-                            <h2 className="text-xl font-semibold text-gray-900">Arena Details</h2>
 
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -724,7 +786,7 @@ const OwnerRegistration = () => {
                         </div>
                     )}
 
-                    {/* Step 6: Review & Submit */}
+                    {/* Step 6: Review & Submit - UPDATED */}
                     {step === 6 && (
                         <div className="space-y-6">
                             <h2 className="text-xl font-semibold text-gray-900">Review & Submit</h2>
@@ -734,20 +796,22 @@ const OwnerRegistration = () => {
                                 <div className="border-b pb-4">
                                     <h3 className="font-medium text-gray-900 mb-2">Owner Information</h3>
                                     <div className="grid grid-cols-2 gap-2 text-sm">
-                                        <div><span className="text-gray-500">Arena Name:</span> {formData.arena_name}</div>
+                                        <div><span className="text-gray-500">Owner Name:</span> {formData.owner_name}</div>
                                         <div><span className="text-gray-500">Email:</span> {formData.email}</div>
-                                        <div><span className="text-gray-500">Phone:</span> {formData.phone_number}</div>
-                                        <div><span className="text-gray-500">Address:</span> {formData.business_address}</div>
+                                        <div><span className="text-gray-500">Personal Number:</span> {formData.personal_number || 'Not provided'}</div>
                                     </div>
                                 </div>
 
                                 <div className="border-b pb-4">
                                     <h3 className="font-medium text-gray-900 mb-2">Arena Details</h3>
                                     <div className="grid grid-cols-2 gap-2 text-sm">
+                                        <div><span className="text-gray-500">Arena Name:</span> {formData.arena_name}</div>
+                                        <div><span className="text-gray-500">Business Phone:</span> {formData.phone_number}</div>
                                         <div><span className="text-gray-500">Courts:</span> {formData.number_of_courts}</div>
                                         <div><span className="text-gray-500">Base Price:</span> Rs{formData.base_price_per_hour}/hour</div>
                                     </div>
-                                    <p className="text-sm text-gray-600 mt-2">{formData.description}</p>
+                                    <p className="text-sm text-gray-600 mt-2"><span className="text-gray-500">Address:</span> {formData.business_address}</p>
+                                    <p className="text-sm text-gray-600 mt-1"><span className="text-gray-500">Description:</span> {formData.description}</p>
                                 </div>
 
                                 <div className="border-b pb-4">
@@ -793,7 +857,7 @@ const OwnerRegistration = () => {
                                         <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
                                     </svg>
                                     <p className="text-sm text-blue-700">
-                                        <strong>Note:</strong> You can upload arena and court photos after registration from your Settings .
+                                        <strong>Note:</strong> You can upload arena and court photos after registration from your Settings.
                                     </p>
                                 </div>
                             </div>
