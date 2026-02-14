@@ -1,4 +1,4 @@
-// File: OwnerDashboard.jsx - FIXED dashboard access for managers
+// File: OwnerDashboard.jsx - UPDATED with Arena Selector
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import OwnerHome from "./OwnerHome";
@@ -7,6 +7,7 @@ import OwnerCalendar from "./OwnerCalendar";
 import OwnerManagers from "./OwnerManagers";
 import OwnerProfile from "./OwnerProfile";
 import OwnerArenaSettings from "./OwnerArenaSettings";
+import ArenaSelector from "./ArenaSelector";
 
 // 🔥 FIX: Updated permission mapping - dashboard is ALWAYS accessible
 const TAB_PERMISSIONS = {
@@ -28,6 +29,9 @@ const OwnerDashboard = () => {
     const savedStats = localStorage.getItem('dashboardStats');
     return savedStats ? JSON.parse(savedStats) : null;
   });
+
+  // 🔥 NEW: Selected arena state
+  const [selectedArena, setSelectedArena] = useState(null);
 
   // Detect user role from localStorage
   const userRole = localStorage.getItem("userRole");
@@ -164,6 +168,11 @@ const OwnerDashboard = () => {
           localStorage.setItem('dashboardStats', JSON.stringify(statsToSave));
           setDashboardStats(statsToSave);
         }
+
+        // 🔥 Auto-select first arena if available
+        if (data.arenas && data.arenas.length > 0 && !selectedArena) {
+          setSelectedArena(data.arenas[0]);
+        }
       } else if (response.status === 401) {
         handleLogout();
       }
@@ -245,13 +254,13 @@ const OwnerDashboard = () => {
   // Get display name based on role
   const getDisplayName = () => {
     if (isOwner) {
-      return userData?.arenas?.[0]?.name || "Arena Owner";
+      return userData?.owner_name || "Arena Owner";
     } else if (isManager) {
       const userDataStr = localStorage.getItem("userData");
       if (userDataStr) {
         try {
           const managerData = JSON.parse(userDataStr);
-          return managerData.arena_name || managerData.name || "Arena Manager";
+          return managerData.name || "Arena Manager";
         } catch (e) {
           return "Arena Manager";
         }
@@ -259,6 +268,12 @@ const OwnerDashboard = () => {
       return "Arena Manager";
     }
     return "User";
+  };
+
+  // Handle arena change
+  const handleArenaChange = (arena) => {
+    setSelectedArena(arena);
+    // Pass to child components via props or context
   };
 
   if (loading || !userData) {
@@ -343,6 +358,17 @@ const OwnerDashboard = () => {
             </button>
           </div>
 
+          {/* 🔥 NEW: Arena Selector for Multi-Arena Support */}
+          {userData?.arenas && userData.arenas.length > 1 && (
+            <div className="mt-4">
+              <ArenaSelector
+                arenas={userData.arenas}
+                selectedArena={selectedArena}
+                onArenaChange={handleArenaChange}
+              />
+            </div>
+          )}
+
           {/* Mobile Navigation Menu */}
           {mobileMenuOpen && (
             <div className="md:hidden mt-4 pb-4 border-t">
@@ -415,7 +441,7 @@ const OwnerDashboard = () => {
         </div>
       </header>
 
-      {/* Main Content - Pass permissions to child components */}
+      {/* Main Content - Pass selectedArena to child components */}
       <main className="px-3 py-6 md:px-4 md:py-8 max-w-7xl mx-auto">
         {currentTab === "home" && (
           <OwnerHome
@@ -424,12 +450,14 @@ const OwnerDashboard = () => {
             refreshStats={refreshStats}
             isOwner={isOwner}
             permissions={permissions}
+            selectedArena={selectedArena} // 🔥 Pass selected arena
           />
         )}
         {currentTab === "bookings" && (
           <OwnerBookings
             isOwner={isOwner}
             permissions={permissions}
+            selectedArena={selectedArena} // 🔥 Pass selected arena
           />
         )}
         {currentTab === "calendar" && (
@@ -437,6 +465,7 @@ const OwnerDashboard = () => {
             arenas={userData?.arenas || []}
             isOwner={isOwner}
             permissions={permissions}
+            selectedArena={selectedArena} // 🔥 Pass selected arena
           />
         )}
         {currentTab === "arenasettings" && (
@@ -444,6 +473,7 @@ const OwnerDashboard = () => {
             dashboardData={userData}
             isOwner={isOwner}
             permissions={permissions}
+            selectedArena={selectedArena} // 🔥 Pass selected arena
           />
         )}
         {currentTab === "managers" && isOwner && (

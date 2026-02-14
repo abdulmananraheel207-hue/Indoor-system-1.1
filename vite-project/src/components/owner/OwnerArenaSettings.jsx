@@ -46,17 +46,24 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
     // Handle both owner and manager dashboard data formats
     if (dashboardData?.arenas) {
       setArenas(dashboardData.arenas);
-      if (dashboardData.arenas.length > 0) {
+
+      // 🔥 Use selectedArena prop if provided
+      if (selectedArena) {
+        setSelectedArena(selectedArena.arena_id);
+      } else if (dashboardData.arenas.length > 0 && !selectedArena) {
         setSelectedArena(dashboardData.arenas[0].arena_id);
       }
     } else if (dashboardData?.data?.arenas) {
       // Alternative format
       setArenas(dashboardData.data.arenas);
-      if (dashboardData.data.arenas.length > 0) {
+
+      if (selectedArena) {
+        setSelectedArena(selectedArena.arena_id);
+      } else if (dashboardData.data.arenas.length > 0 && !selectedArena) {
         setSelectedArena(dashboardData.data.arenas[0].arena_id);
       }
     }
-  }, [dashboardData]);
+  }, [dashboardData, selectedArena]);
 
   useEffect(() => {
     if (selectedArena && (canViewArena || canManageArena)) {

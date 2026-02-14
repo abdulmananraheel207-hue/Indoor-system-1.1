@@ -1,6 +1,4 @@
-// File: OwnerHome.jsx - UPDATED for both Owner and Manager roles
-// File: OwnerHome.jsx - FIXED to show today's bookings for managers
-
+// File: OwnerHome.jsx - UPDATED with selectedArena prop
 import React, { useState, useEffect } from "react";
 
 const OwnerHome = ({
@@ -8,7 +6,8 @@ const OwnerHome = ({
   refreshData,
   refreshStats,
   isOwner,
-  permissions = {}
+  permissions = {},
+  selectedArena = null // 🔥 Add selectedArena prop with default null
 }) => {
   // 🔥 FIX: Handle both owner and manager data structures
   const [stats, setStats] = useState(() => {
@@ -27,6 +26,9 @@ const OwnerHome = ({
       };
     }
   });
+
+  // 🔥 NEW: Filtered stats for selected arena
+  const [filteredStats, setFilteredStats] = useState({});
 
   const [recentActivity, setRecentActivity] = useState(
     userData?.pending_requests || userData?.pending_bookings || []
@@ -63,6 +65,48 @@ const OwnerHome = ({
     }
   }, [userData, isOwner]);
 
+  // 🔥 NEW: Filter stats when selectedArena changes
+  useEffect(() => {
+    if (selectedArena && userData?.arena_stats) {
+      // Filter stats for selected arena
+      const arenaStat = userData.arena_stats.find(
+        stat => stat.arena_id === selectedArena.arena_id
+      );
+
+      if (arenaStat) {
+        setFilteredStats({
+          today_bookings: arenaStat.today_bookings || 0,
+          today_revenue: arenaStat.today_revenue || 0,
+          monthly_revenue: arenaStat.monthly_revenue || 0,
+          pending_requests_count: arenaStat.pending_count || 0
+        });
+      } else {
+        // If no specific stats for this arena, use general stats
+        setFilteredStats(stats);
+      }
+    } else {
+      // No arena selected, use general stats
+      setFilteredStats(stats);
+    }
+  }, [selectedArena, userData, stats]);
+
+  // 🔥 NEW: Filter pending requests by selected arena
+  useEffect(() => {
+    if (selectedArena && userData?.pending_requests) {
+      const filteredRequests = userData.pending_requests.filter(
+        request => request.arena_id === selectedArena.arena_id
+      );
+      setRecentActivity(filteredRequests);
+    } else if (selectedArena && userData?.pending_bookings) {
+      const filteredRequests = userData.pending_bookings.filter(
+        request => request.arena_id === selectedArena.arena_id
+      );
+      setRecentActivity(filteredRequests);
+    } else {
+      setRecentActivity(userData?.pending_requests || userData?.pending_bookings || []);
+    }
+  }, [selectedArena, userData]);
+
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat("en-PK", {
       style: "currency",
@@ -92,8 +136,6 @@ const OwnerHome = ({
     });
   };
 
-  // In OwnerHome.jsx - Update handleAcceptBooking function
-
   const handleAcceptBooking = async (bookingId) => {
     if (!canManageBookings) {
       alert("❌ You don't have permission to accept bookings");
@@ -108,7 +150,6 @@ const OwnerHome = ({
       const token = localStorage.getItem("token");
       const userRole = localStorage.getItem("userRole");
 
-      // 🔥 FIX: Use PUT instead of POST
       const endpoint = userRole === "owner"
         ? `http://localhost:5000/api/owners/bookings/${bookingId}/accept`
         : `http://localhost:5000/api/managers/bookings/${bookingId}/accept`;
@@ -116,7 +157,7 @@ const OwnerHome = ({
       console.log(`📤 Accepting booking at: ${endpoint}`);
 
       const response = await fetch(endpoint, {
-        method: "PUT", // Changed from POST to PUT
+        method: "PUT",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
@@ -129,11 +170,16 @@ const OwnerHome = ({
         );
 
         const updatedStats = {
-          ...stats,
-          pending_requests_count: Math.max((stats.pending_requests_count || 1) - 1, 0),
-          today_bookings: (stats.today_bookings || 0) + 1
+          ...(selectedArena ? filteredStats : stats),
+          pending_requests_count: Math.max(((selectedArena ? filteredStats.pending_requests_count : stats.pending_requests_count) || 1) - 1, 0),
+          today_bookings: ((selectedArena ? filteredStats.today_bookings : stats.today_bookings) || 0) + 1
         };
-        setStats(updatedStats);
+
+        if (selectedArena) {
+          setFilteredStats(updatedStats);
+        } else {
+          setStats(updatedStats);
+        }
 
         const statsToSave = {
           ...updatedStats,
@@ -157,7 +203,6 @@ const OwnerHome = ({
     }
   };
 
-  // Similarly update handleRejectBooking
   const handleRejectBooking = async (bookingId) => {
     if (!canManageBookings) {
       alert("❌ You don't have permission to reject bookings");
@@ -179,7 +224,7 @@ const OwnerHome = ({
       console.log(`📤 Rejecting booking at: ${endpoint}`);
 
       const response = await fetch(endpoint, {
-        method: "PUT", // Changed from POST to PUT
+        method: "PUT",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
@@ -192,10 +237,15 @@ const OwnerHome = ({
         );
 
         const updatedStats = {
-          ...stats,
-          pending_requests_count: Math.max((stats.pending_requests_count || 1) - 1, 0)
+          ...(selectedArena ? filteredStats : stats),
+          pending_requests_count: Math.max(((selectedArena ? filteredStats.pending_requests_count : stats.pending_requests_count) || 1) - 1, 0)
         };
-        setStats(updatedStats);
+
+        if (selectedArena) {
+          setFilteredStats(updatedStats);
+        } else {
+          setStats(updatedStats);
+        }
 
         const statsToSave = {
           ...updatedStats,
@@ -218,6 +268,7 @@ const OwnerHome = ({
       setLoading(false);
     }
   };
+
   const handleRefreshAll = async () => {
     setStatsLoading(true);
     try {
@@ -251,6 +302,9 @@ const OwnerHome = ({
     return "Manager Dashboard";
   };
 
+  // Determine which stats to display
+  const displayStats = selectedArena ? filteredStats : stats;
+
   return (
     <div>
       {/* Stats Header with Refresh Button */}
@@ -258,6 +312,11 @@ const OwnerHome = ({
         <div>
           <h1 className="text-xl font-bold text-gray-900 md:text-2xl">
             {getRoleTitle()}
+            {selectedArena && (
+              <span className="ml-2 text-sm font-normal text-blue-600">
+                • {selectedArena.name}
+              </span>
+            )}
           </h1>
           {!isOwner && (
             <p className="text-sm text-gray-600 mt-1">
@@ -286,6 +345,21 @@ const OwnerHome = ({
         </button>
       </div>
 
+      {/* Arena Selection Indicator */}
+      {selectedArena && (
+        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="flex items-center">
+            <svg className="w-5 h-5 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            <p className="text-sm text-blue-700">
+              Showing data for <span className="font-semibold">{selectedArena.name}</span>
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* 🔥 FIX: Stats Overview - Show today's bookings for managers too */}
       <div className="grid grid-cols-2 gap-3 mb-6 md:grid-cols-2 lg:grid-cols-4 md:gap-6">
         {/* Today's Bookings - Show for everyone */}
@@ -299,7 +373,7 @@ const OwnerHome = ({
             <div>
               <p className="text-xs text-gray-500">Today's Bookings</p>
               <p className="text-xl font-bold text-gray-900">
-                {stats.today_bookings || 0}
+                {displayStats.today_bookings || 0}
               </p>
             </div>
           </div>
@@ -317,7 +391,7 @@ const OwnerHome = ({
               <div>
                 <p className="text-xs text-gray-500">Today's Revenue</p>
                 <p className="text-xl font-bold text-gray-900">
-                  {formatCurrency(stats.today_revenue || 0)}
+                  {formatCurrency(displayStats.today_revenue || 0)}
                 </p>
               </div>
             </div>
@@ -336,7 +410,7 @@ const OwnerHome = ({
               <div>
                 <p className="text-xs text-gray-500">Monthly Revenue</p>
                 <p className="text-xl font-bold text-gray-900">
-                  {formatCurrency(stats.monthly_revenue || 0)}
+                  {formatCurrency(displayStats.monthly_revenue || 0)}
                 </p>
               </div>
             </div>
@@ -355,7 +429,7 @@ const OwnerHome = ({
               <div>
                 <p className="text-xs text-gray-500">Pending Requests</p>
                 <p className="text-xl font-bold text-gray-900">
-                  {stats.pending_requests_count || 0}
+                  {displayStats.pending_requests_count || 0}
                 </p>
               </div>
             </div>
@@ -392,6 +466,11 @@ const OwnerHome = ({
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">
                   Pending Booking Requests
+                  {selectedArena && (
+                    <span className="ml-2 text-sm font-normal text-blue-600">
+                      • {selectedArena.name}
+                    </span>
+                  )}
                 </h2>
                 <p className="text-sm text-gray-600">
                   {canManageBookings
@@ -678,6 +757,11 @@ const OwnerHome = ({
                   <li>• Reject bookings if the time slot is unavailable</li>
                   <li>• View all accepted bookings in the "Bookings" tab</li>
                   <li>• Add managers from the "Managers" tab to delegate tasks</li>
+                  {selectedArena && (
+                    <li className="text-blue-800 font-medium">
+                      • Currently viewing: {selectedArena.name}
+                    </li>
+                  )}
                 </>
               ) : (
                 // Manager tips based on permissions
@@ -688,6 +772,11 @@ const OwnerHome = ({
                   {permissions.manage_arena && <li>• Update arena and court settings</li>}
                   {!canManageBookings && !permissions.manage_calendar && !permissions.manage_arena && (
                     <li>• You have view-only access to this dashboard</li>
+                  )}
+                  {selectedArena && (
+                    <li className="text-blue-800 font-medium">
+                      • Currently viewing: {selectedArena.name}
+                    </li>
                   )}
                 </>
               )}

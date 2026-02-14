@@ -8,110 +8,60 @@ const ownerController = {
   // Complete owner registration with arena, courts, sports, and time slots
   // In ownerController.js - Complete registerOwnerComplete function
 
+  // In ownerController.js - Fixed registerOwnerComplete function
+
   registerOwnerComplete: async (req, res) => {
     try {
+      console.log("📝 Registration request received:", JSON.stringify(req.body, null, 2));
+
       const {
-        // Owner details - UPDATED
-        owner_name,           // New field from step 1
-        personal_number,      // New field from step 1
-        arena_name,           // Moved to step 2
+        // Owner details
+        owner_name,
+        personal_number,
         email,
         password,
-        phone_number,         // Moved to step 2 (business phone)
-        business_address,     // Moved to step 2
-        google_maps_location, // Moved to step 2
-        number_of_courts,
+        phone_number, // Add this - owner's business phone
         agreed_to_terms,
 
-        // Arena details
-        description,
-        base_price_per_hour,
-
-        // Sports
-        sports = [],
-
-        // Court details (array of courts)
-        courts = [],
-
-        // Time slots configuration
-        opening_time = "06:00",
-        closing_time = "22:00",
-        slot_duration = 60,
-        days_available = {
-          monday: true,
-          tuesday: true,
-          wednesday: true,
-          thursday: true,
-          friday: true,
-          saturday: true,
-          sunday: false,
-        },
+        // Multiple arenas array
+        arenas = []
       } = req.body;
 
-      // Validate required fields - UPDATED validation
-      if (
-        !owner_name ||          // Added validation
-        !arena_name ||
-        !email ||
-        !password ||
-        !phone_number ||
-        !business_address
-      ) {
-        return res.status(400).json({
-          message:
-            "Missing required fields: owner_name, arena_name, email, password, phone_number, business_address",
-        });
+      // Validate required fields
+      if (!owner_name) {
+        return res.status(400).json({ message: "Owner name is required" });
+      }
+
+      if (!email) {
+        return res.status(400).json({ message: "Email is required" });
+      }
+
+      if (!password) {
+        return res.status(400).json({ message: "Password is required" });
+      }
+
+      if (!phone_number) {
+        return res.status(400).json({ message: "Business phone number is required" });
+      }
+
+      if (arenas.length === 0) {
+        return res.status(400).json({ message: "At least one arena is required" });
       }
 
       if (!agreed_to_terms) {
-        return res.status(400).json({
-          message: "You must agree to terms and conditions",
-        });
+        return res.status(400).json({ message: "You must agree to terms and conditions" });
       }
 
-      // Normalize business phone number for Pakistani format
-      let normalizedPhone = phone_number.trim().replace(/[\s\-()]/g, "");
-
-      if (normalizedPhone.startsWith("0")) {
-        normalizedPhone = "+92" + normalizedPhone.substring(1);
-      } else if (
-        normalizedPhone.startsWith("92") &&
-        !normalizedPhone.startsWith("+92")
-      ) {
-        normalizedPhone = "+" + normalizedPhone;
-      } else if (!normalizedPhone.startsWith("+")) {
-        normalizedPhone = "+92" + normalizedPhone;
-      }
-
-      const phoneRegex = /^\+923[0-9]{9}$/;
-      if (!phoneRegex.test(normalizedPhone)) {
-        return res.status(400).json({
-          message:
-            "Please enter a valid Pakistani mobile number for business (e.g., 03001234567, +923001234567)",
-        });
-      }
-
-      // Normalize personal number if provided
-      let normalizedPersonalNumber = null;
-      if (personal_number) {
-        normalizedPersonalNumber = personal_number.trim().replace(/[\s\-()]/g, "");
-        if (normalizedPersonalNumber.startsWith("0")) {
-          normalizedPersonalNumber = "+92" + normalizedPersonalNumber.substring(1);
-        } else if (
-          normalizedPersonalNumber.startsWith("92") &&
-          !normalizedPersonalNumber.startsWith("+92")
-        ) {
-          normalizedPersonalNumber = "+" + normalizedPersonalNumber;
-        } else if (!normalizedPersonalNumber.startsWith("+")) {
-          normalizedPersonalNumber = "+92" + normalizedPersonalNumber;
-        }
-
-        // Validate personal number if provided
-        if (!phoneRegex.test(normalizedPersonalNumber)) {
-          return res.status(400).json({
-            message:
-              "Please enter a valid Pakistani mobile number for personal contact",
-          });
+      // Normalize phone number
+      let normalizedPhone = phone_number;
+      if (typeof normalizedPhone === 'string') {
+        normalizedPhone = normalizedPhone.trim().replace(/[\s\-()]/g, "");
+        if (normalizedPhone.startsWith("0")) {
+          normalizedPhone = "+92" + normalizedPhone.substring(1);
+        } else if (normalizedPhone.startsWith("92") && !normalizedPhone.startsWith("+92")) {
+          normalizedPhone = "+" + normalizedPhone;
+        } else if (!normalizedPhone.startsWith("+")) {
+          normalizedPhone = "+92" + normalizedPhone;
         }
       }
 
@@ -130,226 +80,241 @@ const ownerController = {
       await connection.beginTransaction();
 
       try {
-        // 1. Create owner record - UPDATED with new fields
+        // 1. Create owner record - Include ALL required fields
         const hashedPassword = await bcrypt.hash(password, 10);
+
+        // Use first arena's name as the primary arena_name for the owner record
+        const primaryArenaName = arenas[0]?.arena_name || "My Arena";
 
         const [ownerResult] = await connection.execute(
           `INSERT INTO arena_owners 
-           (owner_name, personal_number, arena_name, email, password_hash, phone_number, 
-            business_address, google_maps_location, 
-            number_of_courts, agreed_to_terms, is_active)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)`,
+         (owner_name, arena_name, personal_number, email, phone_number, password_hash, agreed_to_terms, is_active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, TRUE)`,
           [
-            owner_name,                       // New field
-            normalizedPersonalNumber,          // New field
-            arena_name,
+            owner_name,
+            primaryArenaName,
+            personal_number || null,
             email,
+            normalizedPhone, // Add phone_number here
             hashedPassword,
-            normalizedPhone,                   // Business phone
-            business_address,
-            google_maps_location || null,
-            parseInt(number_of_courts) || 1,
-            agreed_to_terms,
+            agreed_to_terms ? 1 : 0,
           ]
         );
 
         const owner_id = ownerResult.insertId;
+        console.log(`✅ Owner created with ID: ${owner_id}`);
 
-        // 2. Create arena record
-        const [arenaResult] = await connection.execute(
-          `INSERT INTO arenas 
+        // 2. Create multiple arenas
+        const createdArenas = [];
+
+        for (let i = 0; i < arenas.length; i++) {
+          const arenaData = arenas[i];
+          console.log(`🏟️ Creating arena ${i + 1}:`, arenaData.arena_name);
+
+          // Validate arena data
+          if (!arenaData.arena_name) {
+            throw new Error(`Arena ${i + 1} name is required`);
+          }
+
+          if (!arenaData.business_address) {
+            throw new Error(`Business address is required for arena: ${arenaData.arena_name}`);
+          }
+
+          // Create arena - REMOVED phone_number from INSERT
+          const [arenaResult] = await connection.execute(
+            `INSERT INTO arenas 
            (owner_id, name, description, location_lat, location_lng,
             address, base_price_per_hour, rating, total_reviews, is_active, is_blocked, total_commission_due)
            VALUES (?, ?, ?, 0, 0, ?, ?, 0, 0, TRUE, FALSE, 0.00)`,
-          [
-            owner_id,
-            arena_name,
-            description || "",
-            business_address,
-            parseFloat(base_price_per_hour) || 500,
-          ]
-        );
-
-        const arena_id = arenaResult.insertId;
-
-        // 3. Add sports to arena
-        if (sports.length > 0) {
-          // Validate sport IDs exist
-          const placeholders = sports.map(() => "?").join(",");
-          const [validSports] = await connection.execute(
-            `SELECT COUNT(*) as count FROM sports_types WHERE sport_id IN (${placeholders})`,
-            sports
-          );
-
-          if (validSports[0].count !== sports.length) {
-            await connection.rollback();
-            return res.status(400).json({
-              message: "Invalid sport IDs. Please select valid sports.",
-            });
-          }
-
-          // Add arena sports
-          for (const sport_id of sports) {
-            await connection.execute(
-              `INSERT INTO arena_sports (arena_id, sport_id) VALUES (?, ?)`,
-              [arena_id, sport_id]
-            );
-          }
-        }
-
-        // 4. Create court details (if courts array provided)
-        let courtData = courts;
-        if (courts.length === 0) {
-          // Auto-generate courts based on number_of_courts
-          courtData = Array.from(
-            { length: parseInt(number_of_courts) || 1 },
-            (_, i) => ({
-              court_number: i + 1,
-              court_name: `Court ${i + 1}`,
-              size_sqft: 2000,
-              price_per_hour: parseFloat(base_price_per_hour) || 500,
-              description: "",
-              sports: sports,
-            })
-          );
-        }
-
-        for (const court of courtData) {
-          const [courtResult] = await connection.execute(
-            `INSERT INTO court_details 
-             (arena_id, court_number, court_name, size_sqft, 
-              price_per_hour, description, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, NOW())`,
             [
-              arena_id,
-              court.court_number || 1,
-              court.court_name || `Court ${court.court_number || 1}`,
-              parseFloat(court.size_sqft) || 2000,
-              parseFloat(court.price_per_hour) ||
-              parseFloat(base_price_per_hour) ||
-              500,
-              court.description || "",
+              owner_id,
+              arenaData.arena_name,
+              arenaData.description || "",
+              arenaData.business_address,
+              parseFloat(arenaData.base_price_per_hour) || 500,
             ]
           );
 
-          const court_id = courtResult.insertId;
+          const arena_id = arenaResult.insertId;
+          console.log(`✅ Arena created with ID: ${arena_id}`);
+          createdArenas.push({ arena_id, name: arenaData.arena_name });
 
-          // Add sports to court
-          const courtSports = court.sports || sports;
-          if (courtSports && courtSports.length > 0) {
-            for (const sport_id of courtSports) {
-              await connection.execute(
-                `INSERT INTO court_sports (court_id, sport_id) VALUES (?, ?)`,
-                [court_id, sport_id]
+          // Add sports to arena
+          if (arenaData.selected_sports && arenaData.selected_sports.length > 0) {
+            console.log(`Adding ${arenaData.selected_sports.length} sports to arena`);
+            for (const sport_id of arenaData.selected_sports) {
+              // Check if sport exists
+              const [sportCheck] = await connection.execute(
+                "SELECT sport_id FROM sports_types WHERE sport_id = ?",
+                [sport_id]
               );
-            }
-          }
-        }
 
-        // 5. Generate time slots
-        const timeSlots = generateTimeSlots(
-          opening_time,
-          closing_time,
-          slot_duration
-        );
-
-        const today = new Date();
-        for (let i = 0; i < 30; i++) {
-          const date = new Date(today);
-          date.setDate(today.getDate() + i);
-          const dateStr = date.toISOString().split("T")[0];
-          const dayName = date
-            .toLocaleDateString("en-US", { weekday: "long" })
-            .toLowerCase();
-
-          if (days_available[dayName] !== false) {
-            // Get all courts for this arena
-            const [courtRows] = await connection.execute(
-              "SELECT court_id FROM court_details WHERE arena_id = ?",
-              [arena_id]
-            );
-
-            // Create time slots for EACH court
-            for (const court of courtRows) {
-              for (const slot of timeSlots) {
+              if (sportCheck.length > 0) {
                 await connection.execute(
-                  `INSERT INTO time_slots 
-                   (arena_id, court_id, sport_id, date, start_time, end_time, price, is_available)
-                   VALUES (?, ?, NULL, ?, ?, ?, ?, TRUE)`,
-                  [
-                    arena_id,
-                    court.court_id,
-                    dateStr,
-                    slot.start_time,
-                    slot.end_time,
-                    parseFloat(base_price_per_hour) || 500,
-                  ]
+                  `INSERT INTO arena_sports (arena_id, sport_id) VALUES (?, ?)`,
+                  [arena_id, sport_id]
                 );
               }
             }
           }
+
+          // Create courts
+          let courtData = arenaData.courts;
+          if (!courtData || courtData.length === 0) {
+            // Auto-generate courts
+            courtData = Array.from(
+              { length: parseInt(arenaData.number_of_courts) || 1 },
+              (_, i) => ({
+                court_number: i + 1,
+                court_name: `Court ${i + 1}`,
+                size_sqft: 2000,
+                price_per_hour: parseFloat(arenaData.base_price_per_hour) || 500,
+                description: "",
+                sports: arenaData.selected_sports || [],
+              })
+            );
+          }
+
+          console.log(`Creating ${courtData.length} courts for arena`);
+
+          for (const court of courtData) {
+            const [courtResult] = await connection.execute(
+              `INSERT INTO court_details 
+             (arena_id, court_number, court_name, size_sqft, 
+              price_per_hour, description, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+              [
+                arena_id,
+                court.court_number || 1,
+                court.court_name || `Court ${court.court_number || 1}`,
+                parseFloat(court.size_sqft) || 2000,
+                parseFloat(court.price_per_hour) ||
+                parseFloat(arenaData.base_price_per_hour) ||
+                500,
+                court.description || "",
+              ]
+            );
+
+            const court_id = courtResult.insertId;
+
+            // Add sports to court
+            const courtSports = court.sports || arenaData.selected_sports || [];
+            for (const sport_id of courtSports) {
+              if (sport_id) {
+                const [sportCheck] = await connection.execute(
+                  "SELECT sport_id FROM sports_types WHERE sport_id = ?",
+                  [sport_id]
+                );
+
+                if (sportCheck.length > 0) {
+                  await connection.execute(
+                    `INSERT INTO court_sports (court_id, sport_id) VALUES (?, ?)`,
+                    [court_id, sport_id]
+                  );
+                }
+              }
+            }
+          }
+
+          // Generate time slots if opening/closing times are provided
+          if (arenaData.opening_time && arenaData.closing_time) {
+            const timeSlots = generateTimeSlots(
+              arenaData.opening_time,
+              arenaData.closing_time,
+              arenaData.slot_duration || 60
+            );
+
+            const today = new Date();
+            let slotsCreated = 0;
+
+            for (let i = 0; i < 30; i++) {
+              const date = new Date(today);
+              date.setDate(today.getDate() + i);
+              const dateStr = date.toISOString().split("T")[0];
+              const dayName = date
+                .toLocaleDateString("en-US", { weekday: "long" })
+                .toLowerCase();
+
+              // Check if this day is available
+              let dayAvailable = true;
+              if (arenaData.days_available && arenaData.days_available[dayName] !== undefined) {
+                dayAvailable = arenaData.days_available[dayName];
+              }
+
+              if (dayAvailable) {
+                // Get all courts for this arena
+                const [courtRows] = await connection.execute(
+                  "SELECT court_id FROM court_details WHERE arena_id = ?",
+                  [arena_id]
+                );
+
+                // Create time slots for EACH court
+                for (const court of courtRows) {
+                  for (const slot of timeSlots) {
+                    await connection.execute(
+                      `INSERT INTO time_slots 
+                     (arena_id, court_id, date, start_time, end_time, price, is_available)
+                     VALUES (?, ?, ?, ?, ?, ?, TRUE)`,
+                      [
+                        arena_id,
+                        court.court_id,
+                        dateStr,
+                        slot.start_time,
+                        slot.end_time,
+                        parseFloat(arenaData.base_price_per_hour) || 500,
+                      ]
+                    );
+                    slotsCreated++;
+                  }
+                }
+              }
+            }
+            console.log(`Created ${slotsCreated} time slots for arena ${arena_id}`);
+          }
         }
-
-        // 6. Store time slots configuration in owner record
-        const timeSlotsConfig = JSON.stringify({
-          opening_time,
-          closing_time,
-          slot_duration,
-          days_available,
-        });
-
-        await connection.execute(
-          `UPDATE arena_owners SET time_slots = ? WHERE owner_id = ?`,
-          [timeSlotsConfig, owner_id]
-        );
 
         // Commit transaction
         await connection.commit();
+        console.log(`✅ Transaction committed successfully`);
 
-        // Generate JWT token for immediate login
+        // Generate JWT token
         const token = jwt.sign(
           { id: owner_id, email, role: "owner" },
           process.env.JWT_SECRET || "your_jwt_secret",
           { expiresIn: "7d" }
         );
 
-        // Get owner data - UPDATED to include new fields
-        const [ownerData] = await connection.execute(
-          `SELECT owner_id, owner_name, arena_name, email, phone_number, 
-                  personal_number, business_address, created_at 
-           FROM arena_owners WHERE owner_id = ?`,
+        // Get owner data
+        const [ownerData] = await pool.execute(
+          `SELECT owner_id, owner_name, arena_name, email, phone_number, personal_number, created_at 
+         FROM arena_owners WHERE owner_id = ?`,
           [owner_id]
         );
 
-        // Get arena data
-        const [arenaData] = await connection.execute(
-          "SELECT * FROM arenas WHERE arena_id = ?",
-          [arena_id]
-        );
-
         res.status(201).json({
-          message: "Owner registration completed successfully",
+          message: `Registration successful with ${createdArenas.length} arena(s)`,
           token,
           owner: ownerData[0],
-          arena: arenaData[0],
-          arena_id,
+          arenas: createdArenas
         });
+
       } catch (error) {
         await connection.rollback();
-        console.error("Transaction error:", error);
+        console.error("❌ Transaction error:", error);
         throw error;
       } finally {
         connection.release();
       }
     } catch (error) {
-      console.error("Registration error:", error);
+      console.error("❌ Registration error:", error);
+
       res.status(500).json({
         message: "Server error during registration",
         error: error.message,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
       });
     }
   },
-
   // Upload arena photos
   uploadArenaPhotos: async (req, res) => {
     try {

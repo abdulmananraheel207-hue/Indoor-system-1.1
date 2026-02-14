@@ -38,6 +38,11 @@ const OwnerBookings = ({ isOwner, permissions = {} }) => {
       const filters = {};
       if (statusFilter !== "all") filters.status = statusFilter;
 
+      // 🔥 Add arena filter if selected
+      if (selectedArena) {
+        filters.arena_id = selectedArena.arena_id;
+      }
+
       if (activeTab === "upcoming") {
         filters.type = "upcoming";
       } else if (activeTab === "history") {
