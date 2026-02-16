@@ -7,10 +7,17 @@ const ReviewReminderModal = () => {
     const [pendingReviews, setPendingReviews] = useState([]);
     const [loading, setLoading] = useState(true);
     const [currentReviewIndex, setCurrentReviewIndex] = useState(0);
+    const [rating, setRating] = useState(5);
+    const [comment, setComment] = useState("");
+    const [submitting, setSubmitting] = useState(false);
+    const [hoverRating, setHoverRating] = useState(0);
     const navigate = useNavigate();
 
     useEffect(() => {
         checkPendingReviews();
+
+        // FOR TESTING: Clear localStorage on component mount (remove this in production)
+        // localStorage.removeItem("reviewRemindersDismissedUntil");
     }, []);
 
     const checkPendingReviews = async () => {
@@ -19,17 +26,39 @@ const ReviewReminderModal = () => {
 
             // Check localStorage first (30-day timeout for "Don't show again")
             const lastDismissed = localStorage.getItem("reviewRemindersDismissedUntil");
-            if (lastDismissed && new Date(lastDismissed) > new Date()) {
-                console.log("Reminders dismissed until:", lastDismissed);
-                return;
+            console.log("Last dismissed until:", lastDismissed);
+
+            if (lastDismissed) {
+                const dismissDate = new Date(lastDismissed);
+                const now = new Date();
+                console.log("Dismiss date:", dismissDate);
+                console.log("Current date:", now);
+                console.log("Is dismissed still valid?", dismissDate > now);
+
+                if (dismissDate > now) {
+                    console.log("Reminders are dismissed until:", dismissDate);
+                    setLoading(false);
+                    return;
+                } else {
+                    // Clear expired dismissal
+                    localStorage.removeItem("reviewRemindersDismissedUntil");
+                }
             }
 
             // Fetch pending reviews
+            console.log("Fetching pending reviews...");
             const response = await integrationService.getPendingReviews();
+            console.log("Pending reviews response:", response);
 
             if (response?.pending_reviews?.length > 0) {
+                console.log("Showing modal with", response.pending_reviews.length, "reviews");
                 setPendingReviews(response.pending_reviews);
                 setIsVisible(true);
+                // Reset form for first review
+                setRating(5);
+                setComment("");
+            } else {
+                console.log("No pending reviews found");
             }
         } catch (error) {
             console.error("Error checking pending reviews:", error);
@@ -42,28 +71,25 @@ const ReviewReminderModal = () => {
         try {
             await integrationService.dismissReviewReminder(bookingId);
 
-            // Don't show again for 7 days (configurable)
-            const nextWeek = new Date();
-            nextWeek.setDate(nextWeek.getDate() + 7);
-            localStorage.setItem("reviewRemindersDismissedUntil", nextWeek.toISOString());
-
             // Remove this booking from pending list
             const updatedPending = pendingReviews.filter(
                 review => review.booking_id !== bookingId
             );
 
             if (updatedPending.length === 0) {
+                // No more reviews, close modal
                 setIsVisible(false);
                 setPendingReviews([]);
             } else {
                 setPendingReviews(updatedPending);
+                // Reset form for next review
+                setRating(5);
+                setComment("");
                 // Adjust index if needed
                 if (currentReviewIndex >= updatedPending.length) {
                     setCurrentReviewIndex(updatedPending.length - 1);
                 }
             }
-
-            alert("Reminder dismissed. You can still add a review from the arena details page anytime!");
         } catch (error) {
             console.error("Error dismissing reminder:", error);
             alert("Failed to dismiss reminder. Please try again.");
@@ -78,25 +104,91 @@ const ReviewReminderModal = () => {
             const nextMonth = new Date();
             nextMonth.setDate(nextMonth.getDate() + 30);
             localStorage.setItem("reviewRemindersDismissedUntil", nextMonth.toISOString());
+            console.log("Set new dismiss until:", nextMonth);
 
             setIsVisible(false);
             setPendingReviews([]);
-
-            alert("All reminders skipped for 30 days. You can still add reviews from arena details pages!");
         } catch (error) {
             console.error("Error skipping all reminders:", error);
             alert("Failed to skip reminders. Please try again.");
         }
     };
 
-    const handleWriteReview = (arenaId, bookingId) => {
-        setIsVisible(false);
-        // Navigate to arena details with booking_id parameter
-        navigate(`/user/arenas/${arenaId}?showReviewForm=true&bookingId=${bookingId}`);
+    const handleSubmitReview = async () => {
+        if (!comment.trim()) {
+            alert("Please write a review comment");
+            return;
+        }
+
+        if (rating < 1 || rating > 5) {
+            alert("Please select a rating between 1 and 5 stars");
+            return;
+        }
+
+        const currentReview = pendingReviews[currentReviewIndex];
+        if (!currentReview) return;
+
+        try {
+            setSubmitting(true);
+
+            // Submit the review with booking_id
+            await integrationService.submitReview(
+                currentReview.arena_id,
+                rating,
+                comment.trim(),
+                currentReview.booking_id
+            );
+
+            // Remove this review from pending list
+            const updatedPending = pendingReviews.filter(
+                review => review.booking_id !== currentReview.booking_id
+            );
+
+            if (updatedPending.length === 0) {
+                // No more reviews, close modal and show success
+                setIsVisible(false);
+                setPendingReviews([]);
+                alert("Thank you for your review! It helps other players make better choices.");
+            } else {
+                setPendingReviews(updatedPending);
+                // Reset form for next review
+                setRating(5);
+                setComment("");
+                // If we're at the last review, adjust index
+                if (currentReviewIndex >= updatedPending.length) {
+                    setCurrentReviewIndex(updatedPending.length - 1);
+                }
+            }
+
+        } catch (error) {
+            console.error("Error submitting review:", error);
+            alert(error.message || "Failed to submit review. Please try again.");
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    const handleNext = () => {
+        if (currentReviewIndex < pendingReviews.length - 1) {
+            setCurrentReviewIndex(currentReviewIndex + 1);
+            // Reset form for next review
+            setRating(5);
+            setComment("");
+        }
+    };
+
+    const handlePrevious = () => {
+        if (currentReviewIndex > 0) {
+            setCurrentReviewIndex(currentReviewIndex - 1);
+            // Reset form for previous review
+            setRating(5);
+            setComment("");
+        }
     };
 
     const currentReview = pendingReviews[currentReviewIndex];
 
+    // Don't render anything if not visible or loading
     if (!isVisible || loading || !currentReview) return null;
 
     return (
@@ -108,7 +200,7 @@ const ReviewReminderModal = () => {
                         <div>
                             <h2 className="text-2xl font-bold">📝 Rate Your Experience</h2>
                             <p className="text-blue-100 mt-1">
-                                Help others by sharing your experience
+                                Share your feedback to help other players
                             </p>
                         </div>
                         <div className="bg-white bg-opacity-20 rounded-full px-3 py-1">
@@ -121,6 +213,7 @@ const ReviewReminderModal = () => {
 
                 {/* Content */}
                 <div className="p-6">
+                    {/* Arena Details */}
                     <div className="flex items-start space-x-4 mb-6">
                         <div className="bg-blue-100 p-3 rounded-full">
                             <span className="text-2xl">🏟️</span>
@@ -130,67 +223,153 @@ const ReviewReminderModal = () => {
                                 {currentReview.arena_name}
                             </h3>
                             <p className="text-gray-600 text-sm mt-1">
-                                Court {currentReview.court_number} • {currentReview.court_name}
+                                Court {currentReview.court_number} • {currentReview.court_name || `Court ${currentReview.court_number}`}
                             </p>
                             <p className="text-gray-500 text-xs mt-1">
-                                Played on {new Date(currentReview.date).toLocaleDateString()}
+                                Played on {new Date(currentReview.date).toLocaleDateString('en-US', {
+                                    year: 'numeric',
+                                    month: 'long',
+                                    day: 'numeric'
+                                })}
                             </p>
                         </div>
                     </div>
 
-                    <div className="bg-gray-50 rounded-lg p-4 mb-6">
-                        <p className="text-gray-700 text-sm">
-                            How was your experience at{" "}
-                            <span className="font-semibold">{currentReview.arena_name}</span>?
-                            Your review helps other players make better decisions.
-                        </p>
+                    {/* Rating Stars */}
+                    <div className="mb-6">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Your Rating
+                        </label>
+                        <div className="flex items-center space-x-1">
+                            {[1, 2, 3, 4, 5].map((star) => (
+                                <button
+                                    key={star}
+                                    type="button"
+                                    onClick={() => setRating(star)}
+                                    onMouseEnter={() => setHoverRating(star)}
+                                    onMouseLeave={() => setHoverRating(0)}
+                                    className="text-3xl focus:outline-none transition-transform hover:scale-110"
+                                >
+                                    <span className={
+                                        (hoverRating ? star <= hoverRating : star <= rating)
+                                            ? "text-yellow-400"
+                                            : "text-gray-300"
+                                    }>
+                                        ★
+                                    </span>
+                                </button>
+                            ))}
+                            <span className="ml-2 text-sm text-gray-600">
+                                {rating} out of 5
+                            </span>
+                        </div>
                     </div>
+
+                    {/* Review Text */}
+                    <div className="mb-6">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Your Review
+                        </label>
+                        <textarea
+                            value={comment}
+                            onChange={(e) => setComment(e.target.value)}
+                            rows="4"
+                            placeholder="Tell others about your experience at this arena. How were the courts? The facilities? The staff?"
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
+                            maxLength={500}
+                        />
+                        <div className="text-right text-xs text-gray-500 mt-1">
+                            {comment.length}/500
+                        </div>
+                    </div>
+
+                    {/* Navigation between multiple reviews */}
+                    {pendingReviews.length > 1 && (
+                        <div className="flex justify-between items-center mb-4">
+                            <button
+                                onClick={handlePrevious}
+                                disabled={currentReviewIndex === 0}
+                                className="text-blue-600 font-medium disabled:text-gray-400 flex items-center"
+                            >
+                                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                                </svg>
+                                Previous
+                            </button>
+                            <span className="text-sm text-gray-500">
+                                {currentReviewIndex + 1} of {pendingReviews.length}
+                            </span>
+                            <button
+                                onClick={handleNext}
+                                disabled={currentReviewIndex === pendingReviews.length - 1}
+                                className="text-blue-600 font-medium disabled:text-gray-400 flex items-center"
+                            >
+                                Next
+                                <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                </svg>
+                            </button>
+                        </div>
+                    )}
                 </div>
 
                 {/* Footer Actions */}
                 <div className="px-6 pb-6">
                     <div className="flex flex-col space-y-3">
                         <button
-                            onClick={() => handleWriteReview(currentReview.arena_id, currentReview.booking_id)}
-                            className="bg-blue-600 text-white font-semibold py-3 rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center"
+                            onClick={handleSubmitReview}
+                            disabled={submitting || !comment.trim()}
+                            className={`w-full py-3 rounded-lg font-semibold flex items-center justify-center ${submitting || !comment.trim()
+                                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                                    : "bg-blue-600 text-white hover:bg-blue-700"
+                                } transition-colors`}
                         >
-                            <span className="mr-2">⭐</span>
-                            Write a Review
+                            {submitting ? (
+                                <>
+                                    <svg
+                                        className="animate-spin -ml-1 mr-3 h-5 w-5 text-white"
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                    >
+                                        <circle
+                                            className="opacity-25"
+                                            cx="12"
+                                            cy="12"
+                                            r="10"
+                                            stroke="currentColor"
+                                            strokeWidth="4"
+                                        ></circle>
+                                        <path
+                                            className="opacity-75"
+                                            fill="currentColor"
+                                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                                        ></path>
+                                    </svg>
+                                    Submitting...
+                                </>
+                            ) : (
+                                <>
+                                    <span className="mr-2">⭐</span>
+                                    Submit Review
+                                </>
+                            )}
                         </button>
 
                         <button
                             onClick={() => handleDismiss(currentReview.booking_id)}
-                            className="border border-gray-300 text-gray-700 font-medium py-3 rounded-lg hover:bg-gray-50 transition-colors"
+                            disabled={submitting}
+                            className="border border-gray-300 text-gray-700 font-medium py-3 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
                         >
                             Maybe Later
                         </button>
-
-                        {pendingReviews.length > 1 && (
-                            <div className="flex justify-between pt-4 border-t">
-                                <button
-                                    onClick={() => setCurrentReviewIndex((prev) => Math.max(0, prev - 1))}
-                                    disabled={currentReviewIndex === 0}
-                                    className="text-blue-600 font-medium disabled:text-gray-400"
-                                >
-                                    ← Previous
-                                </button>
-                                <button
-                                    onClick={() => setCurrentReviewIndex((prev) =>
-                                        Math.min(pendingReviews.length - 1, prev + 1)
-                                    )}
-                                    disabled={currentReviewIndex === pendingReviews.length - 1}
-                                    className="text-blue-600 font-medium disabled:text-gray-400"
-                                >
-                                    Next →
-                                </button>
-                            </div>
-                        )}
                     </div>
 
                     <div className="mt-6 text-center">
                         <button
                             onClick={handleSkipAll}
-                            className="text-gray-500 text-sm hover:text-gray-700"
+                            disabled={submitting}
+                            className="text-gray-500 text-sm hover:text-gray-700 disabled:opacity-50"
                         >
                             Don't show these reminders again for 30 days
                         </button>

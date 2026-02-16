@@ -380,10 +380,7 @@ const UserProfile = () => {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const handleAddPaymentMethod = () => {
-    console.log("Add payment method");
-    // Implement add payment method
-  };
+
 
   const handleRemoveFavorite = async (arenaId) => {
     try {
@@ -459,15 +456,7 @@ const UserProfile = () => {
               >
                 Profile Info
               </button>
-              <button
-                onClick={() => setActiveTab("payment")}
-                className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === "payment"
-                  ? "border-primary-500 text-primary-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                  }`}
-              >
-                Payment Methods
-              </button>
+
               <button
                 onClick={() => setActiveTab("favorites")}
                 className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === "favorites"
@@ -752,65 +741,7 @@ const UserProfile = () => {
             </div>
           )}
 
-          {/* Payment Methods Tab */}
-          {activeTab === "payment" && (
-            <div className="space-y-6">
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-lg font-semibold text-gray-900">
-                    Payment Methods
-                  </h2>
-                  <button
-                    onClick={handleAddPaymentMethod}
-                    className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
-                  >
-                    + Add Payment Method
-                  </button>
-                </div>
 
-                <div className="space-y-4">
-                  {paymentMethods.map((method) => (
-                    <div
-                      key={method.id}
-                      className="flex items-center justify-between p-4 border border-gray-200 rounded-lg"
-                    >
-                      <div className="flex items-center">
-                        <div className="h-10 w-16 bg-gray-100 rounded flex items-center justify-center mr-4">
-                          {method.type === "credit_card" ? (
-                            <span className="text-sm font-medium">💳 Card</span>
-                          ) : (
-                            <span className="text-sm font-medium">💰 PayPal</span>
-                          )}
-                        </div>
-                        <div>
-                          <p className="font-medium">
-                            {method.type === "credit_card"
-                              ? `Card ending in ${method.last4}`
-                              : `PayPal: ${method.email}`}
-                          </p>
-                          {method.isDefault && (
-                            <span className="text-xs text-green-600 bg-green-50 px-2 py-1 rounded">
-                              Default
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center space-x-3">
-                        {!method.isDefault && (
-                          <button className="text-sm text-primary-600 hover:text-primary-500">
-                            Set as Default
-                          </button>
-                        )}
-                        <button className="text-sm text-red-600 hover:text-red-500">
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Favorite Arenas Tab */}
           {activeTab === "favorites" && (

@@ -350,8 +350,8 @@ const UserHome = () => {
                 key={sport.sport_id}
                 onClick={() => handleSportSelect(sport)}
                 className={`flex flex-col items-center p-4 rounded-xl transition-all duration-200 ${selectedSport?.sport_id === sport.sport_id
-                    ? "bg-primary-50 border-2 border-primary-500"
-                    : "bg-white border border-gray-200 hover:border-primary-300 hover:shadow-sm"
+                  ? "bg-primary-50 border-2 border-primary-500"
+                  : "bg-white border border-gray-200 hover:border-primary-300 hover:shadow-sm"
                   }`}
               >
                 <span className="text-2xl mb-2">

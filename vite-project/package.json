@@ -13,6 +13,7 @@
     "@heroicons/react": "^2.2.0",
     "axios": "^1.13.2",
     "country-flag-icons": "^1.6.13",
+    "lodash": "^4.17.23",
     "lucide-react": "^0.561.0",
     "react": "^19.2.0",
     "react-datepicker": "^9.0.0",

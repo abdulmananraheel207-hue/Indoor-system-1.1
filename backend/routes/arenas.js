@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const userController = require("../Controllers/userController");
+const arenaController = require("../Controllers/arenaController");
 const auth = require("../middleware/auth");
 const { reviewValidation } = require("../middleware/validation"); // ADD THIS IMPORT
 
@@ -51,6 +52,6 @@ router.post("/slots/:slot_id/release", userController.releaseTimeSlot);
 router.post(
     "/:arena_id/reviews",
     reviewValidation.addReview, // ADD VALIDATION HERE
-    userController.addReview
+    arenaController.addReview
 );
 module.exports = router;

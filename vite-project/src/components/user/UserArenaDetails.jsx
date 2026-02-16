@@ -1,3 +1,5 @@
+// UserArenaDetails.jsx - Simplified version (only show reviews, no write)
+
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import DatePicker from "react-datepicker";
@@ -20,17 +22,12 @@ const UserArenaDetails = () => {
   const [bookingInProgress, setBookingInProgress] = useState(false);
   const [reviews, setReviews] = useState([]);
   const [loadingReviews, setLoadingReviews] = useState(false);
-  const [showReviewForm, setShowReviewForm] = useState(false);
-  const [newReview, setNewReview] = useState({ rating: 5, comment: "" });
-  const [submittingReview, setSubmittingReview] = useState(false);
   const [lockExpiry, setLockExpiry] = useState(null);
   const [timeLeft, setTimeLeft] = useState(null);
   const [isFavorited, setIsFavorited] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [lastBookingId, setLastBookingId] = useState(null);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  const [selectedBookingId, setSelectedBookingId] = useState(null);
-
 
   useEffect(() => {
     fetchArenaDetails();
@@ -41,7 +38,6 @@ const UserArenaDetails = () => {
   useEffect(() => {
     if (arena && selectedDate && selectedCourt?.court_id) {
       fetchAvailableSlots();
-      // clear any previously selected slots when date changes
       setSelectedSlots([]);
       setLockExpiry(null);
       setTimeLeft(null);
@@ -76,52 +72,25 @@ const UserArenaDetails = () => {
     const checkFavoriteStatus = async () => {
       try {
         const favorites = await integrationService.getFavoriteArenas();
-
-        // Check if current arena is already in favorites
         const isAlreadyFavorited = favorites.some(
           (favorite) =>
             favorite.id === parseInt(arenaId) ||
             favorite.arena_id === parseInt(arenaId) ||
             favorite.arenaId === parseInt(arenaId)
         );
-
         setIsFavorited(isAlreadyFavorited);
       } catch (error) {
         console.error("Error checking favorite status:", error);
       }
     };
-
     checkFavoriteStatus();
   }, [arenaId]);
-
-  // Check if should show review form from URL parameter
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const showForm = urlParams.get('showReviewForm');
-    const bookingId = urlParams.get('bookingId');
-
-    if (showForm === 'true') {
-      setShowReviewForm(true);
-      if (bookingId) {
-        setSelectedBookingId(parseInt(bookingId));
-      }
-
-      // Scroll to review form section
-      setTimeout(() => {
-        const reviewSection = document.querySelector('.reviews-section');
-        if (reviewSection) {
-          reviewSection.scrollIntoView({ behavior: 'smooth' });
-        }
-      }, 100);
-    }
-  }, []);
 
   const fetchArenaDetails = async () => {
     try {
       setLoading(true);
       const details = await integrationService.getArenaDetails(arenaId);
 
-      // Transform court data to match expected format
       const transformedCourts = details.courts.map((court) => ({
         court_id: court.court_id,
         court_name: court.court_name || `Court ${court.court_number}`,
@@ -144,7 +113,6 @@ const UserArenaDetails = () => {
         setCurrentImageIndex(0);
       }
 
-      // fetch sports categories for sport selection
       try {
         const sports = await integrationService.getSportsCategories();
         setSportsList(sports || []);
@@ -163,7 +131,6 @@ const UserArenaDetails = () => {
       setLoadingReviews(true);
       const response = await integrationService.getArenaReviews(arenaId);
 
-      // Handle different response formats
       if (response.reviews) {
         setReviews(response.reviews);
       } else if (Array.isArray(response)) {
@@ -189,7 +156,6 @@ const UserArenaDetails = () => {
         return;
       }
 
-      // Use court-specific endpoint
       const slots = await integrationService.getCourtSlots(
         arenaId,
         selectedCourt.court_id,
@@ -205,37 +171,19 @@ const UserArenaDetails = () => {
   };
 
   const handleSlotSelect = (slot) => {
-    // ... (keep existing slot selection logic)
     const isSlotAvailable = slot.actually_available ?? slot.is_available;
     if (!isSlotAvailable || slot.is_blocked) return;
 
     const now = new Date();
-
-    // FIX: Create date in LOCAL timezone, not UTC
     const slotDateObj = new Date(slot.date);
     const [hours, minutes] = slot.start_time.split(":").map(Number);
     slotDateObj.setHours(hours, minutes, 0, 0);
 
-    // Simple check: if slot start time is before current time
     if (slotDateObj < now) {
-      const slotDateStr = slotDateObj.toLocaleDateString();
-      const nowDateStr = now.toLocaleDateString();
-
-      if (slotDateStr === nowDateStr) {
-        // Same day
-        alert(
-          `Cannot select past time slots. ${slot.start_time} has already passed. Please choose a future time.`
-        );
-      } else {
-        // Different day
-        alert(
-          `Cannot select past dates. ${slotDateStr} has already passed. Please choose today or a future date.`
-        );
-      }
+      alert(`Cannot select past time slots. Please choose a future time.`);
       return;
     }
 
-    // toggle selection
     const exists = selectedSlots.some((s) => s.slot_id === slot.slot_id);
     const toggleSelection = async () => {
       try {
@@ -254,10 +202,7 @@ const UserArenaDetails = () => {
         setSelectedSlots((prev) => [...prev, slot]);
       } catch (error) {
         console.error("Error locking slot", error);
-        alert(
-          error.response?.data?.message ||
-          "Slot is no longer available. Please choose another slot."
-        );
+        alert(error.response?.data?.message || "Slot is no longer available.");
         fetchAvailableSlots();
       }
     };
@@ -266,41 +211,19 @@ const UserArenaDetails = () => {
   };
 
   const handleBooking = async () => {
-    const canProceed = await requireAuth(() => {
-      // This callback will be executed only if user is authenticated
-      // ... rest of your logic
-    }, "book a court");
-
+    const canProceed = await requireAuth(() => { }, "book a court");
     if (!canProceed) return;
 
-    // 1. Check if sport is selected
     if (!selectedSportId) {
       alert("Please select a sport before booking");
-      const sportSelect = document.querySelector(
-        'select[value*="selectedSportId"]'
-      );
-      if (sportSelect) {
-        sportSelect.scrollIntoView({ behavior: "smooth", block: "center" });
-        sportSelect.focus();
-        sportSelect.classList.add("border-red-500", "ring-2", "ring-red-200");
-        setTimeout(() => {
-          sportSelect.classList.remove(
-            "border-red-500",
-            "ring-2",
-            "ring-red-200"
-          );
-        }, 3000);
-      }
       return;
     }
 
-    // 2. Check if time slots are selected
     if (!selectedSlots || selectedSlots.length === 0) {
       alert("Please select at least one time slot");
       return;
     }
 
-    // 3. Check if court is selected
     if (!selectedCourt || !selectedCourt.court_id) {
       alert("Please select a court first");
       return;
@@ -309,7 +232,6 @@ const UserArenaDetails = () => {
     try {
       setBookingInProgress(true);
 
-      // compute booking range and total price from selected slots
       const sorted = [...selectedSlots].sort((a, b) =>
         a.start_time.localeCompare(b.start_time)
       );
@@ -320,21 +242,7 @@ const UserArenaDetails = () => {
         0
       );
 
-      // Ensure we have a sport id to send
       let sportToSend = selectedSportId;
-
-      // Validate sport is in available sports for this arena/court
-      if (sportsList && sportsList.length > 0) {
-        const selectedSport = sportsList.find(
-          (s) => s.sport_id === selectedSportId || s.id === selectedSportId
-        );
-
-        if (!selectedSport) {
-          alert("Invalid sport selected. Please choose from available sports.");
-          setBookingInProgress(false);
-          return;
-        }
-      }
 
       if (!sportToSend) {
         alert("Please select a sport before booking.");
@@ -342,7 +250,6 @@ const UserArenaDetails = () => {
         return;
       }
 
-      // Collect all selected owner-created slot IDs for multi-slot booking
       const slotIds = selectedSlots.map((s) => s.slot_id).filter(Boolean);
       let bookingResponse;
 
@@ -390,45 +297,29 @@ const UserArenaDetails = () => {
       fetchAvailableSlots();
     } catch (error) {
       console.error("Error creating booking:", error);
-      alert(
-        error.response?.data?.message ||
-        "Failed to create booking. Please try again."
-      );
+      alert(error.response?.data?.message || "Failed to create booking.");
     } finally {
       setBookingInProgress(false);
     }
   };
 
   const handleAddFavorite = async () => {
-    const canProceed = await requireAuth(() => {
-      // This callback will be executed only if user is authenticated
-      // ... rest of your logic
-    }, "add arenas to favorites");
-
+    const canProceed = await requireAuth(() => { }, "add arenas to favorites");
     if (!canProceed) return;
 
     try {
-      // Check if already favorited first
       if (isFavorited) {
         alert("This arena is already in your favorites!");
         return;
       }
 
-      console.log("Adding favorite with arenaId:", arenaId);
       await integrationService.addToFavorites(arenaId);
-
-      // Update state to reflect it's now favorited
       setIsFavorited(true);
       alert("Arena added to favorites!");
     } catch (error) {
       console.error("Error adding favorite:", error);
-      console.error("Error response:", error.response);
-
-      // Check if it's the "already in favorites" error
-      if (
-        error.response?.status === 400 &&
-        error.response?.data?.message?.includes("already in favorites")
-      ) {
+      if (error.response?.status === 400 &&
+        error.response?.data?.message?.includes("already in favorites")) {
         setIsFavorited(true);
         alert("This arena is already in your favorites!");
       } else {
@@ -437,69 +328,11 @@ const UserArenaDetails = () => {
     }
   };
 
-  // FIXED: handleSubmitReview function
-  const handleSubmitReview = async () => {
-    if (!newReview.comment.trim()) {
-      alert("Please enter a comment");
-      return;
-    }
-
-    if (newReview.rating < 1 || newReview.rating > 5) {
-      alert("Please select a rating between 1 and 5 stars");
-      return;
-    }
-
-    const canProceed = await requireAuth(() => { }, "leave a review");
-    if (!canProceed) return;
-
-    try {
-      setSubmittingReview(true);
-
-      // IMPORTANT: Get the booking_id from a completed booking
-      // You need to pass this from the component state
-      const bookingIdForReview = selectedBookingId; // Add this state variable
-
-      await integrationService.submitReview(
-        arenaId,
-        newReview.rating,
-        newReview.comment,
-        bookingIdForReview // Pass the booking_id
-      );
-
-      alert("Review submitted successfully!");
-      setNewReview({ rating: 5, comment: "" });
-      setShowReviewForm(false);
-
-      // Refresh reviews
-      await fetchArenaReviews();
-
-      // Clear the URL parameter
-      const url = new URL(window.location);
-      url.searchParams.delete('showReviewForm');
-      window.history.replaceState({}, '', url);
-
-    } catch (error) {
-      console.error("Error submitting review:", error);
-
-      // Show specific message for "no booking" error
-      if (error.message.includes("complete a booking")) {
-        alert("You need to complete a booking at this arena before you can review it. Please book and play first!");
-      } else if (error.message.includes("already reviewed")) {
-        alert("You have already reviewed this arena!");
-      } else {
-        alert(error.message || "Failed to submit review.");
-      }
-    } finally {
-      setSubmittingReview(false);
-    }
-  };
-  // Get current court images
   const getCurrentCourtImages = () => {
     if (!selectedCourt || !selectedCourt.images) return [];
     return selectedCourt.images;
   };
 
-  // Handle next/previous image
   const nextImage = () => {
     const images = getCurrentCourtImages();
     if (images.length === 0) return;
@@ -516,11 +349,9 @@ const UserArenaDetails = () => {
     );
   };
 
-  // Handle court change - reset image index
   const handleCourtChange = (court) => {
     setSelectedCourt(court);
     setCurrentImageIndex(0);
-    // Clear selected slots when changing court
     setSelectedSlots([]);
     setLockExpiry(null);
     setTimeLeft(null);
@@ -545,7 +376,6 @@ const UserArenaDetails = () => {
   const courtImages = getCurrentCourtImages();
   const hasCourtImages = courtImages.length > 0;
 
-  // Calculate average rating
   const averageRating = reviews.length > 0
     ? (reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length).toFixed(1)
     : "No ratings yet";
@@ -578,8 +408,7 @@ const UserArenaDetails = () => {
             <button
               type="button"
               onClick={handleAddFavorite}
-              className={`${isFavorited ? "text-red-700" : "text-red-500 hover:text-red-700"
-                }`}
+              className={`${isFavorited ? "text-red-700" : "text-red-500 hover:text-red-700"}`}
               disabled={isFavorited}
               title={isFavorited ? "Already in favorites" : "Add to favorites"}
             >
@@ -608,14 +437,11 @@ const UserArenaDetails = () => {
           <div className="relative h-96 bg-gray-200 rounded-2xl overflow-hidden">
             {hasCourtImages ? (
               <>
-                {/* Main Image */}
                 <img
                   src={courtImages[currentImageIndex].image_url}
                   alt={`${selectedCourt.court_name} - Photo ${currentImageIndex + 1}`}
                   className="w-full h-full object-cover"
                 />
-
-                {/* Navigation Arrows */}
                 {courtImages.length > 1 && (
                   <>
                     <button
@@ -636,13 +462,9 @@ const UserArenaDetails = () => {
                     </button>
                   </>
                 )}
-
-                {/* Image Counter */}
                 <div className="absolute top-4 right-4 bg-black bg-opacity-70 text-white px-3 py-1 rounded-full text-sm">
                   {currentImageIndex + 1} / {courtImages.length}
                 </div>
-
-                {/* Court Info Overlay */}
                 <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black to-transparent p-6">
                   <div className="text-white">
                     <h2 className="text-2xl font-bold">{selectedCourt.court_name}</h2>
@@ -667,8 +489,7 @@ const UserArenaDetails = () => {
                   <button
                     key={image.image_id || index}
                     onClick={() => setCurrentImageIndex(index)}
-                    className={`flex-shrink-0 focus:outline-none ${currentImageIndex === index ? 'ring-2 ring-blue-500' : ''
-                      }`}
+                    className={`flex-shrink-0 focus:outline-none ${currentImageIndex === index ? 'ring-2 ring-blue-500' : ''}`}
                   >
                     <img
                       src={image.image_url}
@@ -791,10 +612,8 @@ const UserArenaDetails = () => {
                         if (lower.includes("basketball")) return "🏀";
                         if (lower.includes("volleyball")) return "🏐";
                         if (lower.includes("cricket")) return "🏏";
-                        if (lower.includes("football") || lower.includes("soccer"))
-                          return "⚽";
-                        if (lower.includes("table") || lower.includes("ping"))
-                          return "🏓";
+                        if (lower.includes("football") || lower.includes("soccer")) return "⚽";
+                        if (lower.includes("table") || lower.includes("ping")) return "🏓";
                         return "🎯";
                       };
 
@@ -805,9 +624,7 @@ const UserArenaDetails = () => {
                           title={sportName}
                         >
                           <div className="w-12 h-12 flex items-center justify-center bg-blue-50 rounded-full mb-2 border border-blue-100 group-hover:bg-blue-100 transition-colors">
-                            <span className="text-2xl">
-                              {getEmoji(sportName)}
-                            </span>
+                            <span className="text-2xl">{getEmoji(sportName)}</span>
                           </div>
                           <span className="text-xs font-medium text-gray-700 truncate w-full group-hover:text-blue-600">
                             {sportName}
@@ -821,87 +638,11 @@ const UserArenaDetails = () => {
                 </div>
               </div>
 
-              {/* Reviews Section - ALWAYS VISIBLE */}
+              {/* Reviews Section - READ ONLY - NO WRITE BUTTONS */}
               <div className="border-t pt-6">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-xl font-semibold text-gray-900">
-                    Customer Reviews
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!requireAuth(() => { }, "leave a review")) {
-                        return;
-                      }
-                      setShowReviewForm(!showReviewForm);
-                    }}
-                    className="px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 shadow-sm hover:shadow"
-                  >
-                    {showReviewForm ? "Cancel Review" : "Write a Review"}
-                  </button>
-                </div>
-
-                {/* Add Review Form */}
-                {showReviewForm && (
-                  <div className="mb-8 p-6 bg-gray-50 rounded-lg border border-gray-200">
-                    <h4 className="font-semibold text-gray-900 mb-4 text-lg">
-                      Share Your Experience
-                    </h4>
-                    <div className="mb-4">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Your Rating
-                      </label>
-                      <div className="flex items-center space-x-1">
-                        {[1, 2, 3, 4, 5].map((star) => (
-                          <button
-                            key={star}
-                            type="button"
-                            onClick={() => setNewReview({ ...newReview, rating: star })}
-                            className="text-3xl focus:outline-none transition-transform hover:scale-110"
-                          >
-                            <span className={star <= newReview.rating ? "text-yellow-400" : "text-gray-300"}>
-                              {star <= newReview.rating ? "★" : "☆"}
-                            </span>
-                          </button>
-                        ))}
-                        <span className="ml-2 text-sm text-gray-600">
-                          {newReview.rating} out of 5
-                        </span>
-                      </div>
-                    </div>
-                    <div className="mb-4">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Your Review
-                      </label>
-                      <textarea
-                        value={newReview.comment}
-                        onChange={(e) =>
-                          setNewReview({ ...newReview, comment: e.target.value })
-                        }
-                        rows="4"
-                        placeholder="Tell others about your experience at this arena..."
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                    </div>
-                    <div className="flex justify-end space-x-3">
-                      <button
-                        type="button"
-                        onClick={() => setShowReviewForm(false)}
-                        className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleSubmitReview}
-                        disabled={submittingReview}
-                        className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {submittingReview ? "Submitting..." : "Submit Review"}
-                      </button>
-                    </div>
-                  </div>
-                )}
+                <h3 className="text-xl font-semibold text-gray-900 mb-6">
+                  Customer Reviews
+                </h3>
 
                 {/* Reviews List */}
                 {loadingReviews ? (
@@ -968,27 +709,17 @@ const UserArenaDetails = () => {
                   <div className="text-center py-8 border border-gray-200 rounded-lg">
                     <div className="text-gray-400 text-4xl mb-3">📝</div>
                     <p className="text-gray-600 font-medium">No reviews yet</p>
-                    <p className="text-gray-500 text-sm mt-1">Be the first to share your experience!</p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!requireAuth(() => { }, "leave a review")) {
-                          return;
-                        }
-                        setShowReviewForm(true);
-                      }}
-                      className="mt-4 px-4 py-2 text-primary-600 hover:text-primary-700 font-medium"
-                    >
-                      Write the first review
-                    </button>
+                    <p className="text-gray-500 text-sm mt-1">
+                      Be the first to share your experience after completing a booking!
+                    </p>
                   </div>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Right Column - Booking Section (Keep existing) */}
-          <div className="lg:col-span-1">
+          {/* Right Column - Booking Section */}
+          <div className="lg:col-span-1 booking-section">
             <div className="bg-white rounded-xl shadow-sm p-6 sticky top-6">
               <h3 className="text-xl font-semibold text-black-1000 mb-6">
                 Book Now
@@ -1008,7 +739,7 @@ const UserArenaDetails = () => {
                 />
               </div>
 
-              {/* Court Selection (Keep existing) */}
+              {/* Court Selection */}
               {arena.courts && arena.courts.length > 0 && (
                 <div className="mb-6">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1070,93 +801,36 @@ const UserArenaDetails = () => {
                 </div>
               )}
 
-              {/* Sport Selection (Keep existing) */}
+              {/* Sport Selection */}
               {sportsList && sportsList.length > 0 && (
                 <div className="mb-6">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Select Sport
                   </label>
-                  {(() => {
-                    const getSafeArray = (data) => {
-                      if (!data) return [];
-                      if (Array.isArray(data)) return data;
-                      if (typeof data === 'string') {
-                        try {
-                          return data.split(',').map(item => item.trim());
-                        } catch (e) {
-                          return [data];
-                        }
-                      }
-                      return [];
-                    };
-
-                    const courtSports = getSafeArray(selectedCourt?.sports || selectedCourt?.sports_names);
-                    const arenaSports = getSafeArray(arena?.sports || arena?.sports_list);
-
-                    const getSportId = (sport) => {
-                      if (!sport) return null;
-                      if (typeof sport === 'number') return sport;
-                      if (typeof sport === 'object') {
-                        return sport.sport_id || sport.id;
-                      }
-                      if (typeof sport === 'string') {
-                        const parsed = parseInt(sport);
-                        if (!isNaN(parsed)) return parsed;
-                        const found = sportsList.find(s =>
-                          (s.name && s.name.toLowerCase() === sport.toLowerCase()) ||
-                          (s.sport_name && s.sport_name.toLowerCase() === sport.toLowerCase())
-                        );
-                        return found ? (found.sport_id || found.id) : null;
-                      }
-                      return null;
-                    };
-
-                    const availableSportIds = new Set();
-                    courtSports.forEach(sport => {
-                      const id = getSportId(sport);
-                      if (id) availableSportIds.add(id);
-                    });
-                    arenaSports.forEach(sport => {
-                      const id = getSportId(sport);
-                      if (id) availableSportIds.add(id);
-                    });
-
-                    const filteredSports = sportsList.filter((sport) => {
-                      const sportId = sport.sport_id || sport.id;
-                      return availableSportIds.has(sportId);
-                    });
-
-                    const sportsToShow = filteredSports.length > 0 ? filteredSports : sportsList;
-
-                    return (
-                      <>
-                        <select
-                          value={selectedSportId || ""}
-                          onChange={(e) =>
-                            setSelectedSportId(
-                              e.target.value ? parseInt(e.target.value) : null
-                            )
-                          }
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                          required
-                        >
-                          <option value="">-- Select a Sport --</option>
-                          {sportsToShow.map((sport) => (
-                            <option
-                              key={sport.sport_id || sport.id}
-                              value={sport.sport_id || sport.id}
-                            >
-                              {sport.name || sport.sport_name}
-                            </option>
-                          ))}
-                        </select>
-                      </>
-                    );
-                  })()}
+                  <select
+                    value={selectedSportId || ""}
+                    onChange={(e) =>
+                      setSelectedSportId(
+                        e.target.value ? parseInt(e.target.value) : null
+                      )
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    required
+                  >
+                    <option value="">-- Select a Sport --</option>
+                    {sportsList.map((sport) => (
+                      <option
+                        key={sport.sport_id || sport.id}
+                        value={sport.sport_id || sport.id}
+                      >
+                        {sport.name || sport.sport_name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               )}
 
-              {/* Time Slots (Keep existing) */}
+              {/* Time Slots */}
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Available Time Slots for {selectedCourt?.court_name || "Selected Court"}
@@ -1171,10 +845,7 @@ const UserArenaDetails = () => {
                       const isSelected = selectedSlots.some(
                         (s) => s.slot_id === slot.slot_id
                       );
-                      const isAvailable =
-                        slot.actually_available ?? slot.is_available;
-                      const lockedLabel =
-                        !isAvailable || slot.is_blocked ? "Locked" : null;
+                      const isAvailable = slot.actually_available ?? slot.is_available;
                       return (
                         <button
                           key={slot.slot_id}
@@ -1192,24 +863,20 @@ const UserArenaDetails = () => {
                             {slot.start_time} - {slot.end_time}
                           </div>
                           <div className="text-sm">Rs {slot.price}</div>
-                          {!isAvailable && (
-                            <div className="text-xs text-red-500">
-                              {lockedLabel || "Unavailable"}
-                            </div>
-                          )}
                         </button>
                       );
                     })}
                   </div>
                 )}
               </div>
+
               {timeLeft && (
                 <div className="mt-2 text-sm text-primary-700">
                   Slot held for you: {timeLeft} remaining
                 </div>
               )}
 
-              {/* Booking Summary (Keep existing) */}
+              {/* Booking Summary */}
               {selectedSlots && selectedSlots.length > 0 && (
                 <div className="mb-6 p-4 bg-gray-50 rounded-lg">
                   <h4 className="font-medium text-gray-900 mb-3">
@@ -1259,16 +926,14 @@ const UserArenaDetails = () => {
                 </div>
               )}
 
-              {/* Book Button (Keep existing) */}
+              {/* Book Button */}
               {selectedSlots.length > 0 && (
                 <div className="flex items-center justify-between mb-3">
                   <button
                     type="button"
                     onClick={() => {
                       selectedSlots.forEach((s) =>
-                        integrationService
-                          .releaseSlot(s.slot_id)
-                          .catch(() => { })
+                        integrationService.releaseSlot(s.slot_id).catch(() => { })
                       );
                       setSelectedSlots([]);
                       setLockExpiry(null);
@@ -1285,7 +950,7 @@ const UserArenaDetails = () => {
                       <span className="text-primary-600 ml-2">
                         Hold expires in {timeLeft}
                       </span>
-                    )}{" "}
+                    )}
                   </div>
                 </div>
               )}
@@ -1345,6 +1010,8 @@ const UserArenaDetails = () => {
           </div>
         </div>
       </main>
+
+      {/* Success Modal */}
       {showSuccessModal && (
         <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
