@@ -1,12 +1,11 @@
-// File: OwnerBookings.jsx - UPDATED for both Owner and Manager roles
+// File: OwnerBookings.jsx - COMPLETELY FIXED version
 import React, { useState, useEffect } from "react";
 import integrationService from "../../services/integrationService";
 
-const OwnerBookings = ({ isOwner, permissions = {} }) => {
+const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
   const [bookings, setBookings] = useState([]);
   const [filteredBookings, setFilteredBookings] = useState([]);
   const [statusFilter, setStatusFilter] = useState("all");
-  const [typeFilter, setTypeFilter] = useState("upcoming");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [loading, setLoading] = useState(true);
@@ -15,99 +14,203 @@ const OwnerBookings = ({ isOwner, permissions = {} }) => {
   const [stats, setStats] = useState({});
   const [activeTab, setActiveTab] = useState("upcoming");
 
-  // In OwnerBookings.jsx
-  const canViewBookings = isOwner || permissions.manage_bookings; // Management implies viewing
+  // 🔥 NEW: Force refresh counter
+  const [refreshCounter, setRefreshCounter] = useState(0);
+
+  const canViewBookings = isOwner || permissions.manage_bookings;
   const canManageBookings = isOwner || permissions.manage_bookings;
   const canViewFinancial = isOwner || permissions.view_financials;
+
+  // 🔥 FIX: Fetch bookings whenever filters or selected arena changes
   useEffect(() => {
-    if (canViewBookings) {
+    if (canViewBookings && selectedArena) {
+      console.log("📊 Fetching bookings for arena:", selectedArena.arena_id);
       fetchBookings();
       fetchStats();
-      const interval = setInterval(fetchBookings, 10000);
-      return () => clearInterval(interval);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter, typeFilter, dateFrom, dateTo, activeTab, canViewBookings]);
+  }, [statusFilter, dateFrom, dateTo, activeTab, selectedArena, refreshCounter]);
+
+  // 🔥 Auto-refresh every 10 seconds for pending bookings
+  useEffect(() => {
+    if (!canViewBookings) return;
+
+    const interval = setInterval(() => {
+      console.log("🔄 Auto-refreshing bookings...");
+      setRefreshCounter(prev => prev + 1);
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, [canViewBookings]);
+
+  // In OwnerBookings.jsx - Update the fetchBookings function
 
   const fetchBookings = async () => {
     if (!canViewBookings) return;
+    if (!selectedArena) {
+      console.log("⚠️ No arena selected, skipping booking fetch");
+      setBookings([]);
+      setFilteredBookings([]);
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
     setError(null);
+
     try {
-      const filters = {};
-      if (statusFilter !== "all") filters.status = statusFilter;
+      const token = localStorage.getItem("token");
+      const userRole = localStorage.getItem("userRole");
 
-      // 🔥 Add arena filter if selected
-      if (selectedArena) {
-        filters.arena_id = selectedArena.arena_id;
+      // Build query params
+      const params = new URLSearchParams();
+      params.append('arena_id', selectedArena.arena_id);
+
+      if (statusFilter !== "all") {
+        params.append('status', statusFilter);
       }
 
-      if (activeTab === "upcoming") {
-        filters.type = "upcoming";
-      } else if (activeTab === "history") {
-        filters.type = "history";
+      if (dateFrom) {
+        params.append('date_from', dateFrom);
       }
 
-      if (dateFrom) filters.date_from = dateFrom;
-      if (dateTo) filters.date_to = dateTo;
+      if (dateTo) {
+        params.append('date_to', dateTo);
+      }
 
-      let data;
-      if (isOwner) {
-        data = await integrationService.getOwnerBookingRequests(filters);
+      console.log("🔍 Fetching with params:", params.toString());
+
+      let endpoint;
+      if (userRole === "owner") {
+        endpoint = `http://localhost:5000/api/owners/bookings?${params.toString()}`;
       } else {
-        // Manager endpoint - you'll need to implement this
-        const token = localStorage.getItem("token");
-        const response = await fetch(
-          `http://localhost:5000/api/managers/bookings?${new URLSearchParams(filters)}`,
-          {
-            headers: { Authorization: `Bearer ${token}` }
-          }
-        );
-        data = await response.json();
+        endpoint = `http://localhost:5000/api/managers/bookings?${params.toString()}`;
       }
 
-      const bookingsData = Array.isArray(data) ? data : data.bookings || [];
+      const response = await fetch(endpoint, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
 
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log("📥 Bookings received:", data);
+
+      // Handle different response formats
+      let bookingsData = [];
+      if (Array.isArray(data)) {
+        bookingsData = data;
+      } else if (data.bookings && Array.isArray(data.bookings)) {
+        bookingsData = data.bookings;
+      } else if (data.data && Array.isArray(data.data)) {
+        bookingsData = data.data;
+      }
+
+      console.log(`✅ Found ${bookingsData.length} total bookings`);
+
+      // 🔍 DEBUG: Log the first booking to see its structure
+      if (bookingsData.length > 0) {
+        console.log("📋 First booking structure:", bookingsData[0]);
+        console.log("🔑 Available fields in booking:", Object.keys(bookingsData[0]));
+        console.log("🏟️ Arena ID field value:", {
+          arena_id: bookingsData[0].arena_id,
+          arenaId: bookingsData[0].arenaId,
+          arenaID: bookingsData[0].arenaID,
+          arena: bookingsData[0].arena,
+          arena_name: bookingsData[0].arena_name,
+          arenaName: bookingsData[0].arenaName
+        });
+      }
+
+      // Try multiple possible field names for arena ID
+      const possibleArenaIdFields = ['arena_id', 'arenaId', 'arenaID', 'arena.id', 'arenaId.id'];
+
+      const arenaFiltered = bookingsData.filter(b => {
+        // Check each possible field
+        const match = possibleArenaIdFields.some(field => {
+          if (field.includes('.')) {
+            // Handle nested fields like 'arena.id'
+            const parts = field.split('.');
+            let value = b;
+            for (const part of parts) {
+              if (value && value[part] !== undefined) {
+                value = value[part];
+              } else {
+                return false;
+              }
+            }
+            return value === selectedArena.arena_id;
+          } else {
+            // Direct field
+            return b[field] === selectedArena.arena_id;
+          }
+        });
+
+        if (match) {
+          console.log(`✅ Booking ${b.booking_id} matches arena ${selectedArena.arena_id}`);
+        }
+        return match;
+      });
+
+      console.log(`🎯 After arena filter: ${arenaFiltered.length} bookings`);
+
+      setBookings(arenaFiltered);
+
+      // Apply tab filter
       if (activeTab === "upcoming") {
-        const upcomingOnly = bookingsData.filter(b =>
+        const upcoming = arenaFiltered.filter(b =>
           b.status === 'pending' || b.status === 'accepted'
         );
-        setFilteredBookings(upcomingOnly);
+        console.log(`📅 Upcoming bookings: ${upcoming.length}`);
+        setFilteredBookings(upcoming);
       } else if (activeTab === "history") {
-        const historyOnly = bookingsData.filter(b =>
+        const history = arenaFiltered.filter(b =>
           b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected'
         );
-        setFilteredBookings(historyOnly);
+        console.log(`📜 History bookings: ${history.length}`);
+        setFilteredBookings(history);
       }
 
-      setBookings(bookingsData);
     } catch (error) {
-      console.error("Error fetching bookings:", error);
-      setError(error.response?.data?.message || "Failed to load bookings");
+      console.error("❌ Error fetching bookings:", error);
+      setError(error.message || "Failed to load bookings");
+      setBookings([]);
+      setFilteredBookings([]);
     } finally {
       setLoading(false);
     }
   };
-
   const fetchStats = async () => {
-    if (!canViewFinancial) return;
+    if (!canViewFinancial || !selectedArena) return;
 
     try {
-      if (isOwner) {
-        const data = await integrationService.getOwnerBookingStats("month");
-        setStats(data.period_stats || {});
+      const token = localStorage.getItem("token");
+      const userRole = localStorage.getItem("userRole");
+
+      let endpoint;
+      if (userRole === "owner") {
+        endpoint = `http://localhost:5000/api/owners/bookings/stats?period=month&arena_id=${selectedArena.arena_id}`;
       } else {
-        // Manager stats endpoint
-        const token = localStorage.getItem("token");
-        const response = await fetch(
-          "http://localhost:5000/api/managers/stats?period=month",
-          {
-            headers: { Authorization: `Bearer ${token}` }
-          }
-        );
+        endpoint = `http://localhost:5000/api/managers/stats?period=month&arena_id=${selectedArena.arena_id}`;
+      }
+
+      const response = await fetch(endpoint, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (response.ok) {
         const data = await response.json();
-        setStats(data || {});
+        console.log("📊 Stats received:", data);
+
+        if (userRole === "owner") {
+          setStats(data.period_stats || {});
+        } else {
+          setStats(data || {});
+        }
       }
     } catch (error) {
       console.error("Error fetching stats:", error);
@@ -125,43 +228,35 @@ const OwnerBookings = ({ isOwner, permissions = {} }) => {
 
     try {
       setLoading(true);
+      const token = localStorage.getItem("token");
+      const userRole = localStorage.getItem("userRole");
 
-      if (isOwner) {
-        await integrationService.acceptBookingRequest(bookingId);
+      const endpoint = userRole === "owner"
+        ? `http://localhost:5000/api/owners/bookings/${bookingId}/accept`
+        : `http://localhost:5000/api/managers/bookings/${bookingId}/accept`;
+
+      console.log(`📤 Accepting booking at: ${endpoint}`);
+
+      const response = await fetch(endpoint, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (response.ok) {
+        alert("✅ Booking accepted successfully!");
+        // Refresh both bookings and stats
+        setRefreshCounter(prev => prev + 1);
+        fetchStats();
       } else {
-        const token = localStorage.getItem("token");
-        await fetch(
-          `http://localhost:5000/api/managers/bookings/${bookingId}/accept`,
-          {
-            method: "PUT",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
-          }
-        );
+        const data = await response.json();
+        alert(`❌ ${data.message || "Failed to accept booking"}`);
       }
-
-      // Update local state
-      setBookings((prev) =>
-        prev.map((b) =>
-          b.booking_id === bookingId ? { ...b, status: "accepted" } : b
-        )
-      );
-
-      if (activeTab === "upcoming") {
-        setFilteredBookings((prev) =>
-          prev.map((b) =>
-            b.booking_id === bookingId ? { ...b, status: "accepted" } : b
-          )
-        );
-      }
-
-      alert("Booking accepted successfully!");
-      fetchStats();
     } catch (error) {
       console.error("Error accepting booking:", error);
-      alert(error.response?.data?.message || "Failed to accept booking");
+      alert("❌ An error occurred while accepting the booking");
     } finally {
       setLoading(false);
     }
@@ -178,41 +273,34 @@ const OwnerBookings = ({ isOwner, permissions = {} }) => {
 
     try {
       setLoading(true);
+      const token = localStorage.getItem("token");
+      const userRole = localStorage.getItem("userRole");
 
-      if (isOwner) {
-        await integrationService.rejectBookingRequest(bookingId);
+      const endpoint = userRole === "owner"
+        ? `http://localhost:5000/api/owners/bookings/${bookingId}/reject`
+        : `http://localhost:5000/api/managers/bookings/${bookingId}/reject`;
+
+      console.log(`📤 Rejecting booking at: ${endpoint}`);
+
+      const response = await fetch(endpoint, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (response.ok) {
+        alert("✅ Booking rejected successfully");
+        setRefreshCounter(prev => prev + 1);
+        fetchStats();
       } else {
-        const token = localStorage.getItem("token");
-        await fetch(
-          `http://localhost:5000/api/managers/bookings/${bookingId}/reject`,
-          {
-            method: "PUT",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
-          }
-        );
+        const data = await response.json();
+        alert(`❌ ${data.message || "Failed to reject booking"}`);
       }
-
-      // Update local state
-      setBookings((prev) =>
-        prev.map((b) =>
-          b.booking_id === bookingId ? { ...b, status: "rejected" } : b
-        )
-      );
-
-      if (activeTab === "upcoming") {
-        setFilteredBookings((prev) =>
-          prev.filter((b) => b.booking_id !== bookingId)
-        );
-      }
-
-      alert("Booking rejected successfully");
-      fetchStats();
     } catch (error) {
       console.error("Error rejecting booking:", error);
-      alert(error.response?.data?.message || "Failed to reject booking");
+      alert("❌ An error occurred while rejecting the booking");
     } finally {
       setLoading(false);
     }
@@ -228,7 +316,9 @@ const OwnerBookings = ({ isOwner, permissions = {} }) => {
 
     try {
       const token = localStorage.getItem("token");
-      const endpoint = isOwner
+      const userRole = localStorage.getItem("userRole");
+
+      const endpoint = userRole === "owner"
         ? `http://localhost:5000/api/owners/bookings/${bookingId}/complete`
         : `http://localhost:5000/api/managers/bookings/${bookingId}/complete`;
 
@@ -241,19 +331,8 @@ const OwnerBookings = ({ isOwner, permissions = {} }) => {
       });
 
       if (response.ok) {
-        setBookings((prev) =>
-          prev.map((b) =>
-            b.booking_id === bookingId ? { ...b, status: "completed" } : b
-          )
-        );
-
-        if (activeTab === "upcoming") {
-          setFilteredBookings((prev) =>
-            prev.filter((b) => b.booking_id !== bookingId)
-          );
-        }
-
-        alert("Booking marked as completed");
+        alert("✅ Booking marked as completed");
+        setRefreshCounter(prev => prev + 1);
         fetchStats();
       } else {
         const data = await response.json();
@@ -298,6 +377,7 @@ const OwnerBookings = ({ isOwner, permissions = {} }) => {
   };
 
   const formatDate = (dateStr) => {
+    if (!dateStr) return "";
     const date = new Date(dateStr);
     return date.toLocaleDateString("en-US", {
       weekday: "short",
@@ -324,7 +404,27 @@ const OwnerBookings = ({ isOwner, permissions = {} }) => {
     }
   };
 
-  // If user doesn't have permission to view bookings
+  const formatTime = (timeStr) => {
+    if (!timeStr) return "";
+    const time = new Date(`2000-01-01T${timeStr}`);
+    return time.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  };
+
+  const getDaysUntilBooking = (booking) => {
+    if (!booking.date) return null;
+    const bookingDate = new Date(booking.date);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    bookingDate.setHours(0, 0, 0, 0);
+    const diffTime = bookingDate - today;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays;
+  };
+
   if (!canViewBookings) {
     return (
       <div className="bg-white rounded-xl shadow p-8 text-center">
@@ -335,8 +435,19 @@ const OwnerBookings = ({ isOwner, permissions = {} }) => {
         <p className="mt-1 text-sm text-gray-500">
           You don't have permission to view bookings.
         </p>
-        <p className="mt-2 text-xs text-gray-400">
-          Required permission: view_bookings
+      </div>
+    );
+  }
+
+  if (!selectedArena) {
+    return (
+      <div className="bg-white rounded-xl shadow p-8 text-center">
+        <svg className="w-16 h-16 mx-auto text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+        </svg>
+        <h3 className="mt-4 text-lg font-medium text-gray-900">No Arena Selected</h3>
+        <p className="mt-1 text-sm text-gray-500">
+          Please select an arena from the dropdown above to view bookings.
         </p>
       </div>
     );
@@ -347,7 +458,12 @@ const OwnerBookings = ({ isOwner, permissions = {} }) => {
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-xl font-bold text-gray-900 md:text-2xl">
-            {isOwner ? "Booking Management" : "Booking Management"}
+            Booking Management
+            {selectedArena && (
+              <span className="ml-2 text-sm font-normal text-blue-600">
+                • {selectedArena.name}
+              </span>
+            )}
           </h1>
           {!isOwner && (
             <p className="text-sm text-gray-600 mt-1">
@@ -355,17 +471,26 @@ const OwnerBookings = ({ isOwner, permissions = {} }) => {
             </p>
           )}
         </div>
-        {canViewFinancial && (
-          <div className="text-sm text-gray-600">
-            Total Revenue:{" "}
-            <span className="font-bold text-green-600">
-              {formatCurrency(stats.total_revenue || 0)}
-            </span>
-          </div>
-        )}
+        <div className="flex items-center space-x-3">
+          {canViewFinancial && (
+            <div className="text-sm text-gray-600">
+              Total Revenue:{" "}
+              <span className="font-bold text-green-600">
+                {formatCurrency(stats.total_revenue || 0)}
+              </span>
+            </div>
+          )}
+          <button
+            onClick={() => setRefreshCounter(prev => prev + 1)}
+            className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 text-sm"
+            title="Refresh"
+          >
+            🔄 Refresh
+          </button>
+        </div>
       </div>
 
-      {/* Stats Overview - Only show if has financial permission */}
+      {/* Stats Overview */}
       {canViewFinancial && (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <div className="bg-white p-4 rounded-xl shadow">
@@ -395,7 +520,7 @@ const OwnerBookings = ({ isOwner, permissions = {} }) => {
         </div>
       )}
 
-      {/* Main Tabs */}
+      {/* Tabs */}
       <div className="bg-white rounded-xl shadow mb-6">
         <div className="border-b">
           <div className="flex">
@@ -420,63 +545,61 @@ const OwnerBookings = ({ isOwner, permissions = {} }) => {
           </div>
         </div>
 
-        {/* Filters - Only for upcoming tab */}
-        {activeTab === "upcoming" && (
-          <div className="bg-white p-4 border-b">
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Status
-                </label>
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md"
-                >
-                  <option value="all">All Status</option>
-                  <option value="pending">Pending</option>
-                  <option value="accepted">Accepted</option>
-                </select>
-              </div>
+        {/* Filters */}
+        <div className="bg-white p-4 border-b">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Status
+              </label>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md"
+              >
+                <option value="all">All Status</option>
+                <option value="pending">Pending</option>
+                <option value="accepted">Accepted</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  From Date
-                </label>
-                <input
-                  type="date"
-                  value={dateFrom}
-                  onChange={(e) => setDateFrom(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md"
-                />
-              </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                From Date
+              </label>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md"
+              />
+            </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  To Date
-                </label>
-                <input
-                  type="date"
-                  value={dateTo}
-                  onChange={(e) => setDateTo(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md"
-                />
-              </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                To Date
+              </label>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md"
+              />
+            </div>
 
-              <div className="flex items-end">
-                <button
-                  onClick={() => {
-                    fetchBookings();
-                    fetchStats();
-                  }}
-                  className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
-                >
-                  Refresh
-                </button>
-              </div>
+            <div className="flex items-end">
+              <button
+                onClick={() => setRefreshCounter(prev => prev + 1)}
+                className="w-full px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 text-sm"
+              >
+                Apply Filters
+              </button>
             </div>
           </div>
-        )}
+        </div>
 
         {/* Bookings Content */}
         <div className="p-0">
@@ -485,9 +608,22 @@ const OwnerBookings = ({ isOwner, permissions = {} }) => {
               <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
               <p className="mt-2 text-sm text-gray-600">Loading bookings...</p>
             </div>
+          ) : error ? (
+            <div className="p-8 text-center">
+              <p className="text-red-600">{error}</p>
+              <button
+                onClick={() => setRefreshCounter(prev => prev + 1)}
+                className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg"
+              >
+                Try Again
+              </button>
+            </div>
           ) : filteredBookings.length === 0 ? (
             <div className="p-8 text-center">
-              <p className="text-gray-600">
+              <svg className="w-16 h-16 mx-auto text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <p className="mt-4 text-gray-600">
                 {activeTab === "upcoming"
                   ? "No upcoming bookings found"
                   : "No booking history found"}
@@ -524,226 +660,244 @@ const OwnerBookings = ({ isOwner, permissions = {} }) => {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {filteredBookings.map((booking) => (
-                      <tr key={booking.booking_id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
-                          #{booking.booking_id}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div>
-                            <div className="text-sm font-medium text-gray-900">
-                              {booking.user_name}
+                    {filteredBookings.map((booking) => {
+                      const daysUntil = getDaysUntilBooking(booking);
+                      const timePassed = isBookingTimePassed(booking);
+
+                      return (
+                        <tr key={booking.booking_id} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
+                            #{booking.booking_id}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div>
+                              <div className="text-sm font-medium text-gray-900">
+                                {booking.user_name}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                {booking.user_phone}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="text-sm text-gray-900">
+                              {booking.sport_name}
                             </div>
                             <div className="text-xs text-gray-500">
-                              {booking.user_phone}
+                              {booking.arena_name}
                             </div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="text-sm text-gray-900">
-                            {booking.sport_name}
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            {booking.arena_name}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">
-                            {formatDate(booking.date)}
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            {booking.start_time} - {booking.end_time}
-                            {activeTab === "upcoming" && isBookingTimePassed(booking) && (
-                              <span className="ml-2 text-red-500">(Time Passed)</span>
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <div className="text-sm text-gray-900">
+                              {formatDate(booking.date)}
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              {formatTime(booking.start_time)} - {formatTime(booking.end_time)}
+                              {activeTab === "upcoming" && timePassed && (
+                                <span className="ml-2 text-red-500">(Time Passed)</span>
+                              )}
+                            </div>
+                            {daysUntil !== null && !timePassed && activeTab === "upcoming" && (
+                              <div className={`text-xs mt-1 ${daysUntil === 0 ? 'text-yellow-600' :
+                                daysUntil === 1 ? 'text-orange-600' : 'text-green-600'
+                                }`}>
+                                {daysUntil === 0 ? 'Today' :
+                                  daysUntil === 1 ? 'Tomorrow' :
+                                    `In ${daysUntil} days`}
+                              </div>
                             )}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <div className="text-sm font-semibold text-gray-900">
-                            {formatCurrency(booking.total_amount)}
-                          </div>
-                          {canViewFinancial && booking.commission_amount > 0 && (
-                            <div className="text-xs text-gray-500">
-                              Commission: {formatCurrency(booking.commission_amount || 0)}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <div className="text-sm font-semibold text-gray-900">
+                              {formatCurrency(booking.total_amount)}
                             </div>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <span
-                            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(
-                              booking.status
-                            )}`}
-                          >
-                            {getStatusText(booking.status)}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-sm font-medium">
-                          {activeTab === "upcoming" ? (
-                            <div className="flex flex-col space-y-1 md:flex-row md:space-x-2 md:space-y-0">
-                              {booking.status === "pending" && canManageBookings && (
-                                <>
+                            {canViewFinancial && booking.commission_amount > 0 && (
+                              <div className="text-xs text-gray-500">
+                                Commission: {formatCurrency(booking.commission_amount)}
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <span
+                              className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(
+                                booking.status
+                              )}`}
+                            >
+                              {getStatusText(booking.status)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm font-medium">
+                            {activeTab === "upcoming" ? (
+                              <div className="flex flex-col space-y-1">
+                                {booking.status === "pending" && canManageBookings && (
+                                  <>
+                                    <button
+                                      onClick={() => handleAcceptBooking(booking.booking_id)}
+                                      className="text-green-600 hover:text-green-900 text-sm text-left"
+                                    >
+                                      Accept
+                                    </button>
+                                    <button
+                                      onClick={() => handleRejectBooking(booking.booking_id)}
+                                      className="text-red-600 hover:text-red-900 text-sm text-left"
+                                    >
+                                      Reject
+                                    </button>
+                                  </>
+                                )}
+                                {booking.status === "accepted" && canManageBookings && (
                                   <button
-                                    onClick={() =>
-                                      handleAcceptBooking(booking.booking_id)
-                                    }
-                                    className="text-green-600 hover:text-green-900 text-sm"
+                                    onClick={() => handleCompleteBooking(booking.booking_id)}
+                                    className="text-blue-600 hover:text-blue-900 text-sm text-left"
                                   >
-                                    Accept
+                                    Complete
                                   </button>
-                                  <button
-                                    onClick={() =>
-                                      handleRejectBooking(booking.booking_id)
-                                    }
-                                    className="text-red-600 hover:text-red-900 text-sm"
-                                  >
-                                    Reject
-                                  </button>
-                                </>
-                              )}
-                              {booking.status === "accepted" && canManageBookings && (
+                                )}
                                 <button
-                                  onClick={() =>
-                                    handleCompleteBooking(booking.booking_id)
-                                  }
-                                  className="text-blue-600 hover:text-blue-900 text-sm"
+                                  onClick={() => setSelectedBooking(booking)}
+                                  className="text-gray-600 hover:text-gray-900 text-sm text-left"
                                 >
-                                  Complete
+                                  Details
                                 </button>
-                              )}
-                              <button
-                                onClick={() => setSelectedBooking(booking)}
-                                className="text-gray-600 hover:text-gray-900 text-sm"
-                              >
-                                Details
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="text-xs text-gray-500">
-                              {booking.cancellation_time || booking.booking_date}
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                              </div>
+                            ) : (
+                              <div className="text-xs text-gray-500">
+                                {booking.cancellation_time ||
+                                  booking.completed_at ||
+                                  formatDate(booking.booking_date)}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
 
               {/* Mobile Card View */}
               <div className="md:hidden space-y-3 p-3">
-                {filteredBookings.map((booking) => (
-                  <div
-                    key={booking.booking_id}
-                    className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm"
-                  >
-                    <div className="flex justify-between items-start mb-3">
-                      <div>
-                        <div className="font-medium text-gray-900">
-                          #{booking.booking_id}
-                        </div>
-                        <div className="text-sm text-gray-500">
-                          {booking.user_name}
-                        </div>
-                      </div>
-                      <span
-                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(
-                          booking.status
-                        )}`}
-                      >
-                        {getStatusText(booking.status)}
-                      </span>
-                    </div>
+                {filteredBookings.map((booking) => {
+                  const daysUntil = getDaysUntilBooking(booking);
+                  const timePassed = isBookingTimePassed(booking);
 
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-gray-500">Sport:</span>
-                        <span className="font-medium">{booking.sport_name}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-500">Arena:</span>
-                        <span className="font-medium">{booking.arena_name}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-500">Date:</span>
-                        <span className="font-medium">
-                          {formatDate(booking.date)}
+                  return (
+                    <div
+                      key={booking.booking_id}
+                      className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm"
+                    >
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <div className="font-medium text-gray-900">
+                            #{booking.booking_id}
+                          </div>
+                          <div className="text-sm text-gray-500">
+                            {booking.user_name}
+                          </div>
+                        </div>
+                        <span
+                          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(
+                            booking.status
+                          )}`}
+                        >
+                          {getStatusText(booking.status)}
                         </span>
                       </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-500">Time:</span>
-                        <span className="font-medium">
-                          {booking.start_time} - {booking.end_time}
-                          {activeTab === "upcoming" && isBookingTimePassed(booking) && (
-                            <span className="ml-2 text-red-500 text-xs">(Time Passed)</span>
-                          )}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-500">Amount:</span>
-                        <span className="font-medium">
-                          {formatCurrency(booking.total_amount)}
-                        </span>
-                      </div>
-                      {canViewFinancial && booking.commission_amount > 0 && (
+
+                      <div className="space-y-2 text-sm">
                         <div className="flex justify-between">
-                          <span className="text-gray-500">Commission:</span>
+                          <span className="text-gray-500">Sport:</span>
+                          <span className="font-medium">{booking.sport_name}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Arena:</span>
+                          <span className="font-medium">{booking.arena_name}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Date:</span>
                           <span className="font-medium">
-                            {formatCurrency(booking.commission_amount)}
+                            {formatDate(booking.date)}
                           </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Time:</span>
+                          <span className="font-medium">
+                            {formatTime(booking.start_time)} - {formatTime(booking.end_time)}
+                          </span>
+                        </div>
+                        {daysUntil !== null && !timePassed && activeTab === "upcoming" && (
+                          <div className={`flex justify-between ${daysUntil === 0 ? 'text-yellow-600' :
+                            daysUntil === 1 ? 'text-orange-600' : 'text-green-600'
+                            }`}>
+                            <span className="text-gray-500">When:</span>
+                            <span className="font-medium">
+                              {daysUntil === 0 ? 'Today' :
+                                daysUntil === 1 ? 'Tomorrow' :
+                                  `In ${daysUntil} days`}
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Amount:</span>
+                          <span className="font-medium">
+                            {formatCurrency(booking.total_amount)}
+                          </span>
+                        </div>
+                        {canViewFinancial && booking.commission_amount > 0 && (
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Commission:</span>
+                            <span className="font-medium">
+                              {formatCurrency(booking.commission_amount)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {activeTab === "upcoming" && (
+                        <div className="mt-4 pt-3 border-t">
+                          <div className="flex flex-wrap gap-2">
+                            {booking.status === "pending" && canManageBookings && (
+                              <>
+                                <button
+                                  onClick={() => handleAcceptBooking(booking.booking_id)}
+                                  className="flex-1 px-3 py-1.5 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200"
+                                >
+                                  Accept
+                                </button>
+                                <button
+                                  onClick={() => handleRejectBooking(booking.booking_id)}
+                                  className="flex-1 px-3 py-1.5 bg-red-100 text-red-700 text-sm rounded hover:bg-red-200"
+                                >
+                                  Reject
+                                </button>
+                              </>
+                            )}
+                            {booking.status === "accepted" && canManageBookings && (
+                              <button
+                                onClick={() => handleCompleteBooking(booking.booking_id)}
+                                className="flex-1 px-3 py-1.5 bg-blue-100 text-blue-700 text-sm rounded hover:bg-blue-200"
+                              >
+                                Complete
+                              </button>
+                            )}
+                            <button
+                              onClick={() => setSelectedBooking(booking)}
+                              className="flex-1 px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200"
+                            >
+                              Details
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
-
-                    {activeTab === "upcoming" && (
-                      <div className="mt-4 pt-3 border-t">
-                        <div className="flex flex-wrap gap-2">
-                          {booking.status === "pending" && canManageBookings && (
-                            <>
-                              <button
-                                onClick={() =>
-                                  handleAcceptBooking(booking.booking_id)
-                                }
-                                className="flex-1 px-3 py-1.5 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200"
-                              >
-                                Accept
-                              </button>
-                              <button
-                                onClick={() =>
-                                  handleRejectBooking(booking.booking_id)
-                                }
-                                className="flex-1 px-3 py-1.5 bg-red-100 text-red-700 text-sm rounded hover:bg-red-200"
-                              >
-                                Reject
-                              </button>
-                            </>
-                          )}
-                          {booking.status === "accepted" && canManageBookings && (
-                            <button
-                              onClick={() =>
-                                handleCompleteBooking(booking.booking_id)
-                              }
-                              className="flex-1 px-3 py-1.5 bg-blue-100 text-blue-700 text-sm rounded hover:bg-blue-200"
-                            >
-                              Complete
-                            </button>
-                          )}
-                          <button
-                            onClick={() => setSelectedBooking(booking)}
-                            className="flex-1 px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded hover:bg-gray-200"
-                          >
-                            Details
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </>
           )}
         </div>
 
-        {/* Footer note - Role specific */}
+        {/* Footer note */}
         <div className="px-4 py-3 bg-gray-50 border-t text-center">
           <p className="text-xs text-gray-500">
             {canManageBookings
@@ -838,10 +992,7 @@ const OwnerBookings = ({ isOwner, permissions = {} }) => {
                     Time
                   </label>
                   <p className="mt-1 text-sm text-gray-900">
-                    {selectedBooking.start_time} - {selectedBooking.end_time}
-                    {isBookingTimePassed(selectedBooking) && (
-                      <span className="ml-2 text-red-500">(Time Has Passed)</span>
-                    )}
+                    {formatTime(selectedBooking.start_time)} - {formatTime(selectedBooking.end_time)}
                   </p>
                 </div>
                 <div>
@@ -852,13 +1003,13 @@ const OwnerBookings = ({ isOwner, permissions = {} }) => {
                     {formatCurrency(selectedBooking.total_amount)}
                   </p>
                 </div>
-                {canViewFinancial && (
+                {canViewFinancial && selectedBooking.commission_amount > 0 && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700">
                       Commission
                     </label>
                     <p className="mt-1 text-sm text-gray-900">
-                      {formatCurrency(selectedBooking.commission_amount || 0)}
+                      {formatCurrency(selectedBooking.commission_amount)}
                     </p>
                   </div>
                 )}

@@ -1,12 +1,23 @@
-// In OwnerManagers.jsx - Add edit credentials modal
-
+// File: OwnerManagers.jsx - COMPLETE UPDATED VERSION
 import React, { useState, useEffect } from "react";
 
 const OwnerManagers = () => {
   const [managers, setManagers] = useState([]);
+  const [arenas, setArenas] = useState([]);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [showEditCredentials, setShowEditCredentials] = useState(null); // Store manager being edited
+  const [showEditCredentials, setShowEditCredentials] = useState(null);
   const [editingManager, setEditingManager] = useState(null);
+  const [selectedArenaForPermissions, setSelectedArenaForPermissions] = useState("");
+
+  // Form for adding/editing manager
+  const [formData, setFormData] = useState({
+    name: "",
+    email: "",
+    password: "",
+    phone_number: "",
+    arena_permissions: [] // Array of { arena_id, arena_name, permissions }
+  });
+
   const [credentialsForm, setCredentialsForm] = useState({
     name: "",
     email: "",
@@ -14,17 +25,11 @@ const OwnerManagers = () => {
     password: "",
     confirm_password: ""
   });
-  const [formData, setFormData] = useState({
-    name: "",
-    email: "",
-    password: "",
-    phone_number: "",
-    permissions: {},
-  });
+
   const [loading, setLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(null);
 
-  // Define all available permissions - REMOVED view_managers
+  // Available permissions
   const availablePermissions = [
     {
       id: "view_financials",
@@ -50,6 +55,7 @@ const OwnerManagers = () => {
 
   useEffect(() => {
     fetchManagers();
+    fetchArenas();
   }, []);
 
   const fetchManagers = async () => {
@@ -64,22 +70,233 @@ const OwnerManagers = () => {
         }
       );
       const data = await response.json();
+      console.log("📥 Received managers data:", data);
+
       if (response.ok) {
-        const processedManagers = data.map((manager) => ({
-          ...manager,
-          permissions:
-            typeof manager.permissions === "string"
-              ? JSON.parse(manager.permissions)
-              : manager.permissions,
-        }));
-        setManagers(processedManagers);
+        setManagers(data);
       }
     } catch (error) {
       console.error("Error fetching managers:", error);
     }
   };
 
-  // 🔥 NEW: Handle edit credentials
+  const fetchArenas = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        "http://localhost:5000/api/owners/arenas",
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+      const data = await response.json();
+      if (response.ok) {
+        setArenas(data);
+      }
+    } catch (error) {
+      console.error("Error fetching arenas:", error);
+    }
+  };
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData({
+      ...formData,
+      [name]: value,
+    });
+  };
+
+  const handleCredentialsInputChange = (e) => {
+    const { name, value } = e.target;
+    setCredentialsForm({
+      ...credentialsForm,
+      [name]: value,
+    });
+  };
+
+  // Add arena to manager's permissions
+  const handleAddArena = () => {
+    if (!selectedArenaForPermissions) return;
+
+    const arena = arenas.find(a => a.arena_id === parseInt(selectedArenaForPermissions));
+    if (!arena) return;
+
+    // Check if arena already added
+    const exists = formData.arena_permissions.some(
+      ap => ap.arena_id === arena.arena_id
+    );
+
+    if (!exists) {
+      setFormData({
+        ...formData,
+        arena_permissions: [
+          ...formData.arena_permissions,
+          {
+            arena_id: arena.arena_id,
+            arena_name: arena.name,
+            permissions: {}
+          }
+        ]
+      });
+    }
+    setSelectedArenaForPermissions("");
+  };
+
+  // Remove arena from manager
+  const handleRemoveArena = (arenaId) => {
+    setFormData({
+      ...formData,
+      arena_permissions: formData.arena_permissions.filter(
+        ap => ap.arena_id !== arenaId
+      )
+    });
+  };
+
+  // Update permissions for a specific arena
+  const handlePermissionChange = (arenaId, permissionId, checked) => {
+    setFormData({
+      ...formData,
+      arena_permissions: formData.arena_permissions.map(ap => {
+        if (ap.arena_id === arenaId) {
+          return {
+            ...ap,
+            permissions: {
+              ...ap.permissions,
+              [permissionId]: checked
+            }
+          };
+        }
+        return ap;
+      })
+    });
+  };
+
+  // Select all permissions for an arena
+  const handleSelectAllForArena = (arenaId, checked) => {
+    const allPermissions = {};
+    availablePermissions.forEach(perm => {
+      allPermissions[perm.id] = checked;
+    });
+
+    setFormData({
+      ...formData,
+      arena_permissions: formData.arena_permissions.map(ap => {
+        if (ap.arena_id === arenaId) {
+          return {
+            ...ap,
+            permissions: allPermissions
+          };
+        }
+        return ap;
+      })
+    });
+  };
+
+  const handleAddManager = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+
+    try {
+      const token = localStorage.getItem("token");
+
+      // 🔍 DEBUG: Log what we're sending
+      console.log("📤 Sending manager data:", {
+        name: formData.name,
+        email: formData.email,
+        phone_number: formData.phone_number,
+        arena_permissions: formData.arena_permissions
+      });
+
+      const response = await fetch(
+        "http://localhost:5000/api/owners/managers",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: formData.name,
+            email: formData.email,
+            password: formData.password,
+            phone_number: formData.phone_number,
+            arena_permissions: formData.arena_permissions
+          }),
+        }
+      );
+
+      const data = await response.json();
+      console.log("📥 Response from server:", data);
+
+      if (response.ok) {
+        alert("Manager added successfully");
+        resetForm();
+        fetchManagers(); // This will refresh the list
+        setShowAddForm(false);
+      } else {
+        alert(data.message || "Failed to add manager");
+      }
+    } catch (error) {
+      console.error("❌ Error adding manager:", error);
+      alert("An error occurred");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEditManager = (manager) => {
+    setFormData({
+      name: manager.name,
+      email: manager.email,
+      phone_number: manager.phone_number || "",
+      password: "",
+      arena_permissions: manager.arena_permissions || []
+    });
+    setEditingManager(manager);
+    setShowAddForm(true);
+  };
+
+  const handleUpdateManager = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        `http://localhost:5000/api/owners/managers/${editingManager.manager_id}`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            arena_permissions: formData.arena_permissions
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (response.ok) {
+        alert("Manager permissions updated successfully");
+        resetForm();
+        fetchManagers();
+        setEditingManager(null);
+        setShowAddForm(false);
+      } else {
+        alert(data.message || "Failed to update manager");
+      }
+    } catch (error) {
+      console.error("Error updating manager:", error);
+      alert("An error occurred");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleEditCredentials = (manager) => {
     setShowEditCredentials(manager);
     setCredentialsForm({
@@ -91,11 +308,9 @@ const OwnerManagers = () => {
     });
   };
 
-  // 🔥 NEW: Save credentials
   const handleSaveCredentials = async () => {
     if (!showEditCredentials) return;
 
-    // Validate
     if (credentialsForm.password && credentialsForm.password.length < 6) {
       alert("Password must be at least 6 characters long");
       return;
@@ -110,14 +325,12 @@ const OwnerManagers = () => {
     try {
       const token = localStorage.getItem("token");
 
-      // Prepare update data
       const updateData = {
         name: credentialsForm.name,
         email: credentialsForm.email,
         phone_number: credentialsForm.phone_number
       };
 
-      // Only include password if provided
       if (credentialsForm.password) {
         updateData.password = credentialsForm.password;
       }
@@ -154,17 +367,7 @@ const OwnerManagers = () => {
   const handleDeleteManager = async (managerId, managerName) => {
     if (!window.confirm(
       `⚠️ ARE YOU SURE?\n\nYou are about to permanently delete manager "${managerName}".\n\n` +
-      `This action:\n` +
-      `• Cannot be undone\n` +
-      `• Will remove all manager data\n` +
-      `• Will prevent this manager from ever logging in again\n\n` +
-      `Do you still want to delete this manager?`
-    )) {
-      return;
-    }
-
-    if (!window.confirm(
-      `FINAL WARNING:\n\nType "DELETE" to confirm permanent deletion of ${managerName}`
+      `This action cannot be undone.`
     )) {
       return;
     }
@@ -200,142 +403,32 @@ const OwnerManagers = () => {
     }
   };
 
-  const handleInputChange = (e) => {
-    const { name, value, type, checked } = e.target;
-    if (type === "checkbox") {
-      setFormData({
-        ...formData,
-        permissions: {
-          ...formData.permissions,
-          [name]: checked,
-        },
-      });
-    } else {
-      setFormData({
-        ...formData,
-        [name]: value,
-      });
-    }
-  };
-
-  const handleCredentialsInputChange = (e) => {
-    const { name, value } = e.target;
-    setCredentialsForm({
-      ...credentialsForm,
-      [name]: value,
-    });
-  };
-
-  const handleSelectAllPermissions = (checked) => {
-    const allPermissions = {};
-    availablePermissions.forEach((perm) => {
-      allPermissions[perm.id] = checked;
-    });
-    setFormData({
-      ...formData,
-      permissions: allPermissions,
-    });
-  };
-
-  const handleAddManager = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-
-    try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(
-        "http://localhost:5000/api/owners/managers",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(formData),
-        }
-      );
-
-      const data = await response.json();
-
-      if (response.ok) {
-        alert("Manager added successfully");
-        resetForm();
-        fetchManagers();
-        setShowAddForm(false);
-      } else {
-        alert(data.message || "Failed to add manager");
-      }
-    } catch (error) {
-      console.error("Error adding manager:", error);
-      alert("An error occurred");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleUpdateManager = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-
-    try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(
-        `http://localhost:5000/api/owners/managers/${editingManager.manager_id}`,
-        {
-          method: "PUT",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            permissions: formData.permissions,
-          }),
-        }
-      );
-
-      const data = await response.json();
-
-      if (response.ok) {
-        alert("Manager permissions updated successfully");
-        resetForm();
-        fetchManagers();
-        setEditingManager(null);
-      } else {
-        alert(data.message || "Failed to update manager");
-      }
-    } catch (error) {
-      console.error("Error updating manager:", error);
-      alert("An error occurred");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleEditManager = (manager) => {
-    const permissions = manager.permissions || {};
-
-    setFormData({
-      name: manager.name,
-      email: manager.email,
-      phone_number: manager.phone_number,
-      permissions: permissions,
-    });
-    setEditingManager(manager);
-  };
-
   const resetForm = () => {
     setFormData({
       name: "",
       email: "",
       password: "",
       phone_number: "",
-      permissions: {},
+      arena_permissions: []
     });
+    setSelectedArenaForPermissions("");
   };
 
-  const getPermissionCount = (manager) => {
-    const perms = manager.permissions || {};
-    return Object.values(perms).filter(Boolean).length;
+  const getPermissionCountForManager = (manager) => {
+    if (!manager.arena_permissions) return 0;
+
+    // Count total permissions across all arenas
+    return manager.arena_permissions.reduce((total, ap) => {
+      const permCount = Object.values(ap.permissions || {}).filter(Boolean).length;
+      return total + permCount;
+    }, 0);
+  };
+
+  const getArenasList = (manager) => {
+    if (!manager.arena_permissions || manager.arena_permissions.length === 0) {
+      return "None";
+    }
+    return manager.arena_permissions.map(ap => ap.arena_name).join(', ');
   };
 
   return (
@@ -356,11 +449,11 @@ const OwnerManagers = () => {
         </button>
       </div>
 
-      {/* Add/Edit Manager Form - Mobile optimized */}
-      {(showAddForm || editingManager) && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto z-50 p-3 md:p-0 md:static md:bg-white md:shadow md:rounded-xl md:mb-6">
-          <div className="relative top-4 mx-auto p-4 border w-full shadow-lg rounded-md bg-white md:top-0 md:shadow-none md:border-0 md:p-6">
-            <div className="flex justify-between items-center mb-4">
+      {/* Add/Edit Manager Form */}
+      {showAddForm && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto z-50 p-3">
+          <div className="relative top-4 mx-auto p-4 border w-full max-w-4xl shadow-lg rounded-md bg-white max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4 sticky top-0 bg-white pb-2 border-b">
               <h2 className="text-base font-medium text-gray-900 md:text-lg">
                 {editingManager
                   ? "Edit Manager Permissions"
@@ -381,185 +474,240 @@ const OwnerManagers = () => {
             <form
               onSubmit={editingManager ? handleUpdateManager : handleAddManager}
             >
-              <div className="space-y-4 mb-6 md:grid md:grid-cols-2 md:gap-4 md:space-y-0">
-                <div className="space-y-4">
-                  <h3 className="text-sm font-medium text-gray-900">
+              <div className="space-y-6">
+                {/* Manager Details Section */}
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <h3 className="text-sm font-medium text-gray-900 mb-4">
                     Manager Details
                   </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {!editingManager && (
+                      <>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Name *
+                          </label>
+                          <input
+                            type="text"
+                            name="name"
+                            value={formData.name}
+                            onChange={handleInputChange}
+                            required
+                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md"
+                            placeholder="Manager name"
+                          />
+                        </div>
 
-                  {!editingManager && (
-                    <>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Name *
-                        </label>
-                        <input
-                          type="text"
-                          name="name"
-                          value={formData.name}
-                          onChange={handleInputChange}
-                          required
-                          className="w-full px-3 py-2 text-sm md:text-base border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                          placeholder="Manager name"
-                        />
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Email *
+                          </label>
+                          <input
+                            type="email"
+                            name="email"
+                            value={formData.email}
+                            onChange={handleInputChange}
+                            required
+                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md"
+                            placeholder="manager@arena.com"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Password *
+                          </label>
+                          <input
+                            type="password"
+                            name="password"
+                            value={formData.password}
+                            onChange={handleInputChange}
+                            required={!editingManager}
+                            minLength="6"
+                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md"
+                            placeholder="Minimum 6 characters"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Phone Number
+                          </label>
+                          <input
+                            type="tel"
+                            name="phone_number"
+                            value={formData.phone_number}
+                            onChange={handleInputChange}
+                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md"
+                            placeholder="+1234567890"
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    {editingManager && (
+                      <div className="col-span-2 p-3 bg-blue-50 rounded-lg">
+                        <p className="text-sm text-gray-600">
+                          Editing permissions for:{" "}
+                          <span className="font-medium">
+                            {editingManager.name}
+                          </span>
+                        </p>
+                        <p className="text-sm text-gray-600 mt-1">
+                          Email: {editingManager.email}
+                        </p>
                       </div>
+                    )}
+                  </div>
+                </div>
 
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Email *
-                        </label>
-                        <input
-                          type="email"
-                          name="email"
-                          value={formData.email}
-                          onChange={handleInputChange}
-                          required
-                          className="w-full px-3 py-2 text-sm md:text-base border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                          placeholder="manager@arena.com"
-                        />
-                      </div>
+                {/* Arena Permissions Section */}
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <h3 className="text-sm font-medium text-gray-900 mb-4">
+                    Arena Permissions
+                  </h3>
 
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Password *
-                        </label>
-                        <input
-                          type="password"
-                          name="password"
-                          value={formData.password}
-                          onChange={handleInputChange}
-                          required={!editingManager}
-                          minLength="6"
-                          className="w-full px-3 py-2 text-sm md:text-base border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                          placeholder="Minimum 6 characters"
-                        />
-                      </div>
+                  {/* Add Arena Dropdown */}
+                  <div className="flex items-center space-x-2 mb-4">
+                    <select
+                      value={selectedArenaForPermissions}
+                      onChange={(e) => setSelectedArenaForPermissions(e.target.value)}
+                      className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md"
+                    >
+                      <option value="">Select an arena to add</option>
+                      {arenas
+                        .filter(arena =>
+                          !formData.arena_permissions.some(ap => ap.arena_id === arena.arena_id)
+                        )
+                        .map(arena => (
+                          <option key={arena.arena_id} value={arena.arena_id}>
+                            {arena.name}
+                          </option>
+                        ))
+                      }
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleAddArena}
+                      disabled={!selectedArenaForPermissions}
+                      className="px-4 py-2 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 disabled:bg-green-300"
+                    >
+                      Add Arena
+                    </button>
+                  </div>
 
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Phone Number
-                        </label>
-                        <input
-                          type="tel"
-                          name="phone_number"
-                          value={formData.phone_number}
-                          onChange={handleInputChange}
-                          className="w-full px-3 py-2 text-sm md:text-base border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                          placeholder="+1234567890"
-                        />
-                      </div>
-                    </>
-                  )}
-
-                  {editingManager && (
-                    <div className="p-3 bg-gray-50 rounded-lg md:p-4">
-                      <p className="text-sm text-gray-600">
-                        Editing permissions for:{" "}
-                        <span className="font-medium">
-                          {editingManager.name}
-                        </span>
+                  {/* Arena Permissions List */}
+                  {formData.arena_permissions.length === 0 ? (
+                    <div className="text-center py-8 bg-white rounded-lg border-2 border-dashed border-gray-300">
+                      <p className="text-sm text-gray-500">
+                        No arenas assigned yet. Add an arena above to set permissions.
                       </p>
-                      <p className="text-sm text-gray-600 mt-1">
-                        Email: {editingManager.email}
-                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4 max-h-96 overflow-y-auto">
+                      {formData.arena_permissions.map((ap) => (
+                        <div key={ap.arena_id} className="bg-white rounded-lg border border-gray-200 p-4">
+                          <div className="flex justify-between items-center mb-3">
+                            <h4 className="font-medium text-gray-900">
+                              {ap.arena_name}
+                            </h4>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveArena(ap.arena_id)}
+                              className="text-red-600 hover:text-red-800 text-sm"
+                            >
+                              Remove
+                            </button>
+                          </div>
+
+                          <div className="flex justify-between items-center mb-2">
+                            <span className="text-xs font-medium text-gray-500">
+                              Permissions for this arena
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleSelectAllForArena(ap.arena_id, true)}
+                              className="text-xs text-blue-600 hover:text-blue-800"
+                            >
+                              Select All
+                            </button>
+                          </div>
+
+                          <div className="space-y-2">
+                            {availablePermissions.map((permission) => (
+                              <div key={permission.id} className="flex items-start">
+                                <div className="flex items-center h-5">
+                                  <input
+                                    id={`${ap.arena_id}_${permission.id}`}
+                                    type="checkbox"
+                                    checked={!!ap.permissions[permission.id]}
+                                    onChange={(e) =>
+                                      handlePermissionChange(ap.arena_id, permission.id, e.target.checked)
+                                    }
+                                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                                  />
+                                </div>
+                                <div className="ml-3 text-sm">
+                                  <label
+                                    htmlFor={`${ap.arena_id}_${permission.id}`}
+                                    className="font-medium text-gray-700"
+                                  >
+                                    {permission.name}
+                                  </label>
+                                  <p className="text-xs text-gray-500">
+                                    {permission.description}
+                                  </p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
 
-                <div>
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-sm font-medium text-gray-900">
-                      Permissions
-                    </h3>
-                    <button
-                      type="button"
-                      onClick={() => handleSelectAllPermissions(true)}
-                      className="text-sm text-blue-600 hover:text-blue-700"
-                    >
-                      Select All
-                    </button>
-                  </div>
-
-                  <div className="space-y-3 max-h-60 overflow-y-auto p-2 border rounded-lg md:max-h-80">
-                    {availablePermissions.map((permission) => (
-                      <div key={permission.id} className="flex items-start">
-                        <div className="flex items-center h-5">
-                          <input
-                            id={permission.id}
-                            name={permission.id}
-                            type="checkbox"
-                            checked={!!formData.permissions[permission.id]}
-                            onChange={handleInputChange}
-                            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                          />
-                        </div>
-                        <div className="ml-3 text-sm">
-                          <label
-                            htmlFor={permission.id}
-                            className="font-medium text-gray-700"
-                          >
-                            {permission.name}
-                          </label>
-                          <p className="text-xs text-gray-500 md:text-sm">
-                            {permission.description}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-                    <p className="text-sm text-blue-700">
-                      Selected{" "}
-                      {
-                        Object.values(formData.permissions).filter(Boolean)
-                          .length
-                      }{" "}
-                      of {availablePermissions.length} permissions
-                    </p>
-                  </div>
+                {/* Form Actions */}
+                <div className="flex flex-col space-y-3 md:flex-row md:justify-end md:space-x-3 md:space-y-0 pt-4 border-t">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddForm(false);
+                      setEditingManager(null);
+                      resetForm();
+                    }}
+                    className="px-4 py-2 text-sm border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                    disabled={loading}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={loading || formData.arena_permissions.length === 0}
+                    className={`px-4 py-2 text-sm rounded-md text-white ${loading || formData.arena_permissions.length === 0
+                      ? "bg-blue-400 cursor-not-allowed"
+                      : "bg-blue-600 hover:bg-blue-700"
+                      }`}
+                  >
+                    {loading ? (
+                      <>
+                        <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></span>
+                        {editingManager ? "Updating..." : "Adding..."}
+                      </>
+                    ) : editingManager ? (
+                      "Update Permissions"
+                    ) : (
+                      "Add Manager"
+                    )}
+                  </button>
                 </div>
-              </div>
-
-              <div className="flex flex-col space-y-3 md:flex-row md:justify-end md:space-x-3 md:space-y-0">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowAddForm(false);
-                    setEditingManager(null);
-                    resetForm();
-                  }}
-                  className="px-4 py-2 text-sm border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
-                  disabled={loading}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className={`px-4 py-2 text-sm rounded-md text-white ${loading
-                    ? "bg-blue-400 cursor-not-allowed"
-                    : "bg-blue-600 hover:bg-blue-700"
-                    }`}
-                >
-                  {loading ? (
-                    <>
-                      <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></span>
-                      {editingManager ? "Updating..." : "Adding..."}
-                    </>
-                  ) : editingManager ? (
-                    "Update Permissions"
-                  ) : (
-                    "Add Manager"
-                  )}
-                </button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* 🔥 NEW: Edit Credentials Modal */}
+      {/* Edit Credentials Modal */}
       {showEditCredentials && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto z-50 p-3">
           <div className="relative top-20 mx-auto p-4 border w-full max-w-md shadow-lg rounded-md bg-white">
@@ -585,7 +733,7 @@ const OwnerManagers = () => {
                   name="name"
                   value={credentialsForm.name}
                   onChange={handleCredentialsInputChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
                 />
               </div>
 
@@ -598,7 +746,7 @@ const OwnerManagers = () => {
                   name="email"
                   value={credentialsForm.email}
                   onChange={handleCredentialsInputChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
                 />
               </div>
 
@@ -611,7 +759,7 @@ const OwnerManagers = () => {
                   name="phone_number"
                   value={credentialsForm.phone_number}
                   onChange={handleCredentialsInputChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
                   placeholder="+1234567890"
                 />
               </div>
@@ -630,7 +778,7 @@ const OwnerManagers = () => {
                       name="password"
                       value={credentialsForm.password}
                       onChange={handleCredentialsInputChange}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
                       placeholder="Minimum 6 characters"
                       minLength="6"
                     />
@@ -644,7 +792,7 @@ const OwnerManagers = () => {
                       name="confirm_password"
                       value={credentialsForm.confirm_password}
                       onChange={handleCredentialsInputChange}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
                       placeholder="Confirm new password"
                     />
                   </div>
@@ -674,7 +822,7 @@ const OwnerManagers = () => {
         </div>
       )}
 
-      {/* Managers List - Mobile optimized */}
+      {/* Managers List */}
       <div className="bg-white rounded-xl shadow overflow-hidden">
         {managers.length === 0 ? (
           <div className="p-6 text-center md:p-8">
@@ -702,7 +850,10 @@ const OwnerManagers = () => {
                       Contact
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Permissions
+                      Assigned Arenas
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Total Permissions
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Status
@@ -743,12 +894,18 @@ const OwnerManagers = () => {
                       </td>
                       <td className="px-4 py-3">
                         <div className="text-sm text-gray-900">
-                          {getPermissionCount(manager)} permissions
+                          {manager.arena_permissions?.length || 0} arena(s)
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1 truncate max-w-xs" title={getArenasList(manager)}>
+                          {getArenasList(manager)}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="text-sm text-gray-900">
+                          {getPermissionCountForManager(manager)} total
                         </div>
                         <div className="text-xs text-gray-500 mt-1">
-                          {manager.permissions?.view_financials
-                            ? "Includes financial access"
-                            : "No financial access"}
+                          Across {manager.arena_permissions?.length || 0} arenas
                         </div>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
@@ -771,7 +928,6 @@ const OwnerManagers = () => {
                             >
                               Permissions
                             </button>
-                            {/* 🔥 NEW: Edit Credentials Button */}
                             <button
                               onClick={() => handleEditCredentials(manager)}
                               className="text-green-600 hover:text-green-900"
@@ -852,7 +1008,7 @@ const OwnerManagers = () => {
               </table>
             </div>
 
-            {/* Mobile Card View - Add Edit Details button here too */}
+            {/* Mobile Card View */}
             <div className="md:hidden space-y-3 p-3">
               {managers.map((manager) => (
                 <div
@@ -900,11 +1056,32 @@ const OwnerManagers = () => {
                       </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-500">Permissions:</span>
+                      <span className="text-gray-500">Arenas:</span>
                       <span className="font-medium">
-                        {getPermissionCount(manager)}
+                        {manager.arena_permissions?.length || 0}
                       </span>
                     </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Permissions:</span>
+                      <span className="font-medium">
+                        {getPermissionCountForManager(manager)}
+                      </span>
+                    </div>
+                    {manager.arena_permissions && manager.arena_permissions.length > 0 && (
+                      <div className="mt-2 pt-2 border-t">
+                        <span className="text-xs font-medium text-gray-500">Assigned Arenas:</span>
+                        <div className="mt-1 space-y-1">
+                          {manager.arena_permissions.map((ap, idx) => (
+                            <div key={idx} className="text-xs bg-gray-50 p-1 rounded">
+                              <span className="font-medium">{ap.arena_name}</span>
+                              <span className="ml-2 text-gray-500">
+                                ({Object.values(ap.permissions || {}).filter(Boolean).length} perms)
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="pt-3 border-t">
@@ -915,7 +1092,6 @@ const OwnerManagers = () => {
                       >
                         Edit Permissions
                       </button>
-                      {/* 🔥 NEW: Edit Details Button for Mobile */}
                       <button
                         onClick={() => handleEditCredentials(manager)}
                         className="px-3 py-1.5 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200 text-center"
@@ -999,11 +1175,12 @@ const OwnerManagers = () => {
           About Manager Management
         </h3>
         <ul className="text-xs text-blue-700 space-y-1 md:text-sm">
-          <li>• Managers can only access features you explicitly permit</li>
-          <li>• Financial data access is controlled separately through "View Financials" permission</li>
-          <li>• <span className="font-semibold">Deactivate:</span> Temporarily prevents login - you can reactivate later</li>
+          <li>• Managers can be assigned to multiple arenas</li>
+          <li>• Each arena can have different permissions for the same manager</li>
+          <li>• Financial data access is controlled per arena</li>
+          <li>• <span className="font-semibold">Deactivate:</span> Temporarily prevents login</li>
           <li>• <span className="font-semibold">Edit Details:</span> Update manager's name, email, phone, and password</li>
-          <li>• <span className="font-semibold text-red-700">Delete Permanently:</span> Completely removes manager from system - cannot be undone</li>
+          <li>• <span className="font-semibold text-red-700">Delete Permanently:</span> Completely removes manager from system</li>
         </ul>
       </div>
     </div>

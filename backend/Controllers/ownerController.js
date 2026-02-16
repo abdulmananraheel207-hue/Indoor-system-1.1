@@ -161,14 +161,14 @@ const ownerController = {
           // Create courts
           let courtData = arenaData.courts;
           if (!courtData || courtData.length === 0) {
-            // Auto-generate courts
+            // Auto-generate courts if none provided (fallback)
             courtData = Array.from(
               { length: parseInt(arenaData.number_of_courts) || 1 },
               (_, i) => ({
                 court_number: i + 1,
                 court_name: `Court ${i + 1}`,
                 size_sqft: 2000,
-                price_per_hour: parseFloat(arenaData.base_price_per_hour) || 500,
+                price_per_hour: 500, // Default price instead of base_price_per_hour
                 description: "",
                 sports: arenaData.selected_sports || [],
               })
@@ -180,21 +180,18 @@ const ownerController = {
           for (const court of courtData) {
             const [courtResult] = await connection.execute(
               `INSERT INTO court_details 
-             (arena_id, court_number, court_name, size_sqft, 
-              price_per_hour, description, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+         (arena_id, court_number, court_name, size_sqft, 
+          price_per_hour, description, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, NOW())`,
               [
                 arena_id,
                 court.court_number || 1,
                 court.court_name || `Court ${court.court_number || 1}`,
                 parseFloat(court.size_sqft) || 2000,
-                parseFloat(court.price_per_hour) ||
-                parseFloat(arenaData.base_price_per_hour) ||
-                500,
+                parseFloat(court.price_per_hour) || 500, // Use court price, not base_price
                 court.description || "",
               ]
             );
-
             const court_id = courtResult.insertId;
 
             // Add sports to court
@@ -215,6 +212,7 @@ const ownerController = {
               }
             }
           }
+
 
           // Generate time slots if opening/closing times are provided
           if (arenaData.opening_time && arenaData.closing_time) {
@@ -242,26 +240,26 @@ const ownerController = {
               }
 
               if (dayAvailable) {
-                // Get all courts for this arena
+                // Get all courts for this arena with their specific prices
                 const [courtRows] = await connection.execute(
-                  "SELECT court_id FROM court_details WHERE arena_id = ?",
+                  "SELECT court_id, price_per_hour FROM court_details WHERE arena_id = ?",
                   [arena_id]
                 );
 
-                // Create time slots for EACH court
+                // Create time slots for EACH court using court-specific prices
                 for (const court of courtRows) {
                   for (const slot of timeSlots) {
                     await connection.execute(
                       `INSERT INTO time_slots 
-                     (arena_id, court_id, date, start_time, end_time, price, is_available)
-                     VALUES (?, ?, ?, ?, ?, ?, TRUE)`,
+                         (arena_id, court_id, date, start_time, end_time, price, is_available)
+                         VALUES (?, ?, ?, ?, ?, ?, TRUE)`,
                       [
                         arena_id,
                         court.court_id,
                         dateStr,
                         slot.start_time,
                         slot.end_time,
-                        parseFloat(arenaData.base_price_per_hour) || 500,
+                        parseFloat(court.price_per_hour) || 500, // Use court-specific price
                       ]
                     );
                     slotsCreated++;
@@ -748,6 +746,8 @@ const ownerController = {
     }
   },
 
+  // In ownerController.js - Update getDashboard function
+
   getDashboard: async (req, res) => {
     try {
       const owner_id = req.user.id;
@@ -832,6 +832,28 @@ const ownerController = {
         [owner_id]
       );
 
+      // 🔥 NEW: Get per-arena statistics
+      const [arenaStats] = await pool.execute(
+        `SELECT 
+         a.arena_id,
+         a.name as arena_name,
+         COUNT(DISTINCT b.booking_id) as total_bookings,
+         SUM(CASE WHEN b.status = 'completed' THEN 1 ELSE 0 END) as completed_bookings,
+         SUM(CASE WHEN b.status = 'pending' THEN 1 ELSE 0 END) as pending_bookings,
+         SUM(CASE WHEN b.status = 'accepted' THEN 1 ELSE 0 END) as accepted_bookings,
+         COALESCE(SUM(CASE WHEN b.status = 'completed' THEN b.total_amount ELSE 0 END), 0) as total_revenue,
+         COALESCE(SUM(CASE WHEN b.status = 'completed' AND ts.date = CURDATE() THEN b.total_amount ELSE 0 END), 0) as today_revenue,
+         COUNT(DISTINCT CASE WHEN ts.date = CURDATE() THEN b.booking_id END) as today_bookings
+       FROM arenas a
+       LEFT JOIN bookings b ON a.arena_id = b.arena_id
+       LEFT JOIN time_slots ts ON b.slot_id = ts.slot_id
+       WHERE a.owner_id = ?
+       GROUP BY a.arena_id, a.name`,
+        [owner_id]
+      );
+
+      console.log("📊 Arena stats:", arenaStats);
+
       res.json({
         dashboard: {
           today_bookings: todayBookings[0].count,
@@ -845,6 +867,7 @@ const ownerController = {
         pending_requests: pendingRequests,
         upcoming_bookings: upcomingBookings,
         arenas: arenas,
+        arena_stats: arenaStats, // 🔥 ADD THIS LINE
       });
     } catch (error) {
       console.error(error);
@@ -855,7 +878,7 @@ const ownerController = {
   // Get all booking requests for owner
   getOwnerBookings: async (req, res) => {
     try {
-      const { status, date_from, date_to, type = "all" } = req.query;
+      const { status, date_from, date_to, type = "all", arena_id } = req.query;
       const ownerId = req.user.id;
 
       let query = `
@@ -871,6 +894,7 @@ const ownerController = {
         u.phone_number as user_phone,
         st.name as sport_name,
         a.name as arena_name,
+        a.arena_id,
         ts.date,
         ts.start_time,
         ts.end_time,
@@ -886,18 +910,23 @@ const ownerController = {
 
       const params = [ownerId];
 
+      // Add arena_id filter if provided
+      if (arena_id) {
+        query += " AND a.arena_id = ?";
+        params.push(arena_id);
+      }
+
       if (status && status !== "all") {
         query += " AND b.status = ?";
         params.push(status);
       }
 
-      // Filter by booking type - MODIFIED THIS SECTION
+      // Filter by booking type
       if (type === "upcoming") {
-        query += " AND b.status IN ('accepted', 'pending')"; // Keep even if time has passed
-      } else if (type === "past") {
+        query += " AND b.status IN ('accepted', 'pending')";
+      } else if (type === "history") {
         query += " AND b.status IN ('completed', 'cancelled', 'rejected')";
       } else if (type === "history") {
-        // Show all except pending/accepted (these are in upcoming)
         query += " AND b.status IN ('completed', 'cancelled', 'rejected')";
       }
 
@@ -913,14 +942,16 @@ const ownerController = {
 
       query += " ORDER BY ts.date ASC, ts.start_time ASC";
 
+      console.log("Executing query with params:", params);
       const [bookings] = await pool.execute(query, params);
+
+      console.log(`Found ${bookings.length} bookings`);
       res.json(bookings);
     } catch (error) {
-      console.error(error);
+      console.error("Error in getOwnerBookings:", error);
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
-
   // Accept a booking request
   acceptBooking: async (req, res) => {
     const connection = await pool.getConnection();
@@ -1908,38 +1939,44 @@ const ownerController = {
   },
 
   // In ownerController.js - Update addManager
+  // In ownerController.js - Update addManager with logs
+
   addManager: async (req, res) => {
     try {
-      const { name, email, password, phone_number, permissions } = req.body;
+      const { name, email, password, phone_number, arena_permissions } = req.body;
+      const owner_id = req.user.id;
 
-      // Simple validation - only allow the 4 simplified permissions
-      const allowedPermissions = [
-        'view_financials',
-        'manage_bookings',
-        'manage_calendar',
-        'manage_arena'
-      ];
-
-      // Filter out any invalid permissions
-      const cleanPermissions = {};
-      if (permissions) {
-        allowedPermissions.forEach(perm => {
-          if (permissions[perm]) cleanPermissions[perm] = true;
-        });
-      }
+      console.log("=".repeat(50));
+      console.log("📝 ADD MANAGER REQUEST");
+      console.log("Owner ID:", owner_id);
+      console.log("Name:", name);
+      console.log("Email:", email);
+      console.log("Phone:", phone_number);
+      console.log("Arena Permissions received:", JSON.stringify(arena_permissions, null, 2));
 
       // Check if manager already exists
       const [existingManager] = await pool.execute(
         "SELECT manager_id FROM arena_managers WHERE email = ? AND owner_id = ?",
-        [email, req.user.id]
+        [email, owner_id]
       );
 
       if (existingManager.length > 0) {
+        console.log("❌ Manager already exists");
         return res.status(400).json({ message: "Manager already exists" });
       }
 
       // Hash password
       const hashedPassword = await bcrypt.hash(password, 10);
+
+      // Transform arena_permissions array into nested object
+      const permissionsObj = {};
+      if (arena_permissions && Array.isArray(arena_permissions)) {
+        arena_permissions.forEach(ap => {
+          permissionsObj[`arena_${ap.arena_id}`] = ap.permissions || {};
+        });
+      }
+
+      console.log("📦 Transformed permissions object:", JSON.stringify(permissionsObj, null, 2));
 
       // Insert manager
       const [result] = await pool.execute(
@@ -1947,29 +1984,27 @@ const ownerController = {
        (owner_id, name, email, password_hash, phone_number, permissions)
        VALUES (?, ?, ?, ?, ?, ?)`,
         [
-          req.user.id,
+          owner_id,
           name,
           email,
           hashedPassword,
           phone_number,
-          JSON.stringify(cleanPermissions),
+          JSON.stringify(permissionsObj),
         ]
       );
+
+      console.log("✅ Manager inserted with ID:", result.insertId);
+      console.log("=".repeat(50));
 
       res.status(201).json({
         message: "Manager added successfully",
         manager_id: result.insertId,
       });
     } catch (error) {
-      console.error(error);
+      console.error("❌ Error adding manager:", error);
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
-
-  // Add this to ownerController.js
-
-  // Delete manager permanently
-  // Add this to ownerController.js - Delete manager permanently
   deleteManager: async (req, res) => {
     try {
       const { manager_id } = req.params;
@@ -2419,44 +2454,85 @@ const ownerController = {
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
-  // Get all managers
-  // Update this existing function in ownerController.js
   getManagers: async (req, res) => {
     try {
+      console.log("=".repeat(50));
+      console.log("📋 FETCHING MANAGERS");
+      console.log("🔑 User from token:", req.user);
+      console.log("Owner ID from token:", req.user.id);
+
+      // Get managers for this specific owner
       const [managers] = await pool.execute(
         `SELECT * FROM arena_managers 
-       WHERE owner_id = ? 
-         AND email NOT LIKE 'deleted_%'  -- Exclude soft-deleted managers
-       ORDER BY created_at DESC`,
+       WHERE owner_id = ?`,
         [req.user.id]
       );
 
-      res.json(managers);
+      console.log(`Found ${managers.length} managers for owner_id ${req.user.id}`);
+
+      if (managers.length === 0) {
+        console.log("❌ No managers found for this owner");
+        console.log("=".repeat(50));
+        return res.json([]);
+      }
+
+      // Get all arenas for this owner
+      const [arenas] = await pool.execute(
+        "SELECT arena_id, name FROM arenas WHERE owner_id = ?",
+        [req.user.id]
+      );
+
+      const arenaMap = {};
+      arenas.forEach(arena => {
+        arenaMap[arena.arena_id] = arena.name;
+      });
+
+      // Process each manager
+      const processedManagers = managers.map(manager => {
+        let permissions = {};
+        try {
+          permissions = JSON.parse(manager.permissions) || {};
+        } catch (e) {
+          permissions = {};
+        }
+
+        // Convert to array format
+        const arenaPermissions = [];
+        Object.keys(permissions).forEach(key => {
+          if (key.startsWith('arena_')) {
+            const arenaId = parseInt(key.replace('arena_', ''));
+            arenaPermissions.push({
+              arena_id: arenaId,
+              arena_name: arenaMap[arenaId] || `Arena ${arenaId}`,
+              permissions: permissions[key]
+            });
+          }
+        });
+
+        return {
+          ...manager,
+          permissions: permissions,
+          arena_permissions: arenaPermissions
+        };
+      });
+
+      console.log(`✅ Returning ${processedManagers.length} processed managers`);
+      console.log("=".repeat(50));
+
+      // 🔥 IMPORTANT: Send the response!
+      res.json(processedManagers);
+
     } catch (error) {
-      console.error(error);
+      console.error("Error fetching managers:", error);
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
-  // In ownerController.js - Update updateManager
+  // In ownerController.js - REPLACE your existing updateManager function
+
   updateManager: async (req, res) => {
     try {
       const { manager_id } = req.params;
-      const { permissions, is_active } = req.body;
-
-      // Filter to only allowed permissions
-      const allowedPermissions = [
-        'view_financials',
-        'manage_bookings',
-        'manage_calendar',
-        'manage_arena'
-      ];
-
-      const cleanPermissions = {};
-      if (permissions) {
-        allowedPermissions.forEach(perm => {
-          if (permissions[perm]) cleanPermissions[perm] = true;
-        });
-      }
+      const { arena_permissions, is_active } = req.body;
 
       // Verify owner owns this manager
       const [managerCheck] = await pool.execute(
@@ -2473,9 +2549,15 @@ const ownerController = {
       const updateFields = [];
       const values = [];
 
-      if (permissions) {
+      // 🔥 Handle arena-specific permissions update
+      if (arena_permissions) {
+        const permissionsObj = {};
+        arena_permissions.forEach(ap => {
+          permissionsObj[`arena_${ap.arena_id}`] = ap.permissions || {};
+        });
+
         updateFields.push("permissions = ?");
-        values.push(JSON.stringify(cleanPermissions));
+        values.push(JSON.stringify(permissionsObj));
       }
 
       if (is_active !== undefined) {
@@ -2494,9 +2576,11 @@ const ownerController = {
         values
       );
 
-      res.json({ message: "Manager updated successfully" });
+      res.json({
+        message: "Manager updated successfully",
+      });
     } catch (error) {
-      console.error(error);
+      console.error("Error updating manager:", error);
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },

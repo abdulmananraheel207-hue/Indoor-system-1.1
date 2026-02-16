@@ -1,4 +1,4 @@
-// File: OwnerHome.jsx - UPDATED with selectedArena prop
+// File: OwnerHome.jsx - UPDATED with proper arena filtering
 import React, { useState, useEffect } from "react";
 
 const OwnerHome = ({
@@ -7,7 +7,7 @@ const OwnerHome = ({
   refreshStats,
   isOwner,
   permissions = {},
-  selectedArena = null // 🔥 Add selectedArena prop with default null
+  selectedArena = null
 }) => {
   // 🔥 FIX: Handle both owner and manager data structures
   const [stats, setStats] = useState(() => {
@@ -27,8 +27,13 @@ const OwnerHome = ({
     }
   });
 
-  // 🔥 NEW: Filtered stats for selected arena
-  const [filteredStats, setFilteredStats] = useState({});
+  // 🔥 NEW: State for arena-specific stats
+  const [arenaSpecificStats, setArenaSpecificStats] = useState({
+    today_bookings: 0,
+    today_revenue: 0,
+    monthly_revenue: 0,
+    pending_requests_count: 0
+  });
 
   const [recentActivity, setRecentActivity] = useState(
     userData?.pending_requests || userData?.pending_bookings || []
@@ -39,16 +44,101 @@ const OwnerHome = ({
   // Permission checks
   const canViewFinancial = isOwner || permissions.view_financials;
   const canManageBookings = isOwner || permissions.manage_bookings;
-
-  // 🔥 FIX: For managers, if they have manage_bookings, they can view bookings
   const canViewBookings = canManageBookings;
+
+  // 🔥 DEBUG: Update arena-specific stats when selectedArena changes or stats update
+  useEffect(() => {
+    console.log("🔍 DEBUG: selectedArena changed:", selectedArena);
+    console.log("🔍 DEBUG: userData:", userData);
+    console.log("🔍 DEBUG: userData.arena_stats:", userData?.arena_stats);
+
+    if (!selectedArena) {
+      console.log("📊 No arena selected, using global stats");
+      setArenaSpecificStats({
+        today_bookings: stats.today_bookings || 0,
+        today_revenue: stats.today_revenue || 0,
+        monthly_revenue: stats.monthly_revenue || 0,
+        pending_requests_count: stats.pending_requests_count || 0
+      });
+      return;
+    }
+
+    // Try to get arena-specific stats from userData.arena_stats
+    if (userData?.arena_stats && Array.isArray(userData.arena_stats)) {
+      console.log("📊 arena_stats array:", userData.arena_stats);
+
+      const arenaStat = userData.arena_stats.find(
+        stat => {
+          console.log("Comparing:", stat.arena_id, "vs", selectedArena.arena_id);
+          return stat.arena_id === selectedArena.arena_id;
+        }
+      );
+
+      if (arenaStat) {
+        console.log("✅ Found arena-specific stats:", arenaStat);
+        console.log("📊 arenaStat fields:", Object.keys(arenaStat));
+
+        setArenaSpecificStats({
+          today_bookings: arenaStat.today_bookings || 0,
+          today_revenue: arenaStat.today_revenue || 0,
+          monthly_revenue: arenaStat.total_revenue || 0,
+          pending_requests_count: arenaStat.pending_bookings || 0
+        });
+        return;
+      } else {
+        console.log("❌ No matching arena stat found for ID:", selectedArena.arena_id);
+      }
+    } else {
+      console.log("❌ No arena_stats in userData or not an array");
+    }
+
+    // If no arena-specific stats, use filtered pending requests count
+    if (userData?.pending_requests) {
+      const arenaPending = userData.pending_requests.filter(
+        req => req.arena_id === selectedArena.arena_id
+      ).length;
+      console.log(`📊 Found ${arenaPending} pending requests for this arena`);
+
+      setArenaSpecificStats(prev => ({
+        ...prev,
+        pending_requests_count: arenaPending
+      }));
+    } else {
+      // Fallback to global stats
+      console.log("📊 Falling back to global stats");
+      setArenaSpecificStats({
+        today_bookings: stats.today_bookings || 0,
+        today_revenue: stats.today_revenue || 0,
+        monthly_revenue: stats.monthly_revenue || 0,
+        pending_requests_count: stats.pending_requests_count || 0
+      });
+    }
+  }, [selectedArena, userData, stats]);
+
+  // 🔥 NEW: Filter pending requests by selected arena
+  useEffect(() => {
+    if (!userData) return;
+
+    let pendingItems = userData.pending_requests || userData.pending_bookings || [];
+
+    if (selectedArena && pendingItems.length > 0) {
+      const filtered = pendingItems.filter(item =>
+        item.arena_id === selectedArena.arena_id ||
+        item.arenaId === selectedArena.arena_id ||
+        item.arena?.id === selectedArena.arena_id
+      );
+      console.log(`📋 Filtered ${filtered.length} pending requests for arena ${selectedArena.arena_id}`);
+      setRecentActivity(filtered);
+    } else {
+      setRecentActivity(pendingItems);
+    }
+  }, [selectedArena, userData]);
 
   useEffect(() => {
     if (userData) {
       // Handle different API response structures
       if (isOwner) {
         setStats(userData.dashboard || {});
-        setRecentActivity(userData.pending_requests || []);
       } else {
         // Manager dashboard response structure
         setStats({
@@ -60,52 +150,9 @@ const OwnerHome = ({
           total_arenas: userData?.arenas?.length || 0,
           ...userData?.stats
         });
-        setRecentActivity(userData.pending_requests || userData.pending_bookings || []);
       }
     }
   }, [userData, isOwner]);
-
-  // 🔥 NEW: Filter stats when selectedArena changes
-  useEffect(() => {
-    if (selectedArena && userData?.arena_stats) {
-      // Filter stats for selected arena
-      const arenaStat = userData.arena_stats.find(
-        stat => stat.arena_id === selectedArena.arena_id
-      );
-
-      if (arenaStat) {
-        setFilteredStats({
-          today_bookings: arenaStat.today_bookings || 0,
-          today_revenue: arenaStat.today_revenue || 0,
-          monthly_revenue: arenaStat.monthly_revenue || 0,
-          pending_requests_count: arenaStat.pending_count || 0
-        });
-      } else {
-        // If no specific stats for this arena, use general stats
-        setFilteredStats(stats);
-      }
-    } else {
-      // No arena selected, use general stats
-      setFilteredStats(stats);
-    }
-  }, [selectedArena, userData, stats]);
-
-  // 🔥 NEW: Filter pending requests by selected arena
-  useEffect(() => {
-    if (selectedArena && userData?.pending_requests) {
-      const filteredRequests = userData.pending_requests.filter(
-        request => request.arena_id === selectedArena.arena_id
-      );
-      setRecentActivity(filteredRequests);
-    } else if (selectedArena && userData?.pending_bookings) {
-      const filteredRequests = userData.pending_bookings.filter(
-        request => request.arena_id === selectedArena.arena_id
-      );
-      setRecentActivity(filteredRequests);
-    } else {
-      setRecentActivity(userData?.pending_requests || userData?.pending_bookings || []);
-    }
-  }, [selectedArena, userData]);
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat("en-PK", {
@@ -169,23 +216,12 @@ const OwnerHome = ({
           prev.filter((b) => b.booking_id !== bookingId)
         );
 
-        const updatedStats = {
-          ...(selectedArena ? filteredStats : stats),
-          pending_requests_count: Math.max(((selectedArena ? filteredStats.pending_requests_count : stats.pending_requests_count) || 1) - 1, 0),
-          today_bookings: ((selectedArena ? filteredStats.today_bookings : stats.today_bookings) || 0) + 1
-        };
-
-        if (selectedArena) {
-          setFilteredStats(updatedStats);
-        } else {
-          setStats(updatedStats);
-        }
-
-        const statsToSave = {
-          ...updatedStats,
-          lastUpdated: new Date().toISOString()
-        };
-        localStorage.setItem('dashboardStats', JSON.stringify(statsToSave));
+        // Update arena-specific stats
+        setArenaSpecificStats(prev => ({
+          ...prev,
+          pending_requests_count: Math.max(prev.pending_requests_count - 1, 0),
+          today_bookings: prev.today_bookings + 1
+        }));
 
         alert("✅ Booking accepted successfully!");
 
@@ -236,22 +272,11 @@ const OwnerHome = ({
           prev.filter((b) => b.booking_id !== bookingId)
         );
 
-        const updatedStats = {
-          ...(selectedArena ? filteredStats : stats),
-          pending_requests_count: Math.max(((selectedArena ? filteredStats.pending_requests_count : stats.pending_requests_count) || 1) - 1, 0)
-        };
-
-        if (selectedArena) {
-          setFilteredStats(updatedStats);
-        } else {
-          setStats(updatedStats);
-        }
-
-        const statsToSave = {
-          ...updatedStats,
-          lastUpdated: new Date().toISOString()
-        };
-        localStorage.setItem('dashboardStats', JSON.stringify(statsToSave));
+        // Update arena-specific stats
+        setArenaSpecificStats(prev => ({
+          ...prev,
+          pending_requests_count: Math.max(prev.pending_requests_count - 1, 0)
+        }));
 
         alert("✅ Booking rejected successfully");
 
@@ -302,8 +327,8 @@ const OwnerHome = ({
     return "Manager Dashboard";
   };
 
-  // Determine which stats to display
-  const displayStats = selectedArena ? filteredStats : stats;
+  // 🔥 Determine which stats to display - use arena-specific stats when arena is selected
+  const displayStats = selectedArena ? arenaSpecificStats : stats;
 
   return (
     <div>
@@ -360,9 +385,9 @@ const OwnerHome = ({
         </div>
       )}
 
-      {/* 🔥 FIX: Stats Overview - Show today's bookings for managers too */}
+      {/* Stats Overview - Now showing arena-specific stats */}
       <div className="grid grid-cols-2 gap-3 mb-6 md:grid-cols-2 lg:grid-cols-4 md:gap-6">
-        {/* Today's Bookings - Show for everyone */}
+        {/* Today's Bookings */}
         <div className="bg-white p-4 rounded-xl shadow">
           <div className="flex items-center">
             <div className="p-2 bg-blue-100 rounded-lg mr-3">
@@ -458,7 +483,7 @@ const OwnerHome = ({
         </div>
       )}
 
-      {/* Pending Requests Section - Only if user has view_bookings or manage_bookings */}
+      {/* Pending Requests Section */}
       {(isOwner || canViewBookings || canManageBookings) && (
         <div className="bg-white rounded-xl shadow">
           <div className="p-4 border-b">
@@ -524,7 +549,6 @@ const OwnerHome = ({
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Amount
                         </th>
-                        {/* Only show Actions column if user can manage bookings */}
                         {canManageBookings && (
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Actions
@@ -580,14 +604,12 @@ const OwnerHome = ({
                               <div className="text-lg font-semibold text-gray-900">
                                 {formatCurrency(booking.total_amount)}
                               </div>
-                              {/* Only show commission for owners or managers with financial permission */}
                               {(isOwner || canViewFinancial) && booking.commission_amount > 0 && (
                                 <div className="text-xs text-gray-500">
                                   Commission: {formatCurrency(booking.commission_amount)}
                                 </div>
                               )}
                             </td>
-                            {/* Only show Actions column if user can manage bookings */}
                             {canManageBookings && (
                               <td className="px-4 py-3">
                                 <div className="flex space-x-2">
@@ -692,7 +714,6 @@ const OwnerHome = ({
                           )}
                         </div>
 
-                        {/* Only show action buttons if user can manage bookings */}
                         {canManageBookings && (
                           <div className="pt-3 border-t">
                             <div className="flex flex-col space-y-2">
@@ -727,7 +748,6 @@ const OwnerHome = ({
             )}
           </div>
 
-          {/* Footer note - Role specific */}
           <div className="px-4 py-3 bg-gray-50 border-t text-center">
             <p className="text-xs text-gray-500">
               {canManageBookings
@@ -739,7 +759,7 @@ const OwnerHome = ({
         </div>
       )}
 
-      {/* Quick Tips - Role specific */}
+      {/* Quick Tips */}
       <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
         <div className="flex">
           <svg className="w-5 h-5 text-blue-600 mt-0.5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -751,7 +771,6 @@ const OwnerHome = ({
             </p>
             <ul className="mt-1 text-xs text-blue-700 space-y-1">
               {isOwner ? (
-                // Owner tips
                 <>
                   <li>• Accept bookings promptly to confirm reservations</li>
                   <li>• Reject bookings if the time slot is unavailable</li>
@@ -764,7 +783,6 @@ const OwnerHome = ({
                   )}
                 </>
               ) : (
-                // Manager tips based on permissions
                 <>
                   {canManageBookings && <li>• You can accept and reject booking requests</li>}
                   {canViewBookings && <li>• View all bookings in the "Bookings" tab</li>}

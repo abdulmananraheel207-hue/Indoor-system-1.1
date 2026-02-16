@@ -1,11 +1,10 @@
-// File: OwnerArenaSettings.jsx - FIXED for manager data format
+// File: OwnerArenaSettings.jsx - UPDATED (removed duplicate arena selector)
 import React, { useState, useEffect } from "react";
 import { ownerAPI } from "../../services/api";
-import { integrationService } from "../../services/integrationService";
 
-const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
+const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {}, selectedArena = null }) => {
   const [arenas, setArenas] = useState([]);
-  const [selectedArena, setSelectedArena] = useState("");
+  // 🔥 Use selectedArena from props directly
   const [courts, setCourts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [uploadingPhotos, setUploadingPhotos] = useState({});
@@ -26,8 +25,7 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
     sports: [],
   });
 
-  // In OwnerArenaSettings.jsx
-  const canViewArena = isOwner || permissions.manage_arena; // Management implies viewing
+  const canViewArena = isOwner || permissions.manage_arena;
   const canManageArena = isOwner || permissions.manage_arena;
   const canUploadPhotos = isOwner || permissions.manage_arena;
 
@@ -42,37 +40,25 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
     { id: 8, name: "Table Tennis", icon: "🏓" },
   ];
 
+  // Update arenas from dashboardData
   useEffect(() => {
-    // Handle both owner and manager dashboard data formats
     if (dashboardData?.arenas) {
       setArenas(dashboardData.arenas);
-
-      // 🔥 Use selectedArena prop if provided
-      if (selectedArena) {
-        setSelectedArena(selectedArena.arena_id);
-      } else if (dashboardData.arenas.length > 0 && !selectedArena) {
-        setSelectedArena(dashboardData.arenas[0].arena_id);
-      }
     } else if (dashboardData?.data?.arenas) {
-      // Alternative format
       setArenas(dashboardData.data.arenas);
-
-      if (selectedArena) {
-        setSelectedArena(selectedArena.arena_id);
-      } else if (dashboardData.data.arenas.length > 0 && !selectedArena) {
-        setSelectedArena(dashboardData.data.arenas[0].arena_id);
-      }
     }
-  }, [dashboardData, selectedArena]);
+  }, [dashboardData]);
 
+  // Fetch courts when selected arena changes
   useEffect(() => {
-    if (selectedArena && (canViewArena || canManageArena)) {
+    if (selectedArena?.arena_id && (canViewArena || canManageArena)) {
       fetchCourts();
     }
   }, [selectedArena, canViewArena, canManageArena]);
 
   const fetchCourts = async () => {
     if (!canViewArena && !canManageArena) return;
+    if (!selectedArena) return;
 
     try {
       const token = localStorage.getItem("token");
@@ -81,12 +67,11 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
       let courtsData = [];
 
       if (userRole === "owner") {
-        const response = await ownerAPI.getCourts(selectedArena);
+        const response = await ownerAPI.getCourts(selectedArena.arena_id);
         courtsData = response.data || [];
       } else {
-        // Manager endpoint for courts
         const response = await fetch(
-          `http://localhost:5000/api/managers/courts/${selectedArena}`,
+          `http://localhost:5000/api/managers/courts/${selectedArena.arena_id}`,
           {
             headers: { Authorization: `Bearer ${token}` }
           }
@@ -95,18 +80,14 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
         courtsData = data || [];
       }
 
-      // 🔥 FIX: Process courts data to ensure sports_names is always an array
       const processedCourts = courtsData.map(court => ({
         ...court,
-        // Ensure sports_names is always an array
         sports_names: Array.isArray(court.sports_names)
           ? court.sports_names
           : (court.sports_names ? [court.sports_names] : []),
-        // Ensure sports is always an array
         sports: Array.isArray(court.sports)
           ? court.sports
           : (court.sports ? [court.sports] : []),
-        // Ensure images is always an array
         images: Array.isArray(court.images) ? court.images : []
       }));
 
@@ -129,7 +110,6 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
       size_sqft: court.size_sqft || "",
       price_per_hour: court.price_per_hour || "",
       description: court.description || "",
-      // Ensure sports is an array
       sports: Array.isArray(court.sports) ? court.sports : [],
     });
   };
@@ -155,7 +135,6 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
           sports: courtForm.sports,
         });
       } else {
-        // Manager endpoint for updating court
         await fetch(
           `http://localhost:5000/api/managers/courts/${editCourt.court_id}`,
           {
@@ -198,7 +177,7 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
       const userRole = localStorage.getItem("userRole");
 
       if (userRole === "owner") {
-        await ownerAPI.addCourt(selectedArena, {
+        await ownerAPI.addCourt(selectedArena.arena_id, {
           court_name: newCourtForm.court_name,
           size_sqft: newCourtForm.size_sqft,
           price_per_hour: newCourtForm.price_per_hour,
@@ -206,9 +185,8 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
           sports: newCourtForm.sports,
         });
       } else {
-        // Manager endpoint for adding court
         await fetch(
-          `http://localhost:5000/api/managers/arenas/${selectedArena}/courts`,
+          `http://localhost:5000/api/managers/arenas/${selectedArena.arena_id}/courts`,
           {
             method: "POST",
             headers: {
@@ -244,7 +222,6 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
     }
   };
 
-  // ===== PHOTO UPLOAD FUNCTION =====
   const handlePhotoUpload = async (courtId) => {
     if (!canUploadPhotos) {
       alert("❌ You don't have permission to upload photos");
@@ -285,13 +262,10 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
         setUploadingPhotos({ ...uploadingPhotos, [courtId]: true });
 
         try {
-          // 🔥 FIX: Use different endpoints based on user role
           let endpoint;
           if (userRole === "owner") {
             endpoint = `http://localhost:5000/api/owners/courts/${courtId}/photos`;
           } else {
-            // For managers, check if there's a manager endpoint for photos
-            // If not, you might need to create one in your backend
             endpoint = `http://localhost:5000/api/managers/courts/${courtId}/photos`;
           }
 
@@ -313,34 +287,7 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
               fetchCourts();
             }, 500);
           } else {
-            // If manager endpoint fails, try owner endpoint as fallback
-            if (userRole === "manager" && response.status === 403) {
-              console.log("⚠️ Manager upload failed, trying owner endpoint as fallback...");
-
-              const fallbackResponse = await fetch(
-                `http://localhost:5000/api/owners/courts/${courtId}/photos`,
-                {
-                  method: 'POST',
-                  headers: {
-                    'Authorization': `Bearer ${token}`,
-                  },
-                  body: formData,
-                }
-              );
-
-              const fallbackResult = await fallbackResponse.json();
-
-              if (fallbackResponse.ok) {
-                alert(`✅ Upload successful!\n${fallbackResult.message}\nPhotos: ${fallbackResult.count}`);
-                setTimeout(() => {
-                  fetchCourts();
-                }, 500);
-              } else {
-                alert(`❌ Upload failed: ${fallbackResult.message || result.message}`);
-              }
-            } else {
-              alert(`❌ Upload failed: ${result.message}`);
-            }
+            alert(`❌ Upload failed: ${result.message}`);
           }
         } catch (error) {
           console.error("💥 Upload error:", error);
@@ -358,8 +305,6 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
     }
   };
 
-  // In OwnerArenaSettings.jsx - Update handleDeletePhoto function
-
   const handleDeletePhoto = async (courtId, photo) => {
     if (!canUploadPhotos) {
       alert("❌ You don't have permission to delete photos");
@@ -376,7 +321,6 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
       if (userRole === "owner") {
         endpoint = `http://localhost:5000/api/owners/courts/${courtId}/photos/${photo.image_id}`;
       } else {
-        // Managers use manager endpoint
         endpoint = `http://localhost:5000/api/managers/courts/${courtId}/photos/${photo.image_id}`;
       }
 
@@ -394,7 +338,7 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
 
       if (response.ok) {
         alert("✅ Photo deleted successfully");
-        fetchCourts(); // Refresh the courts list
+        fetchCourts();
       } else {
         alert(`❌ Failed to delete photo: ${result.message}`);
       }
@@ -403,6 +347,7 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
       alert("Failed to delete photo");
     }
   };
+
   const toggleSport = (sportId, formType = "edit") => {
     if (formType === "edit") {
       const isSelected = courtForm.sports.includes(sportId);
@@ -426,7 +371,6 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
   const getCourtPhotos = (court) => {
     const photos = [];
 
-    // Handle different photo data structures
     if (court.images && Array.isArray(court.images) && court.images.length > 0) {
       court.images.forEach((img) => {
         photos.push({
@@ -440,7 +384,6 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
       return photos;
     }
 
-    // Handle legacy format
     if (court.primary_image) {
       photos.push({
         path: court.primary_image,
@@ -460,9 +403,7 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
     return photos;
   };
 
-  // 🔥 SAFE RENDERING FUNCTION for sports names
   const renderSportsNames = (sports_names) => {
-    // Handle different data formats safely
     if (!sports_names) return null;
 
     if (Array.isArray(sports_names)) {
@@ -476,7 +417,6 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
       ));
     }
 
-    // If it's a string, render as single item
     if (typeof sports_names === 'string') {
       return (
         <span className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded">
@@ -488,7 +428,6 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
     return null;
   };
 
-  // If user doesn't have permission to view arena settings
   if (!canViewArena && !canManageArena) {
     return (
       <div className="bg-white rounded-xl shadow p-8 text-center">
@@ -499,8 +438,19 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
         <p className="mt-1 text-sm text-gray-500">
           You don't have permission to view arena settings.
         </p>
-        <p className="mt-2 text-xs text-gray-400">
-          Required permission: view_arena or manage_arena
+      </div>
+    );
+  }
+
+  if (!selectedArena) {
+    return (
+      <div className="bg-white rounded-xl shadow p-8 text-center">
+        <svg className="w-16 h-16 mx-auto text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+        </svg>
+        <h3 className="mt-4 text-lg font-medium text-gray-900">No Arena Selected</h3>
+        <p className="mt-1 text-sm text-gray-500">
+          Please select an arena from the dropdown above to manage court settings.
         </p>
       </div>
     );
@@ -512,6 +462,11 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
         <div>
           <h1 className="text-xl font-bold text-gray-900 md:text-2xl">
             Arena & Court Settings
+            {selectedArena && (
+              <span className="ml-2 text-sm font-normal text-blue-600">
+                • {selectedArena.name}
+              </span>
+            )}
           </h1>
           {!isOwner && (
             <p className="text-sm text-gray-600 mt-1">
@@ -521,42 +476,38 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
             </p>
           )}
         </div>
+        {canManageArena && (
+          <button
+            onClick={() => setShowAddCourt(true)}
+            className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700"
+          >
+            + Add Court
+          </button>
+        )}
       </div>
 
+      {/* Courts Summary */}
       <div className="bg-white p-4 rounded-xl shadow mb-4 md:p-6 md:mb-6">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between">
+        <div className="flex items-center justify-between">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Select Arena
-            </label>
-            <select
-              value={selectedArena}
-              onChange={(e) => setSelectedArena(e.target.value)}
-              className="w-full md:w-64 px-3 py-2 text-sm md:text-base border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-            >
-              {arenas.map((arena) => (
-                <option key={arena.arena_id} value={arena.arena_id}>
-                  {arena.name}
-                </option>
-              ))}
-            </select>
+            <p className="text-sm text-gray-600">
+              Managing courts for <span className="font-semibold">{selectedArena.name}</span>
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              {courts.length} court{courts.length !== 1 ? "s" : ""} found
+            </p>
           </div>
-          <div className="flex items-center space-x-3 mt-4 md:mt-0">
-            <div className="text-sm text-gray-600">
-              {courts.length} court{courts.length !== 1 ? "s" : ""}
-            </div>
-            {canManageArena && (
-              <button
-                onClick={() => setShowAddCourt(true)}
-                className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700"
-              >
-                + Add Court
-              </button>
+          <div className="text-sm text-gray-600">
+            {selectedArena.address && (
+              <span className="text-gray-500 truncate max-w-xs">
+                📍 {selectedArena.address.substring(0, 50)}...
+              </span>
             )}
           </div>
         </div>
       </div>
 
+      {/* Courts List */}
       <div className="bg-white rounded-xl shadow overflow-hidden">
         <div className="p-4 border-b bg-gray-50 md:p-6">
           <h2 className="text-lg font-medium text-gray-900">
@@ -613,7 +564,6 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
                           {court.description || "No description provided."}
                         </p>
 
-                        {/* 🔥 FIXED: Safely render sports names */}
                         {court.sports_names && (
                           <div className="mt-3">
                             <span className="text-xs font-bold text-gray-400 uppercase">
@@ -662,47 +612,40 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
                       {/* PHOTO GALLERY */}
                       {courtPhotos.length > 0 ? (
                         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                          {courtPhotos.map((photo, index) => {
-                            // 🔥 Managers with manage_arena can delete ANY photo
-                            // No need to check who uploaded it
+                          {courtPhotos.map((photo, index) => (
+                            <div key={photo.image_id || index} className="relative group">
+                              <img
+                                src={photo.image_url || photo.path}
+                                alt={`Court ${court.court_name} - ${index + 1}`}
+                                className="w-full h-40 object-cover rounded-lg shadow-sm border border-gray-200"
+                                onError={(e) => {
+                                  e.target.src = "https://via.placeholder.com/300x200?text=Image+Error";
+                                }}
+                              />
+                              <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100">
+                                {photo.is_primary && (
+                                  <span className="absolute top-2 left-2 px-2 py-1 bg-blue-600 text-white text-xs rounded">
+                                    Primary
+                                  </span>
+                                )}
 
-                            return (
-                              <div key={photo.image_id || index} className="relative group">
-                                <img
-                                  src={photo.image_url || photo.path}
-                                  alt={`Court ${court.court_name} - ${index + 1}`}
-                                  className="w-full h-40 object-cover rounded-lg shadow-sm border border-gray-200"
-                                  onError={(e) => {
-                                    e.target.src = "https://via.placeholder.com/300x200?text=Image+Error";
-                                  }}
-                                />
-                                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100">
-                                  {photo.is_primary && (
-                                    <span className="absolute top-2 left-2 px-2 py-1 bg-blue-600 text-white text-xs rounded">
-                                      Primary
-                                    </span>
-                                  )}
+                                {photo.uploaded_by_manager_id && (
+                                  <span className="absolute top-2 right-2 px-2 py-1 bg-purple-600 text-white text-xs rounded">
+                                    Manager Upload
+                                  </span>
+                                )}
 
-                                  {/* Show uploader badge if available (for info only) */}
-                                  {photo.uploaded_by_manager_id && (
-                                    <span className="absolute top-2 right-2 px-2 py-1 bg-purple-600 text-white text-xs rounded">
-                                      Manager Upload
-                                    </span>
-                                  )}
-
-                                  {/* 🔥 Delete button for ALL photos if user has manage_arena permission */}
-                                  {canUploadPhotos && (
-                                    <button
-                                      onClick={() => handleDeletePhoto(court.court_id, photo)}
-                                      className="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
-                                    >
-                                      Delete
-                                    </button>
-                                  )}
-                                </div>
+                                {canUploadPhotos && (
+                                  <button
+                                    onClick={() => handleDeletePhoto(court.court_id, photo)}
+                                    className="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
+                                  >
+                                    Delete
+                                  </button>
+                                )}
                               </div>
-                            );
-                          })}
+                            </div>
+                          ))}
                         </div>
                       ) : (
                         <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl p-8 text-center">
@@ -732,7 +675,7 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
         </div>
       </div>
 
-      {/* Edit Court Modal - Only for users with manage_arena permission */}
+      {/* Edit Court Modal */}
       {canManageArena && editCourt && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden">
@@ -877,7 +820,7 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {} }) => {
         </div>
       )}
 
-      {/* Add Court Modal - Only for users with manage_arena permission */}
+      {/* Add Court Modal */}
       {canManageArena && showAddCourt && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden">

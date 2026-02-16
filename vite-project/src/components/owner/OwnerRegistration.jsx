@@ -1,4 +1,6 @@
-import React, { useState } from "react";
+// OwnerRegistration.jsx - Updated version
+
+import React, { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import PhoneInput from 'react-phone-number-input';
 import 'react-phone-number-input/style.css';
@@ -10,13 +12,12 @@ const OwnerRegistration = () => {
     const [error, setError] = useState("");
     const [currentArenaIndex, setCurrentArenaIndex] = useState(0);
 
-    // Define stepTitles at the top before any usage
     const stepTitles = [
         "Owner Information",
         "Number of Arenas",
         "Arena Details",
-        "Sports Selection",
-        "Operating Hours",
+        "Court Configuration", // Changed from "Sports Selection"
+        "Sports & Operating Hours", // Combined sports and hours
         "Review & Submit"
     ];
 
@@ -32,7 +33,7 @@ const OwnerRegistration = () => {
         // Step 2: Number of Arenas
         number_of_arenas: 1,
 
-        // Step 3: Arena Details (for multiple arenas)
+        // Step 3-5: Arena details (for multiple arenas)
         arenas: [{
             arena_name: "",
             phone_number: "",
@@ -40,9 +41,15 @@ const OwnerRegistration = () => {
             google_maps_location: "",
             description: "",
             number_of_courts: 1,
-            base_price_per_hour: 500,
+            // REMOVED base_price_per_hour from top level
+
+            // Courts configuration
             courts: [],
+
+            // Sports selection
             selected_sports: [],
+
+            // Operating hours (per arena)
             opening_time: "06:00",
             closing_time: "22:00",
             slot_duration: 60,
@@ -68,6 +75,13 @@ const OwnerRegistration = () => {
         { id: 7, name: "Football", icon: "⚽" },
         { id: 8, name: "Table Tennis", icon: "🏓" },
     ]);
+
+    // Initialize courts when number_of_courts changes
+    useEffect(() => {
+        if (formData.arenas[currentArenaIndex]) {
+            initializeCourts(currentArenaIndex);
+        }
+    }, [formData.arenas[currentArenaIndex]?.number_of_courts]);
 
     const handleInputChange = (e) => {
         const { name, value, type, checked } = e.target;
@@ -100,10 +114,23 @@ const OwnerRegistration = () => {
 
     const handleCourtChange = (arenaIndex, courtIndex, field, value) => {
         const updatedArenas = [...formData.arenas];
-        const court = updatedArenas[arenaIndex].courts[courtIndex];
+
+        if (!updatedArenas[arenaIndex].courts) {
+            updatedArenas[arenaIndex].courts = [];
+        }
+
+        if (!updatedArenas[arenaIndex].courts[courtIndex]) {
+            updatedArenas[arenaIndex].courts[courtIndex] = {
+                court_number: courtIndex + 1,
+                court_name: `Court ${courtIndex + 1}`,
+                size_sqft: 2000,
+                price_per_hour: 500,
+                description: ""
+            };
+        }
 
         updatedArenas[arenaIndex].courts[courtIndex] = {
-            ...court,
+            ...updatedArenas[arenaIndex].courts[courtIndex],
             [field]: field === 'court_number' || field === 'size_sqft' || field === 'price_per_hour'
                 ? parseFloat(value) || 0
                 : value
@@ -123,6 +150,16 @@ const OwnerRegistration = () => {
         updatedArenas[arenaIndex].selected_sports = isSelected
             ? currentSports.filter(id => id !== sportId)
             : [...currentSports, sportId];
+
+        // Also update sports for all courts if needed
+        if (updatedArenas[arenaIndex].courts && updatedArenas[arenaIndex].courts.length > 0) {
+            updatedArenas[arenaIndex].courts = updatedArenas[arenaIndex].courts.map(court => ({
+                ...court,
+                sports: isSelected
+                    ? (court.sports || []).filter(id => id !== sportId)
+                    : [...(court.sports || []), sportId]
+            }));
+        }
 
         setFormData({
             ...formData,
@@ -145,17 +182,18 @@ const OwnerRegistration = () => {
     const initializeCourts = (arenaIndex) => {
         const updatedArenas = [...formData.arenas];
         const arena = updatedArenas[arenaIndex];
-        const courts = [];
         const numCourts = parseInt(arena.number_of_courts) || 1;
+        const courts = [];
 
         for (let i = 1; i <= numCourts; i++) {
+            const existingCourt = arena.courts && arena.courts[i - 1];
             courts.push({
                 court_number: i,
-                court_name: `Court ${i}`,
-                size_sqft: 2000,
-                price_per_hour: parseFloat(arena.base_price_per_hour) || 500,
-                description: "",
-                sports: [...(arena.selected_sports || [])]
+                court_name: existingCourt?.court_name || `Court ${i}`,
+                size_sqft: existingCourt?.size_sqft || 2000,
+                price_per_hour: existingCourt?.price_per_hour || 500,
+                description: existingCourt?.description || "",
+                sports: existingCourt?.sports || (arena.selected_sports ? [...arena.selected_sports] : [])
             });
         }
 
@@ -190,14 +228,28 @@ const OwnerRegistration = () => {
                 if (!currentArena.google_maps_location?.trim()) return "Google Maps location is required";
                 if (!currentArena.description?.trim()) return "Arena description is required";
                 if (currentArena.number_of_courts < 1) return "Number of courts must be at least 1";
-                if (!currentArena.base_price_per_hour || currentArena.base_price_per_hour <= 0)
-                    return "Base price must be greater than 0";
                 return null;
 
             case 4:
+                const arenaForCourts = formData.arenas[currentArenaIndex];
+                if (!arenaForCourts.courts || arenaForCourts.courts.length === 0) {
+                    return "Please configure at least one court";
+                }
+
+                // Validate each court has required fields
+                for (let i = 0; i < arenaForCourts.courts.length; i++) {
+                    const court = arenaForCourts.courts[i];
+                    if (!court.court_name?.trim()) return `Court ${i + 1}: Court name is required`;
+                    if (!court.size_sqft || court.size_sqft <= 0) return `Court ${i + 1}: Valid size is required`;
+                    if (!court.price_per_hour || court.price_per_hour <= 0) return `Court ${i + 1}: Valid price per hour is required`;
+                }
+                return null;
+
+            case 5:
                 const arenaForSports = formData.arenas[currentArenaIndex];
-                if (!arenaForSports.selected_sports || arenaForSports.selected_sports.length === 0)
+                if (!arenaForSports.selected_sports || arenaForSports.selected_sports.length === 0) {
                     return "Select at least one sport";
+                }
                 return null;
 
             default:
@@ -226,7 +278,6 @@ const OwnerRegistration = () => {
                         google_maps_location: "",
                         description: "",
                         number_of_courts: 1,
-                        base_price_per_hour: 500,
                         courts: [],
                         selected_sports: [],
                         opening_time: "06:00",
@@ -251,10 +302,11 @@ const OwnerRegistration = () => {
         }
 
         if (step === 3) {
+            // Initialize courts when moving to court configuration step
             initializeCourts(currentArenaIndex);
         }
 
-        if (step === 4) {
+        if (step === 5) {
             // Check if we have more arenas to configure
             if (currentArenaIndex < formData.arenas.length - 1) {
                 setCurrentArenaIndex(currentArenaIndex + 1);
@@ -268,9 +320,10 @@ const OwnerRegistration = () => {
     };
 
     const prevStep = () => {
-        if (step === 3 && currentArenaIndex > 0) {
+        if (step === 4 && currentArenaIndex > 0) {
             setCurrentArenaIndex(currentArenaIndex - 1);
-        } else if (step === 4 && currentArenaIndex > 0) {
+            setStep(3);
+        } else if (step === 5 && currentArenaIndex > 0) {
             setCurrentArenaIndex(currentArenaIndex - 1);
             setStep(3);
         } else {
@@ -311,26 +364,30 @@ const OwnerRegistration = () => {
                 personal_number: formData.personal_number || null,
                 email: formData.email,
                 password: formData.password,
-                phone_number: formData.arenas[0]?.phone_number, // Use first arena's phone as owner phone
+                phone_number: formData.arenas[0]?.phone_number,
                 agreed_to_terms: formData.agreed_to_terms ? 1 : 0,
 
                 arenas: formData.arenas.map(arena => ({
                     arena_name: arena.arena_name,
-                    // REMOVED phone_number from here
                     business_address: arena.business_address,
                     google_maps_location: arena.google_maps_location || "",
                     description: arena.description || "",
                     number_of_courts: parseInt(arena.number_of_courts) || 1,
-                    base_price_per_hour: parseFloat(arena.base_price_per_hour) || 500,
-                    selected_sports: arena.selected_sports || [],
+
+                    // Courts configuration
                     courts: (arena.courts || []).map(court => ({
                         court_number: court.court_number,
                         court_name: court.court_name,
                         size_sqft: parseFloat(court.size_sqft) || 2000,
-                        price_per_hour: parseFloat(court.price_per_hour) || parseFloat(arena.base_price_per_hour) || 500,
+                        price_per_hour: parseFloat(court.price_per_hour) || 500,
                         description: court.description || "",
                         sports: court.sports || arena.selected_sports || []
                     })),
+
+                    // Sports
+                    selected_sports: arena.selected_sports || [],
+
+                    // Operating hours (per arena)
                     opening_time: arena.opening_time || "06:00",
                     closing_time: arena.closing_time || "22:00",
                     slot_duration: parseInt(arena.slot_duration) || 60,
@@ -593,20 +650,6 @@ const OwnerRegistration = () => {
                                     ))}
                                 </select>
                             </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Base Price per Hour (Rs) *
-                                </label>
-                                <input
-                                    type="number"
-                                    min="0"
-                                    value={formData.arenas[currentArenaIndex].base_price_per_hour}
-                                    onChange={(e) => handleArenaChange(currentArenaIndex, 'base_price_per_hour', parseFloat(e.target.value))}
-                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                    placeholder="500"
-                                />
-                            </div>
                         </div>
                     </div>
                 );
@@ -615,43 +658,72 @@ const OwnerRegistration = () => {
                 return formData.arenas[currentArenaIndex] && (
                     <div className="space-y-6">
                         <h2 className="text-xl font-semibold text-gray-900">
-                            Sports Selection {formData.arenas.length > 1 && `- Arena ${currentArenaIndex + 1}`}
+                            Court Configuration {formData.arenas.length > 1 && `- Arena ${currentArenaIndex + 1}`}
                         </h2>
-                        <p className="text-gray-600">Select which sports are available at this arena</p>
+                        <p className="text-gray-600">Configure details for each court. You can upload photos later.</p>
 
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                            {availableSports.map(sport => (
-                                <button
-                                    type="button"
-                                    key={sport.id}
-                                    onClick={() => handleSportToggle(currentArenaIndex, sport.id)}
-                                    className={`p-4 border-2 rounded-lg flex flex-col items-center transition-all hover:scale-105 ${formData.arenas[currentArenaIndex].selected_sports?.includes(sport.id)
-                                        ? 'border-blue-500 bg-blue-50'
-                                        : 'border-gray-200 hover:border-gray-300'
-                                        }`}
-                                >
-                                    <span className="text-3xl mb-2">{sport.icon}</span>
-                                    <span className="text-sm font-medium">{sport.name}</span>
-                                </button>
-                            ))}
-                        </div>
+                        {formData.arenas[currentArenaIndex].courts &&
+                            formData.arenas[currentArenaIndex].courts.map((court, courtIndex) => (
+                                <div key={courtIndex} className="p-4 border border-gray-200 rounded-lg mb-4">
+                                    <h3 className="font-medium text-gray-900 mb-3">Court {courtIndex + 1}</h3>
 
-                        {formData.arenas[currentArenaIndex].selected_sports?.length > 0 && (
-                            <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-                                <h4 className="font-medium text-blue-900 mb-2">Selected Sports:</h4>
-                                <div className="flex flex-wrap gap-2">
-                                    {formData.arenas[currentArenaIndex].selected_sports.map(sportId => {
-                                        const sport = availableSports.find(s => s.id === sportId);
-                                        return sport ? (
-                                            <span key={sportId} className="px-3 py-1 bg-white border border-blue-200 rounded-full text-sm flex items-center">
-                                                <span className="mr-2">{sport.icon}</span>
-                                                {sport.name}
-                                            </span>
-                                        ) : null;
-                                    })}
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                Court Name *
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={court.court_name}
+                                                onChange={(e) => handleCourtChange(currentArenaIndex, courtIndex, 'court_name', e.target.value)}
+                                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                placeholder="e.g., Main Court, VIP Court"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                Size (square feet) *
+                                            </label>
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                value={court.size_sqft}
+                                                onChange={(e) => handleCourtChange(currentArenaIndex, courtIndex, 'size_sqft', e.target.value)}
+                                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                placeholder="e.g., 2000"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                Price per Hour (Rs) *
+                                            </label>
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                value={court.price_per_hour}
+                                                onChange={(e) => handleCourtChange(currentArenaIndex, courtIndex, 'price_per_hour', e.target.value)}
+                                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                placeholder="e.g., 500"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                Description (Optional)
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={court.description}
+                                                onChange={(e) => handleCourtChange(currentArenaIndex, courtIndex, 'description', e.target.value)}
+                                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                placeholder="Any special features?"
+                                            />
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
-                        )}
+                            ))}
                     </div>
                 );
 
@@ -659,99 +731,125 @@ const OwnerRegistration = () => {
                 return formData.arenas[currentArenaIndex] && (
                     <div className="space-y-6">
                         <h2 className="text-xl font-semibold text-gray-900">
-                            Operating Hours {formData.arenas.length > 1 && `- Arena ${currentArenaIndex + 1}`}
+                            Sports & Operating Hours {formData.arenas.length > 1 && `- Arena ${currentArenaIndex + 1}`}
                         </h2>
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Opening Time
-                                </label>
-                                <select
-                                    value={formData.arenas[currentArenaIndex].opening_time}
-                                    onChange={(e) => handleArenaChange(currentArenaIndex, 'opening_time', e.target.value)}
-                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg"
-                                >
-                                    {Array.from({ length: 12 }, (_, i) => {
-                                        const hour = i + 6;
-                                        const time = `${hour.toString().padStart(2, '0')}:00`;
-                                        return <option key={time} value={time}>{time}</option>;
-                                    })}
-                                </select>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Closing Time
-                                </label>
-                                <select
-                                    value={formData.arenas[currentArenaIndex].closing_time}
-                                    onChange={(e) => handleArenaChange(currentArenaIndex, 'closing_time', e.target.value)}
-                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg"
-                                >
-                                    {Array.from({ length: 12 }, (_, i) => {
-                                        const hour = i + 12;
-                                        const time = `${hour.toString().padStart(2, '0')}:00`;
-                                        return <option key={time} value={time}>{time}</option>;
-                                    })}
-                                </select>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Slot Duration
-                                </label>
-                                <select
-                                    value={formData.arenas[currentArenaIndex].slot_duration}
-                                    onChange={(e) => handleArenaChange(currentArenaIndex, 'slot_duration', parseInt(e.target.value))}
-                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg"
-                                >
-                                    <option value="60">1 hour</option>
-                                    <option value="90">1.5 hours</option>
-                                    <option value="120">2 hours</option>
-                                </select>
-                            </div>
-                        </div>
-
+                        {/* Sports Selection */}
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-3">
-                                Available Days
-                            </label>
-                            <div className="grid grid-cols-3 md:grid-cols-7 gap-2">
-                                {Object.keys(formData.arenas[currentArenaIndex].days_available).map(day => (
-                                    <div key={day} className="flex flex-col items-center">
-                                        <label className="text-sm font-medium text-gray-700 capitalize mb-2">
-                                            {day.substring(0, 3)}
-                                        </label>
-                                        <input
-                                            type="checkbox"
-                                            checked={formData.arenas[currentArenaIndex].days_available[day]}
-                                            onChange={(e) => handleDaysChange(currentArenaIndex, day, e.target.checked)}
-                                            className="h-5 w-5 text-blue-600 rounded focus:ring-blue-500"
-                                        />
-                                    </div>
+                            <h3 className="font-medium text-gray-900 mb-3">Select Sports *</h3>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                {availableSports.map(sport => (
+                                    <button
+                                        type="button"
+                                        key={sport.id}
+                                        onClick={() => handleSportToggle(currentArenaIndex, sport.id)}
+                                        className={`p-4 border-2 rounded-lg flex flex-col items-center transition-all hover:scale-105 ${formData.arenas[currentArenaIndex].selected_sports?.includes(sport.id)
+                                                ? 'border-blue-500 bg-blue-50'
+                                                : 'border-gray-200 hover:border-gray-300'
+                                            }`}
+                                    >
+                                        <span className="text-3xl mb-2">{sport.icon}</span>
+                                        <span className="text-sm font-medium">{sport.name}</span>
+                                    </button>
                                 ))}
                             </div>
                         </div>
 
-                        <div className="p-4 bg-gray-50 rounded-lg">
-                            <h4 className="font-medium text-gray-900 mb-2">Time Slots Preview:</h4>
-                            <div className="text-sm text-gray-600 space-y-1">
-                                <p><strong>Days:</strong> {Object.keys(formData.arenas[currentArenaIndex].days_available)
-                                    .filter(day => formData.arenas[currentArenaIndex].days_available[day])
-                                    .map(day => day.charAt(0).toUpperCase() + day.slice(1))
-                                    .join(', ')}
-                                </p>
-                                <p><strong>Hours:</strong> {formData.arenas[currentArenaIndex].opening_time} to {formData.arenas[currentArenaIndex].closing_time}</p>
-                                <p><strong>Slot Duration:</strong> {formData.arenas[currentArenaIndex].slot_duration / 60} hour(s)</p>
-                                <div className="mt-2">
-                                    <p className="font-medium">Generated Slots:</p>
-                                    <div className="flex flex-wrap gap-1 mt-1">
-                                        {generateTimeSlotsPreview(currentArenaIndex).map((slot, index) => (
-                                            <span key={index} className="px-2 py-1 bg-white border border-gray-200 rounded text-xs">
-                                                {slot}
-                                            </span>
-                                        ))}
+                        {/* Operating Hours */}
+                        <div className="mt-8">
+                            <h3 className="font-medium text-gray-900 mb-3">Operating Hours</h3>
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        Opening Time
+                                    </label>
+                                    <select
+                                        value={formData.arenas[currentArenaIndex].opening_time}
+                                        onChange={(e) => handleArenaChange(currentArenaIndex, 'opening_time', e.target.value)}
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+                                    >
+                                        {Array.from({ length: 12 }, (_, i) => {
+                                            const hour = i + 6;
+                                            const time = `${hour.toString().padStart(2, '0')}:00`;
+                                            return <option key={time} value={time}>{time}</option>;
+                                        })}
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        Closing Time
+                                    </label>
+                                    <select
+                                        value={formData.arenas[currentArenaIndex].closing_time}
+                                        onChange={(e) => handleArenaChange(currentArenaIndex, 'closing_time', e.target.value)}
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+                                    >
+                                        {Array.from({ length: 12 }, (_, i) => {
+                                            const hour = i + 12;
+                                            const time = `${hour.toString().padStart(2, '0')}:00`;
+                                            return <option key={time} value={time}>{time}</option>;
+                                        })}
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        Slot Duration
+                                    </label>
+                                    <select
+                                        value={formData.arenas[currentArenaIndex].slot_duration}
+                                        onChange={(e) => handleArenaChange(currentArenaIndex, 'slot_duration', parseInt(e.target.value))}
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+                                    >
+                                        <option value="60">1 hour</option>
+                                        <option value="90">1.5 hours</option>
+                                        <option value="120">2 hours</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div className="mt-4">
+                                <label className="block text-sm font-medium text-gray-700 mb-3">
+                                    Available Days
+                                </label>
+                                <div className="grid grid-cols-3 md:grid-cols-7 gap-2">
+                                    {Object.keys(formData.arenas[currentArenaIndex].days_available).map(day => (
+                                        <div key={day} className="flex flex-col items-center">
+                                            <label className="text-sm font-medium text-gray-700 capitalize mb-2">
+                                                {day.substring(0, 3)}
+                                            </label>
+                                            <input
+                                                type="checkbox"
+                                                checked={formData.arenas[currentArenaIndex].days_available[day]}
+                                                onChange={(e) => handleDaysChange(currentArenaIndex, day, e.target.checked)}
+                                                className="h-5 w-5 text-blue-600 rounded focus:ring-blue-500"
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+                                <h4 className="font-medium text-gray-900 mb-2">Time Slots Preview:</h4>
+                                <div className="text-sm text-gray-600 space-y-1">
+                                    <p><strong>Days:</strong> {Object.keys(formData.arenas[currentArenaIndex].days_available)
+                                        .filter(day => formData.arenas[currentArenaIndex].days_available[day])
+                                        .map(day => day.charAt(0).toUpperCase() + day.slice(1))
+                                        .join(', ')}
+                                    </p>
+                                    <p><strong>Hours:</strong> {formData.arenas[currentArenaIndex].opening_time} to {formData.arenas[currentArenaIndex].closing_time}</p>
+                                    <p><strong>Slot Duration:</strong> {formData.arenas[currentArenaIndex].slot_duration / 60} hour(s)</p>
+                                    <div className="mt-2">
+                                        <p className="font-medium">Generated Slots:</p>
+                                        <div className="flex flex-wrap gap-1 mt-1">
+                                            {generateTimeSlotsPreview(currentArenaIndex).map((slot, index) => (
+                                                <span key={index} className="px-2 py-1 bg-white border border-gray-200 rounded text-xs">
+                                                    {slot}
+                                                </span>
+                                            ))}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -782,10 +880,24 @@ const OwnerRegistration = () => {
                                     <div className="grid grid-cols-2 gap-2 text-sm mb-2">
                                         <div><span className="text-gray-500">Business Phone:</span> {arena.phone_number}</div>
                                         <div><span className="text-gray-500">Courts:</span> {arena.number_of_courts}</div>
-                                        <div><span className="text-gray-500">Base Price:</span> Rs{arena.base_price_per_hour}/hour</div>
+                                        <div className="col-span-2"><span className="text-gray-500">Address:</span> {arena.business_address}</div>
                                     </div>
 
-                                    <p className="text-sm text-gray-600"><span className="text-gray-500">Address:</span> {arena.business_address}</p>
+                                    <div className="mt-3">
+                                        <span className="text-gray-500 text-sm">Courts:</span>
+                                        <div className="mt-1 space-y-2">
+                                            {arena.courts && arena.courts.map((court, courtIdx) => (
+                                                <div key={courtIdx} className="bg-gray-50 p-2 rounded text-sm">
+                                                    <div className="font-medium">{court.court_name}</div>
+                                                    <div className="grid grid-cols-3 gap-2 mt-1 text-xs">
+                                                        <div>Size: {court.size_sqft} sq ft</div>
+                                                        <div>Price: Rs{court.price_per_hour}/hr</div>
+                                                        {court.description && <div className="col-span-3">{court.description}</div>}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
 
                                     <div className="mt-2">
                                         <span className="text-gray-500 text-sm">Sports:</span>

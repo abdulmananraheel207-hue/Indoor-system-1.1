@@ -1,4 +1,4 @@
-// File: OwnerDashboard.jsx - UPDATED with Arena Selector
+// File: OwnerDashboard.jsx - UPDATED with better arena handling
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import OwnerHome from "./OwnerHome";
@@ -9,14 +9,13 @@ import OwnerProfile from "./OwnerProfile";
 import OwnerArenaSettings from "./OwnerArenaSettings";
 import ArenaSelector from "./ArenaSelector";
 
-// 🔥 FIX: Updated permission mapping - dashboard is ALWAYS accessible
 const TAB_PERMISSIONS = {
-  home: null, // Always accessible for both owner and manager
+  home: null,
   bookings: "manage_bookings",
   calendar: "manage_calendar",
   arenasettings: "manage_arena",
-  managers: null, // Managers should NEVER see this tab
-  profile: null,  // Profile is always accessible
+  managers: null,
+  profile: null,
 };
 
 const OwnerDashboard = () => {
@@ -30,18 +29,25 @@ const OwnerDashboard = () => {
     return savedStats ? JSON.parse(savedStats) : null;
   });
 
-  // 🔥 NEW: Selected arena state
-  const [selectedArena, setSelectedArena] = useState(null);
+  // 🔥 IMPROVED: Selected arena state with better handling
+  const [selectedArena, setSelectedArena] = useState(() => {
+    const savedArena = localStorage.getItem('selectedArena');
+    return savedArena ? JSON.parse(savedArena) : null;
+  });
 
-  // Detect user role from localStorage
   const userRole = localStorage.getItem("userRole");
   const isOwner = userRole === "owner";
   const isManager = userRole === "manager";
 
-  // Get permissions based on role
+  // Save selected arena to localStorage whenever it changes
+  useEffect(() => {
+    if (selectedArena) {
+      localStorage.setItem('selectedArena', JSON.stringify(selectedArena));
+    }
+  }, [selectedArena]);
+
   const getPermissions = () => {
     if (isOwner) {
-      // Owners have ALL permissions
       return {
         view_financials: true,
         manage_bookings: true,
@@ -49,7 +55,6 @@ const OwnerDashboard = () => {
         manage_arena: true,
       };
     } else if (isManager) {
-      // Get manager permissions from stored user data
       const userDataStr = localStorage.getItem("userData");
       if (userDataStr) {
         try {
@@ -66,25 +71,16 @@ const OwnerDashboard = () => {
 
   const permissions = getPermissions();
 
-  // Check if current tab is accessible
   const canAccessTab = (tab) => {
-    if (isOwner) return true; // Owners can access everything
-
-    // 🔥 FIX: Dashboard (home) is ALWAYS accessible for managers
+    if (isOwner) return true;
     if (tab === "home") return true;
-
-    // Managers: NEVER see managers tab
     if (tab === "managers") return false;
-
-    // Profile always accessible
     if (tab === "profile") return true;
 
-    // Check permission for other tabs
     const requiredPermission = TAB_PERMISSIONS[tab];
     return requiredPermission ? permissions[requiredPermission] || false : true;
   };
 
-  // Get available tabs based on role/permissions
   const getAvailableTabs = () => {
     const allTabs = [
       { id: "home", label: "Dashboard", icon: "📊" },
@@ -101,9 +97,7 @@ const OwnerDashboard = () => {
   const availableTabs = getAvailableTabs();
 
   useEffect(() => {
-    // Redirect if trying to access unauthorized tab
     if (!canAccessTab(currentTab)) {
-      // Find first available tab (always at least "home" and "profile")
       const firstAvailable = availableTabs[0]?.id || "profile";
       setCurrentTab(firstAvailable);
     }
@@ -112,7 +106,6 @@ const OwnerDashboard = () => {
   useEffect(() => {
     fetchUserData();
 
-    // Refresh data every 30 seconds
     const interval = setInterval(() => {
       if (currentTab === "home") {
         fetchUserData();
@@ -120,7 +113,6 @@ const OwnerDashboard = () => {
     }, 30000);
 
     return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentTab, userRole]);
 
   const fetchUserData = async () => {
@@ -129,7 +121,6 @@ const OwnerDashboard = () => {
       const token = localStorage.getItem("token");
       let endpoint = "";
 
-      // Different endpoints based on role
       if (isOwner) {
         endpoint = "http://localhost:5000/api/owners/dashboard";
       } else if (isManager) {
@@ -149,7 +140,6 @@ const OwnerDashboard = () => {
       if (response.ok) {
         setUserData(data);
 
-        // Save stats based on response structure
         let statsToSave = null;
 
         if (isOwner && data.dashboard) {
@@ -169,16 +159,27 @@ const OwnerDashboard = () => {
           setDashboardStats(statsToSave);
         }
 
-        // 🔥 Auto-select first arena if available
-        if (data.arenas && data.arenas.length > 0 && !selectedArena) {
-          setSelectedArena(data.arenas[0]);
+        // 🔥 IMPROVED: Handle arena selection
+        if (data.arenas && data.arenas.length > 0) {
+          // Check if previously selected arena still exists
+          if (selectedArena) {
+            const stillExists = data.arenas.some(a => a.arena_id === selectedArena.arena_id);
+            if (!stillExists) {
+              // Previously selected arena no longer exists, select first available
+              setSelectedArena(data.arenas[0]);
+            }
+          } else {
+            // No arena selected, select first one
+            setSelectedArena(data.arenas[0]);
+          }
+        } else {
+          setSelectedArena(null);
         }
       } else if (response.status === 401) {
         handleLogout();
       }
     } catch (error) {
       console.error("Error fetching user data:", error);
-      // Use cached stats if available
       if (dashboardStats) {
         console.log("Using cached dashboard stats");
         setUserData(prev => ({
@@ -198,6 +199,7 @@ const OwnerDashboard = () => {
     localStorage.removeItem("ownerData");
     localStorage.removeItem("managerData");
     localStorage.removeItem('dashboardStats');
+    localStorage.removeItem('selectedArena'); // 🔥 Clear selected arena
     navigate("/");
   };
 
@@ -211,7 +213,7 @@ const OwnerDashboard = () => {
       } else if (isManager && permissions.view_financials) {
         endpoint = "http://localhost:5000/api/managers/stats?period=month";
       } else {
-        return; // No permission to view stats
+        return;
       }
 
       const response = await fetch(endpoint, {
@@ -251,7 +253,12 @@ const OwnerDashboard = () => {
     }
   };
 
-  // Get display name based on role
+  const handleArenaChange = (arena) => {
+    setSelectedArena(arena);
+    // Refresh data when arena changes
+    fetchUserData();
+  };
+
   const getDisplayName = () => {
     if (isOwner) {
       return userData?.owner_name || "Arena Owner";
@@ -270,12 +277,6 @@ const OwnerDashboard = () => {
     return "User";
   };
 
-  // Handle arena change
-  const handleArenaChange = (arena) => {
-    setSelectedArena(arena);
-    // Pass to child components via props or context
-  };
-
   if (loading || !userData) {
     return (
       <div className="min-h-screen flex justify-center items-center">
@@ -289,11 +290,9 @@ const OwnerDashboard = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
       <header className="bg-white shadow-sm">
         <div className="px-4 py-4">
           <div className="flex items-center justify-between">
-            {/* Mobile menu button */}
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="md:hidden p-2 rounded-md text-gray-700 hover:bg-gray-100"
@@ -320,7 +319,6 @@ const OwnerDashboard = () => {
               {isOwner ? "Arena Owner Portal" : "Arena Manager Portal"}
             </button>
 
-            {/* Desktop navigation */}
             <div className="hidden md:flex items-center space-x-4">
               <span className="text-gray-600">
                 {displayName}
@@ -330,7 +328,6 @@ const OwnerDashboard = () => {
                 </span>
               </span>
 
-              {/* Only show refresh button if user has permission to view stats */}
               {(isOwner || permissions.view_financials) && (
                 <button
                   onClick={refreshStats}
@@ -349,7 +346,6 @@ const OwnerDashboard = () => {
               </button>
             </div>
 
-            {/* Mobile logout button */}
             <button
               onClick={handleLogout}
               className="md:hidden px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
@@ -358,8 +354,8 @@ const OwnerDashboard = () => {
             </button>
           </div>
 
-          {/* 🔥 NEW: Arena Selector for Multi-Arena Support */}
-          {userData?.arenas && userData.arenas.length > 1 && (
+          {/* 🔥 IMPROVED: Arena Selector with better visibility */}
+          {userData?.arenas && userData.arenas.length > 0 && (
             <div className="mt-4">
               <ArenaSelector
                 arenas={userData.arenas}
@@ -369,7 +365,6 @@ const OwnerDashboard = () => {
             </div>
           )}
 
-          {/* Mobile Navigation Menu */}
           {mobileMenuOpen && (
             <div className="md:hidden mt-4 pb-4 border-t">
               <div className="flex flex-col space-y-2 pt-4">
@@ -419,7 +414,6 @@ const OwnerDashboard = () => {
             </div>
           )}
 
-          {/* Desktop Navigation */}
           <div className="hidden md:flex mt-4 space-x-2">
             {availableTabs.map((tab) => (
               <button
@@ -441,7 +435,6 @@ const OwnerDashboard = () => {
         </div>
       </header>
 
-      {/* Main Content - Pass selectedArena to child components */}
       <main className="px-3 py-6 md:px-4 md:py-8 max-w-7xl mx-auto">
         {currentTab === "home" && (
           <OwnerHome
@@ -450,14 +443,14 @@ const OwnerDashboard = () => {
             refreshStats={refreshStats}
             isOwner={isOwner}
             permissions={permissions}
-            selectedArena={selectedArena} // 🔥 Pass selected arena
+            selectedArena={selectedArena}
           />
         )}
         {currentTab === "bookings" && (
           <OwnerBookings
             isOwner={isOwner}
             permissions={permissions}
-            selectedArena={selectedArena} // 🔥 Pass selected arena
+            selectedArena={selectedArena}
           />
         )}
         {currentTab === "calendar" && (
@@ -465,7 +458,7 @@ const OwnerDashboard = () => {
             arenas={userData?.arenas || []}
             isOwner={isOwner}
             permissions={permissions}
-            selectedArena={selectedArena} // 🔥 Pass selected arena
+            selectedArena={selectedArena}
           />
         )}
         {currentTab === "arenasettings" && (
@@ -473,7 +466,7 @@ const OwnerDashboard = () => {
             dashboardData={userData}
             isOwner={isOwner}
             permissions={permissions}
-            selectedArena={selectedArena} // 🔥 Pass selected arena
+            selectedArena={selectedArena}
           />
         )}
         {currentTab === "managers" && isOwner && (
