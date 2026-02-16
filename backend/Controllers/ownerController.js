@@ -1938,8 +1938,7 @@ const ownerController = {
     }
   },
 
-  // In ownerController.js - Update addManager
-  // In ownerController.js - Update addManager with logs
+  // In ownerController.js - REPLACE your addManager function with this
 
   addManager: async (req, res) => {
     try {
@@ -1954,6 +1953,21 @@ const ownerController = {
       console.log("Phone:", phone_number);
       console.log("Arena Permissions received:", JSON.stringify(arena_permissions, null, 2));
 
+      // Validate required fields
+      if (!name || !email || !password) {
+        return res.status(400).json({
+          success: false,
+          message: "Name, email, and password are required"
+        });
+      }
+
+      if (!arena_permissions || arena_permissions.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: "At least one arena with permissions is required"
+        });
+      }
+
       // Check if manager already exists
       const [existingManager] = await pool.execute(
         "SELECT manager_id FROM arena_managers WHERE email = ? AND owner_id = ?",
@@ -1962,33 +1976,49 @@ const ownerController = {
 
       if (existingManager.length > 0) {
         console.log("❌ Manager already exists");
-        return res.status(400).json({ message: "Manager already exists" });
+        return res.status(400).json({
+          success: false,
+          message: "Manager with this email already exists"
+        });
       }
 
       // Hash password
       const hashedPassword = await bcrypt.hash(password, 10);
 
-      // Transform arena_permissions array into nested object
+      // ✅ FIXED: Build permissions object with arena-specific permissions
       const permissionsObj = {};
-      if (arena_permissions && Array.isArray(arena_permissions)) {
+
+      if (Array.isArray(arena_permissions)) {
         arena_permissions.forEach(ap => {
-          permissionsObj[`arena_${ap.arena_id}`] = ap.permissions || {};
+          // Make sure arena_id exists
+          if (!ap.arena_id) {
+            console.warn("Skipping arena permission without arena_id:", ap);
+            return;
+          }
+
+          // Store permissions for this specific arena
+          permissionsObj[`arena_${ap.arena_id}`] = {
+            view_financials: ap.permissions?.view_financials === true,
+            manage_bookings: ap.permissions?.manage_bookings === true,
+            manage_calendar: ap.permissions?.manage_calendar === true,
+            manage_arena: ap.permissions?.manage_arena === true
+          };
         });
       }
 
-      console.log("📦 Transformed permissions object:", JSON.stringify(permissionsObj, null, 2));
+      console.log("📦 Final permissions object to store:", JSON.stringify(permissionsObj, null, 2));
 
-      // Insert manager
+      // Insert manager with is_active explicitly set to 1
       const [result] = await pool.execute(
         `INSERT INTO arena_managers 
-       (owner_id, name, email, password_hash, phone_number, permissions)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+       (owner_id, name, email, password_hash, phone_number, permissions, is_active, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, NOW())`,
         [
           owner_id,
           name,
           email,
           hashedPassword,
-          phone_number,
+          phone_number || null,
           JSON.stringify(permissionsObj),
         ]
       );
@@ -1996,13 +2026,28 @@ const ownerController = {
       console.log("✅ Manager inserted with ID:", result.insertId);
       console.log("=".repeat(50));
 
+      // Return the created manager data
       res.status(201).json({
+        success: true,
         message: "Manager added successfully",
         manager_id: result.insertId,
+        manager: {
+          manager_id: result.insertId,
+          name,
+          email,
+          phone_number,
+          is_active: 1,
+          permissions: permissionsObj
+        }
       });
+
     } catch (error) {
       console.error("❌ Error adding manager:", error);
-      res.status(500).json({ message: "Server error", error: error.message });
+      res.status(500).json({
+        success: false,
+        message: "Server error while adding manager",
+        error: error.message
+      });
     }
   },
   deleteManager: async (req, res) => {
@@ -2014,7 +2059,7 @@ const ownerController = {
 
       // First verify this manager exists and belongs to this owner
       const [managerCheck] = await pool.execute(
-        `SELECT manager_id, name, email, is_active 
+        `SELECT manager_id, name, email 
        FROM arena_managers 
        WHERE manager_id = ? AND owner_id = ?`,
         [manager_id, owner_id]
@@ -2031,13 +2076,9 @@ const ownerController = {
       const manager = managerCheck[0];
       console.log(`✅ Found manager: ${manager.name} (${manager.email})`);
 
-      // SOFT DELETE - Since you don't have deleted_at column, just deactivate
-      // This keeps the record but prevents login
+      // HARD DELETE - Permanently remove from database
       const [deleteResult] = await pool.execute(
-        `UPDATE arena_managers 
-       SET 
-         is_active = 0,
-         email = CONCAT('deleted_', manager_id, '_', email) -- Make email unique for future reuse
+        `DELETE FROM arena_managers 
        WHERE manager_id = ? AND owner_id = ?`,
         [manager_id, owner_id]
       );
@@ -2063,26 +2104,14 @@ const ownerController = {
 
     } catch (error) {
       console.error("💥 Error deleting manager:", error);
-
-      // Handle specific database errors
-      if (error.code === 'ER_DUP_ENTRY') {
-        return res.status(400).json({
-          success: false,
-          message: "Error deleting manager. Please try again."
-        });
-      }
-
       res.status(500).json({
         success: false,
         message: "Server error while deleting manager",
-        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        error: error.message
       });
     }
   },
 
-  // In ownerController.js - Add updateManagerCredentials function
-
-  // Update manager credentials (name, email, phone, password)
   updateManagerCredentials: async (req, res) => {
     try {
       const { manager_id } = req.params;
@@ -2107,6 +2136,7 @@ const ownerController = {
 
       if (managerCheck.length === 0) {
         return res.status(404).json({
+          success: false,
           message: "Manager not found or access denied"
         });
       }
@@ -2121,7 +2151,7 @@ const ownerController = {
       }
 
       if (email) {
-        // Check if email is already taken by another manager
+        // Check if email is already taken by another manager under this owner
         const [emailCheck] = await pool.execute(
           `SELECT manager_id FROM arena_managers 
          WHERE email = ? AND manager_id != ? AND owner_id = ?`,
@@ -2130,6 +2160,7 @@ const ownerController = {
 
         if (emailCheck.length > 0) {
           return res.status(400).json({
+            success: false,
             message: "Email already in use by another manager"
           });
         }
@@ -2150,13 +2181,18 @@ const ownerController = {
       }
 
       if (updateFields.length === 0) {
-        return res.status(400).json({ message: "No fields to update" });
+        return res.status(400).json({
+          success: false,
+          message: "No fields to update"
+        });
       }
 
       values.push(manager_id);
 
       await pool.execute(
-        `UPDATE arena_managers SET ${updateFields.join(", ")} WHERE manager_id = ?`,
+        `UPDATE arena_managers 
+       SET ${updateFields.join(", ")} 
+       WHERE manager_id = ?`,
         values
       );
 
@@ -2166,13 +2202,15 @@ const ownerController = {
       });
 
     } catch (error) {
-      console.error("Error updating manager credentials:", error);
+      console.error("❌ Error updating manager credentials:", error);
       res.status(500).json({
-        message: "Server error",
+        success: false,
+        message: "Server error while updating manager credentials",
         error: error.message
       });
     }
   },
+  // If you have this function, update it too
   getTimeSlotsForDate: async (req, res) => {
     try {
       const { arena_id } = req.params;
@@ -2189,25 +2227,17 @@ const ownerController = {
       );
 
       if (arenaCheck.length === 0) {
-        return res
-          .status(404)
-          .json({ message: "Arena not found or access denied" });
+        return res.status(404).json({ message: "Arena not found or access denied" });
       }
 
-      // Build query based on whether court_id is provided
+      // ✅ FIXED: Remove opening_time and closing_time references
       let query = `
       SELECT ts.*, 
         b.booking_id,
         b.status as booking_status,
         u.name as booked_by,
         cd.court_number,
-        cd.court_name,
-        CASE 
-          WHEN b.booking_id IS NOT NULL THEN FALSE
-          WHEN ts.is_blocked_by_owner = TRUE THEN FALSE
-          WHEN ts.is_holiday = TRUE THEN FALSE
-          ELSE TRUE
-        END as is_available_display
+        cd.court_name
       FROM time_slots ts
       LEFT JOIN court_details cd ON ts.court_id = cd.court_id
       LEFT JOIN bookings b ON ts.slot_id = b.slot_id AND b.status IN ('pending', 'accepted', 'completed')
@@ -2217,7 +2247,6 @@ const ownerController = {
 
       const params = [arena_id, date];
 
-      // Filter by court_id if provided
       if (court_id) {
         query += " AND ts.court_id = ?";
         params.push(court_id);
@@ -2226,7 +2255,6 @@ const ownerController = {
       query += " ORDER BY cd.court_number, ts.start_time";
 
       const [slots] = await pool.execute(query, params);
-
       res.json(slots);
     } catch (error) {
       console.error(error);
@@ -2454,64 +2482,89 @@ const ownerController = {
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
+  // In ownerController.js - REPLACE your getManagers function
+
   getManagers: async (req, res) => {
     try {
-      console.log("=".repeat(50));
-      console.log("📋 FETCHING MANAGERS");
-      console.log("🔑 User from token:", req.user);
-      console.log("Owner ID from token:", req.user.id);
+      const owner_id = req.user.id;
 
-      // Get managers for this specific owner
+      console.log("=".repeat(50));
+      console.log("📋 FETCHING MANAGERS FOR OWNER:", owner_id);
+
+      // Get all managers for this owner
       const [managers] = await pool.execute(
-        `SELECT * FROM arena_managers 
-       WHERE owner_id = ?`,
-        [req.user.id]
+        `SELECT manager_id, owner_id, name, email, phone_number, 
+              permissions, is_active, created_at
+       FROM arena_managers 
+       WHERE owner_id = ?
+       ORDER BY created_at DESC`,
+        [owner_id]
       );
 
-      console.log(`Found ${managers.length} managers for owner_id ${req.user.id}`);
+      console.log(`Found ${managers.length} managers`);
 
       if (managers.length === 0) {
-        console.log("❌ No managers found for this owner");
-        console.log("=".repeat(50));
         return res.json([]);
       }
 
-      // Get all arenas for this owner
+      // Get all arenas for this owner to map arena names
       const [arenas] = await pool.execute(
         "SELECT arena_id, name FROM arenas WHERE owner_id = ?",
-        [req.user.id]
+        [owner_id]
       );
 
+      // Create arena name lookup map
       const arenaMap = {};
       arenas.forEach(arena => {
         arenaMap[arena.arena_id] = arena.name;
       });
 
-      // Process each manager
+      // ✅ FIXED: Process each manager's permissions
       const processedManagers = managers.map(manager => {
-        let permissions = {};
+        let rawPermissions = {};
+
+        // Parse permissions JSON
         try {
-          permissions = JSON.parse(manager.permissions) || {};
+          rawPermissions = typeof manager.permissions === 'string'
+            ? JSON.parse(manager.permissions)
+            : (manager.permissions || {});
         } catch (e) {
-          permissions = {};
+          console.error("Error parsing permissions for manager", manager.manager_id, e);
+          rawPermissions = {};
         }
 
-        // Convert to array format
+        console.log(`Manager ${manager.manager_id} raw permissions:`, rawPermissions);
+
+        // Convert to arena_permissions array format for frontend
         const arenaPermissions = [];
-        Object.keys(permissions).forEach(key => {
+
+        Object.keys(rawPermissions).forEach(key => {
           if (key.startsWith('arena_')) {
             const arenaId = parseInt(key.replace('arena_', ''));
+            const perms = rawPermissions[key] || {};
+
             arenaPermissions.push({
               arena_id: arenaId,
               arena_name: arenaMap[arenaId] || `Arena ${arenaId}`,
-              permissions: permissions[key]
+              permissions: {
+                view_financials: perms.view_financials === true,
+                manage_bookings: perms.manage_bookings === true,
+                manage_calendar: perms.manage_calendar === true,
+                manage_arena: perms.manage_arena === true
+              }
             });
           }
         });
 
         return {
-          ...manager,
-          permissions: permissions,
+          manager_id: manager.manager_id,
+          owner_id: manager.owner_id,
+          name: manager.name,
+          email: manager.email,
+          phone_number: manager.phone_number,
+          is_active: manager.is_active === 1 || manager.is_active === true,
+          created_at: manager.created_at,
+          permissions: rawPermissions,
           arena_permissions: arenaPermissions
         };
       });
@@ -2519,41 +2572,60 @@ const ownerController = {
       console.log(`✅ Returning ${processedManagers.length} processed managers`);
       console.log("=".repeat(50));
 
-      // 🔥 IMPORTANT: Send the response!
       res.json(processedManagers);
 
     } catch (error) {
-      console.error("Error fetching managers:", error);
-      res.status(500).json({ message: "Server error", error: error.message });
+      console.error("❌ Error fetching managers:", error);
+      res.status(500).json({
+        success: false,
+        message: "Server error while fetching managers",
+        error: error.message
+      });
     }
   },
-  // In ownerController.js - REPLACE your existing updateManager function
+  // In ownerController.js - Replace your updateManager function with this
 
   updateManager: async (req, res) => {
     try {
       const { manager_id } = req.params;
       const { arena_permissions, is_active } = req.body;
+      const owner_id = req.user.id;
 
-      // Verify owner owns this manager
+      console.log("📝 Updating manager permissions:", {
+        manager_id,
+        owner_id,
+        arena_permissions,
+        is_active
+      });
+
+      // Verify manager belongs to this owner
       const [managerCheck] = await pool.execute(
         `SELECT manager_id FROM arena_managers 
        WHERE manager_id = ? AND owner_id = ?`,
-        [manager_id, req.user.id]
+        [manager_id, owner_id]
       );
 
       if (managerCheck.length === 0) {
-        return res.status(404)
-          .json({ message: "Manager not found or access denied" });
+        return res.status(404).json({
+          success: false,
+          message: "Manager not found or access denied"
+        });
       }
 
       const updateFields = [];
       const values = [];
 
-      // 🔥 Handle arena-specific permissions update
+      // ✅ FIXED: Handle arena-specific permissions update properly
       if (arena_permissions) {
         const permissionsObj = {};
+
         arena_permissions.forEach(ap => {
-          permissionsObj[`arena_${ap.arena_id}`] = ap.permissions || {};
+          permissionsObj[`arena_${ap.arena_id}`] = {
+            view_financials: ap.permissions?.view_financials || false,
+            manage_bookings: ap.permissions?.manage_bookings || false,
+            manage_calendar: ap.permissions?.manage_calendar || false,
+            manage_arena: ap.permissions?.manage_arena || false
+          };
         });
 
         updateFields.push("permissions = ?");
@@ -2562,11 +2634,14 @@ const ownerController = {
 
       if (is_active !== undefined) {
         updateFields.push("is_active = ?");
-        values.push(is_active);
+        values.push(is_active ? 1 : 0);
       }
 
       if (updateFields.length === 0) {
-        return res.status(400).json({ message: "No fields to update" });
+        return res.status(400).json({
+          success: false,
+          message: "No fields to update"
+        });
       }
 
       values.push(manager_id);
@@ -2577,11 +2652,16 @@ const ownerController = {
       );
 
       res.json({
+        success: true,
         message: "Manager updated successfully",
       });
     } catch (error) {
       console.error("Error updating manager:", error);
-      res.status(500).json({ message: "Server error", error: error.message });
+      res.status(500).json({
+        success: false,
+        message: "Server error",
+        error: error.message
+      });
     }
   },
   // Get owner profile

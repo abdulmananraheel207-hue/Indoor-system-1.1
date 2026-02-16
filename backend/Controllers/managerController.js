@@ -2,11 +2,15 @@ const pool = require("../db");
 
 const managerController = {
   // In managerController.js - Update getDashboard to return better stats
+  // In managerController.js - Update getDashboard to handle arena-specific permissions
 
   getDashboard: async (req, res) => {
     try {
       const { owner_id, permissions, id: manager_id } = req.manager;
       const today = new Date().toISOString().split("T")[0];
+
+      console.log("📊 Building dashboard for manager:", manager_id);
+      console.log("Permissions:", permissions);
 
       const dashboardData = {
         permissions: permissions,
@@ -16,44 +20,64 @@ const managerController = {
         arenas: [],
       };
 
-      // 🔥 FIX: Always fetch basic stats regardless of permissions
-      // Today's bookings count
+      // Get all arenas this manager has access to
+      const accessibleArenaIds = [];
+      Object.keys(permissions).forEach(key => {
+        if (key.startsWith('arena_')) {
+          const arenaId = parseInt(key.replace('arena_', ''));
+          accessibleArenaIds.push(arenaId);
+        }
+      });
+
+      console.log("Accessible arenas:", accessibleArenaIds);
+
+      if (accessibleArenaIds.length === 0) {
+        return res.json(dashboardData);
+      }
+
+      const placeholders = accessibleArenaIds.map(() => '?').join(',');
+
+      // Today's bookings count for accessible arenas
       const [todayBookings] = await pool.execute(
         `SELECT COUNT(*) as count 
        FROM bookings b
        JOIN arenas a ON b.arena_id = a.arena_id
-       WHERE a.owner_id = ? AND DATE(b.booking_date) = ?`,
-        [owner_id, today]
+       WHERE a.arena_id IN (${placeholders}) AND DATE(b.booking_date) = ?`,
+        [...accessibleArenaIds, today]
       );
       dashboardData.stats.today_bookings = todayBookings[0].count || 0;
 
-      // Total pending requests count
+      // Total pending requests count for accessible arenas
       const [pendingCount] = await pool.execute(
         `SELECT COUNT(*) as count 
        FROM bookings b
        JOIN arenas a ON b.arena_id = a.arena_id
-       WHERE a.owner_id = ? AND b.status = 'pending'`,
-        [owner_id]
+       WHERE a.arena_id IN (${placeholders}) AND b.status = 'pending'`,
+        accessibleArenaIds
       );
       dashboardData.stats.pending_requests_count = pendingCount[0].count || 0;
 
-      // Total arenas count
-      const [arenasCount] = await pool.execute(
-        "SELECT COUNT(*) as count FROM arenas WHERE owner_id = ? AND is_active = TRUE",
-        [owner_id]
-      );
-      dashboardData.stats.total_arenas = arenasCount[0].count || 0;
+      // Total arenas count (only accessible ones)
+      dashboardData.stats.total_arenas = accessibleArenaIds.length;
 
-      // Today's revenue if has view_financials permission
-      if (permissions.view_financials) {
+      // Check if manager has view_financials permission for ANY arena
+      let canViewFinancials = false;
+      Object.keys(permissions).forEach(key => {
+        if (key.startsWith('arena_') && permissions[key]?.view_financials) {
+          canViewFinancials = true;
+        }
+      });
+
+      if (canViewFinancials) {
+        // Today's revenue
         const [todayRevenue] = await pool.execute(
           `SELECT COALESCE(SUM(b.total_amount), 0) as revenue
          FROM bookings b
          JOIN arenas a ON b.arena_id = a.arena_id
-         WHERE a.owner_id = ? 
+         WHERE a.arena_id IN (${placeholders}) 
            AND DATE(b.booking_date) = ? 
            AND b.status = 'completed'`,
-          [owner_id, today]
+          [...accessibleArenaIds, today]
         );
         dashboardData.stats.today_revenue = todayRevenue[0].revenue || 0;
 
@@ -63,61 +87,65 @@ const managerController = {
          FROM bookings b
          JOIN arenas a ON b.arena_id = a.arena_id
          JOIN time_slots ts ON b.slot_id = ts.slot_id
-         WHERE a.owner_id = ? 
+         WHERE a.arena_id IN (${placeholders}) 
            AND MONTH(ts.date) = MONTH(CURRENT_DATE())
            AND YEAR(ts.date) = YEAR(CURRENT_DATE())
            AND b.status = 'completed'`,
-          [owner_id]
+          accessibleArenaIds
         );
         dashboardData.stats.monthly_revenue = monthlyRevenue[0].revenue || 0;
       }
 
-      // Only fetch pending requests if has manage_bookings
-      if (permissions.manage_bookings) {
+      // Check if manager has manage_bookings permission for ANY arena
+      let canManageBookings = false;
+      Object.keys(permissions).forEach(key => {
+        if (key.startsWith('arena_') && permissions[key]?.manage_bookings) {
+          canManageBookings = true;
+        }
+      });
+
+      if (canManageBookings) {
         const [pendingRequests] = await pool.execute(
           `SELECT b.*, u.name as user_name, u.phone_number as user_phone,
-                 st.name as sport_name, a.name as arena_name,
-                 ts.date, ts.start_time, ts.end_time
+                st.name as sport_name, a.name as arena_name,
+                ts.date, ts.start_time, ts.end_time
          FROM bookings b
          JOIN arenas a ON b.arena_id = a.arena_id
          JOIN users u ON b.user_id = u.user_id
          JOIN sports_types st ON b.sport_id = st.sport_id
          JOIN time_slots ts ON b.slot_id = ts.slot_id
-         WHERE a.owner_id = ? AND b.status = 'pending'
+         WHERE a.arena_id IN (${placeholders}) AND b.status = 'pending'
          ORDER BY ts.date ASC, ts.start_time ASC
          LIMIT 10`,
-          [owner_id]
+          accessibleArenaIds
         );
         dashboardData.pending_requests = pendingRequests;
-      }
 
-      // Get owner's arenas if has manage_arena
-      if (permissions.manage_arena) {
-        const [arenas] = await pool.execute(
-          "SELECT arena_id, name FROM arenas WHERE owner_id = ? AND is_active = TRUE",
-          [owner_id]
-        );
-        dashboardData.arenas = arenas;
-      }
-
-      // Get recent bookings if has manage_bookings
-      if (permissions.manage_bookings) {
         const [recentBookings] = await pool.execute(
           `SELECT b.*, u.name as user_name, st.name as sport_name,
-                 a.name as arena_name, ts.date, ts.start_time, ts.end_time
+                a.name as arena_name, ts.date, ts.start_time, ts.end_time
          FROM bookings b
          JOIN arenas a ON b.arena_id = a.arena_id
          JOIN users u ON b.user_id = u.user_id
          JOIN sports_types st ON b.sport_id = st.sport_id
          JOIN time_slots ts ON b.slot_id = ts.slot_id
-         WHERE a.owner_id = ?
+         WHERE a.arena_id IN (${placeholders})
          ORDER BY b.booking_date DESC
          LIMIT 5`,
-          [owner_id]
+          accessibleArenaIds
         );
         dashboardData.recent_bookings = recentBookings;
       }
 
+      // Get accessible arenas
+      const [arenas] = await pool.execute(
+        `SELECT arena_id, name FROM arenas 
+       WHERE arena_id IN (${placeholders}) AND is_active = TRUE`,
+        accessibleArenaIds
+      );
+      dashboardData.arenas = arenas;
+
+      console.log("✅ Dashboard data prepared");
       res.json(dashboardData);
     } catch (error) {
       console.error("Dashboard error:", error);
