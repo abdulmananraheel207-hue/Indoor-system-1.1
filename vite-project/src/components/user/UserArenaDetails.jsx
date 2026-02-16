@@ -1,4 +1,3 @@
-// UserArenaDetails.jsx - Simplified version (only show reviews, no write)
 
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
@@ -90,6 +89,14 @@ const UserArenaDetails = () => {
     try {
       setLoading(true);
       const details = await integrationService.getArenaDetails(arenaId);
+
+      // DEBUG: Log the arena data to see what sports information we're getting
+      console.log('Arena details received:', {
+        sports_list: details.sports_list,
+        sports: details.sports,
+        arena_sports: details.arena_sports,
+        court_sports: details.court_sports
+      });
 
       const transformedCourts = details.courts.map((court) => ({
         court_id: court.court_id,
@@ -801,7 +808,7 @@ const UserArenaDetails = () => {
                 </div>
               )}
 
-              {/* Sport Selection */}
+
               {sportsList && sportsList.length > 0 && (
                 <div className="mb-6">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -818,15 +825,37 @@ const UserArenaDetails = () => {
                     required
                   >
                     <option value="">-- Select a Sport --</option>
-                    {sportsList.map((sport) => (
-                      <option
-                        key={sport.sport_id || sport.id}
-                        value={sport.sport_id || sport.id}
-                      >
-                        {sport.name || sport.sport_name}
-                      </option>
-                    ))}
+
+                    {/* FILTER sports to only show what this arena offers */}
+                    {sportsList
+                      .filter(sport => {
+                        // Check if this sport is offered by the arena
+                        if (!arena?.sports_list || arena.sports_list.length === 0) {
+                          return false;
+                        }
+
+                        // Check by sport name (case insensitive)
+                        const sportName = (sport.name || sport.sport_name || '').toLowerCase();
+                        return arena.sports_list.some(arenaSport =>
+                          arenaSport.toLowerCase() === sportName
+                        );
+                      })
+                      .map((sport) => (
+                        <option
+                          key={sport.sport_id || sport.id}
+                          value={sport.sport_id || sport.id}
+                        >
+                          {sport.name || sport.sport_name}
+                        </option>
+                      ))}
                   </select>
+
+                  {/* Show message if no sports available */}
+                  {(!arena?.sports_list || arena.sports_list.length === 0) && (
+                    <p className="mt-2 text-sm text-yellow-600">
+                      No sports information available for this arena
+                    </p>
+                  )}
                 </div>
               )}
 

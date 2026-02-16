@@ -241,8 +241,8 @@ const OwnerAuth = (props) => {
             type="submit"
             disabled={loading}
             className={`w-full py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white ${loading
-                ? "bg-indigo-400 cursor-not-allowed"
-                : "bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700"
+              ? "bg-indigo-400 cursor-not-allowed"
+              : "bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700"
               } transition-all duration-200 shadow-lg`}
           >
             {loading ? "Processing..." : "Sign In to Owner Portal"}

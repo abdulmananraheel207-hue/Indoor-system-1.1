@@ -571,30 +571,33 @@ const userController = {
   },
 
 
+  // In userController.js - Update getArenaDetails function
   getArenaDetails: async (req, res) => {
     try {
       const { arena_id } = req.params;
 
       const [arenas] = await pool.execute(
         `SELECT a.*, 
-              ao.arena_name as owner_name,
-              ao.phone_number as owner_phone,
-              GROUP_CONCAT(DISTINCT st.name) as sports,
-              AVG(ar.rating) as avg_rating,
-              COUNT(ar.review_id) as total_reviews
-       FROM arenas a
-       JOIN arena_owners ao ON a.owner_id = ao.owner_id
-       LEFT JOIN arena_sports asp ON a.arena_id = asp.arena_id
-       LEFT JOIN sports_types st ON asp.sport_id = st.sport_id
-       LEFT JOIN arena_reviews ar ON a.arena_id = ar.arena_id
-       WHERE a.arena_id = ? AND a.is_active = TRUE
-       GROUP BY a.arena_id`,
+            ao.arena_name as owner_name,
+            ao.phone_number as owner_phone,
+            GROUP_CONCAT(DISTINCT st.name) as sports,
+            AVG(ar.rating) as avg_rating,
+            COUNT(ar.review_id) as total_reviews
+     FROM arenas a
+     JOIN arena_owners ao ON a.owner_id = ao.owner_id
+     LEFT JOIN arena_sports asp ON a.arena_id = asp.arena_id
+     LEFT JOIN sports_types st ON asp.sport_id = st.sport_id
+     LEFT JOIN arena_reviews ar ON a.arena_id = ar.arena_id
+     WHERE a.arena_id = ? AND a.is_active = TRUE
+     GROUP BY a.arena_id`,
         [arena_id]
       );
 
       if (arenas.length === 0) {
         return res.status(404).json({ message: "Arena not found" });
       }
+
+      const arena = arenas[0];
 
       // Get arena images
       const [images] = await pool.execute(
@@ -605,13 +608,13 @@ const userController = {
       // Get all courts for this arena WITH IMAGES
       const [courts] = await pool.execute(
         `SELECT cd.*, 
-              GROUP_CONCAT(DISTINCT st.name) as sports_names
-       FROM court_details cd
-       LEFT JOIN court_sports cs ON cd.court_id = cs.court_id
-       LEFT JOIN sports_types st ON cs.sport_id = st.sport_id
-       WHERE cd.arena_id = ?
-       GROUP BY cd.court_id
-       ORDER BY cd.court_number`,
+            GROUP_CONCAT(DISTINCT st.name) as sports_names
+     FROM court_details cd
+     LEFT JOIN court_sports cs ON cd.court_id = cs.court_id
+     LEFT JOIN sports_types st ON cs.sport_id = st.sport_id
+     WHERE cd.arena_id = ?
+     GROUP BY cd.court_id
+     ORDER BY cd.court_number`,
         [arena_id]
       );
 
@@ -620,16 +623,16 @@ const userController = {
         courts.map(async (court) => {
           const [courtImages] = await pool.execute(
             `SELECT image_id, image_url, cloudinary_id, is_primary, uploaded_at
-           FROM court_images 
-           WHERE court_id = ? 
-           ORDER BY is_primary DESC, uploaded_at DESC`,
+         FROM court_images 
+         WHERE court_id = ? 
+         ORDER BY is_primary DESC, uploaded_at DESC`,
             [court.court_id]
           );
 
           return {
             ...court,
             sports: court.sports_names ? court.sports_names.split(',') : [],
-            images: courtImages || []  // Add images array to each court
+            images: courtImages || []
           };
         })
       );
@@ -637,29 +640,47 @@ const userController = {
       // Get time slots for next 7 days (all courts)
       const [slots] = await pool.execute(
         `SELECT ts.*, cd.court_name, cd.court_number,
-              b.booking_id as existing_booking_id,
-              b.status as booking_status
-       FROM time_slots ts
-       JOIN court_details cd ON ts.court_id = cd.court_id
-       LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
-         AND b.status IN ('pending', 'accepted', 'completed')
-       WHERE ts.arena_id = ? 
-         AND ts.date >= CURDATE() 
-         AND ts.date <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)
-       ORDER BY ts.date, ts.start_time`,
+            b.booking_id as existing_booking_id,
+            b.status as booking_status
+     FROM time_slots ts
+     JOIN court_details cd ON ts.court_id = cd.court_id
+     LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
+       AND b.status IN ('pending', 'accepted', 'completed')
+     WHERE ts.arena_id = ? 
+       AND ts.date >= CURDATE() 
+       AND ts.date <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)
+     ORDER BY ts.date, ts.start_time`,
         [arena_id]
       );
 
       // Get reviews
       const [reviews] = await pool.execute(
         `SELECT ar.*, u.name as user_name, u.profile_picture_url
-       FROM arena_reviews ar
-       JOIN users u ON ar.user_id = u.user_id
-       WHERE ar.arena_id = ?
-       ORDER BY ar.created_at DESC
-       LIMIT 10`,
+     FROM arena_reviews ar
+     JOIN users u ON ar.user_id = u.user_id
+     WHERE ar.arena_id = ?
+     ORDER BY ar.created_at DESC
+     LIMIT 10`,
         [arena_id]
       );
+
+      // Get ALL sports available at this arena (from arena_sports and court_sports)
+      const [arenaSports] = await pool.execute(
+        `SELECT DISTINCT st.name 
+     FROM sports_types st
+     JOIN arena_sports ars ON st.sport_id = ars.sport_id
+     WHERE ars.arena_id = ?
+     UNION
+     SELECT DISTINCT st.name 
+     FROM sports_types st
+     JOIN court_sports cs ON st.sport_id = cs.sport_id
+     JOIN court_details cd ON cs.court_id = cd.court_id
+     WHERE cd.arena_id = ?`,
+        [arena_id, arena_id]
+      );
+
+      // Create sports_list array from the query results
+      const sports_list = arenaSports.map(s => s.name);
 
       // Check if arena is in user's favorites
       let is_favorite = false;
@@ -681,13 +702,15 @@ const userController = {
         slotsByCourt[courtId].push(slot);
       });
 
+      // Send response with sports_list properly populated
       res.json({
-        ...arenas[0],
+        ...arena,
         images,
-        courts: courtsWithImages,  // Now includes images
+        courts: courtsWithImages,
         slots: slotsByCourt,
         reviews,
         is_favorite,
+        sports_list: sports_list, // Make sure this is included
       });
     } catch (error) {
       console.error(error);

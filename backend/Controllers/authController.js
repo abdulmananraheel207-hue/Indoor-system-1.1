@@ -283,7 +283,7 @@ const authController = {
     }
   },
 
-  // Login for all user types
+  // Login for all user types - FIXED with simple owner block check for managers
   login: async (req, res) => {
     try {
       const { email, password, userType } = req.body;
@@ -301,52 +301,82 @@ const authController = {
           table = "admins";
           break;
         case "manager":
-          // For managers, we need to join with owners table to check if owner is blocked
+          console.log("🔍 Manager login attempt for email:", email);
+
+          // Get manager details with owner blocking status
           const [managers] = await pool.execute(`
             SELECT 
-                m.*,
+                m.manager_id,
+                m.name,
+                m.email,
+                m.password_hash,
+                m.phone_number,
+                m.permissions,
+                m.is_active as manager_is_active,
                 o.owner_id,
                 o.arena_name as owner_name,
-                o.is_blocked as owner_is_blocked,
-                o.blocked_reason as owner_blocked_reason,
-                o.blocked_at as owner_blocked_at
+                o.is_blocked,
+                o.blocked_reason,
+                o.blocked_at
             FROM arena_managers m
-            JOIN arena_owners o ON m.owner_id = o.owner_id
-            WHERE m.email = ? AND m.is_active = TRUE
+            INNER JOIN arena_owners o ON m.owner_id = o.owner_id
+            WHERE m.email = ?
           `, [email]);
 
           if (managers.length === 0) {
-            return res.status(401).json({ message: "Invalid credentials" });
+            return res.status(401).json({
+              success: false,
+              message: "Invalid credentials"
+            });
           }
 
           user = managers[0];
 
-          // 🚫 CHECK IF OWNER IS BLOCKED FIRST
-          if (user.owner_is_blocked === 1 || user.owner_is_blocked === true) {
-            console.log('🚫 Blocked owner - manager login denied:', {
+          // CHECK 1: If the owner is blocked, deny manager access
+          // This prevents all managers from logging in when their owner is blocked
+          const ownerIsBlocked = Number(user.is_blocked) === 1;
+          if (ownerIsBlocked) {
+            console.log('🚫 Manager login denied - Owner is blocked:', {
               manager_id: user.manager_id,
+              manager_name: user.name,
               owner_id: user.owner_id,
-              owner_name: user.owner_name
+              owner_name: user.owner_name,
+              blocked_reason: user.blocked_reason
             });
 
             return res.status(403).json({
               success: false,
               message: 'OWNER_BLOCKED',
               details: {
-                reason: user.owner_blocked_reason || 'The arena owner account has been blocked',
-                blocked_date: user.owner_blocked_at ?
-                  new Date(user.owner_blocked_at).toLocaleDateString() : 'Recently',
+                reason: user.blocked_reason || 'The arena owner account has been blocked',
+                blocked_date: user.blocked_at ?
+                  new Date(user.blocked_at).toLocaleDateString() : 'Recently',
                 owner_name: user.owner_name,
                 support_email: 'support@arenafinder.com',
-                support_phone: '+92 300 1234567'
+                action_required: 'Please contact the super admin to resolve this issue.'
               }
             });
           }
 
-          // Verify password
+          // CHECK 2: Verify manager is active
+          if (user.manager_is_active != 1) {
+            console.log('❌ Manager login denied - Manager is inactive:', user.manager_id);
+            return res.status(403).json({
+              success: false,
+              message: 'MANAGER_INACTIVE',
+              details: {
+                reason: 'Your manager account has been deactivated'
+              }
+            });
+          }
+
+          // CHECK 3: Verify password
           const isValidManagerPassword = await bcrypt.compare(password, user.password_hash);
           if (!isValidManagerPassword) {
-            return res.status(401).json({ message: "Invalid credentials" });
+            return res.status(401).json({
+              success: false,
+              message: "Invalid credentials"
+            });
           }
 
           // Update last login
@@ -354,6 +384,16 @@ const authController = {
             `UPDATE arena_managers SET last_login = NOW() WHERE manager_id = ?`,
             [user.manager_id]
           );
+
+          // Parse permissions
+          let permissions = user.permissions;
+          if (typeof permissions === 'string') {
+            try {
+              permissions = JSON.parse(permissions);
+            } catch (e) {
+              permissions = {};
+            }
+          }
 
           // Generate token
           const managerToken = jwt.sign(
@@ -368,10 +408,14 @@ const authController = {
             { expiresIn: "7d" }
           );
 
-          // Remove sensitive data
-          delete user.password_hash;
+          console.log("✅ Manager login successful:", {
+            manager_id: user.manager_id,
+            name: user.name,
+            owner_name: user.owner_name
+          });
 
           return res.json({
+            success: true,
             message: "Login successful",
             token: managerToken,
             user: {
@@ -382,7 +426,7 @@ const authController = {
               role: "manager",
               owner_id: user.owner_id,
               owner_name: user.owner_name,
-              permissions: user.permissions
+              permissions: permissions || {}
             }
           });
 
@@ -401,13 +445,16 @@ const authController = {
       const [users] = await pool.execute(query, [email]);
 
       if (users.length === 0) {
-        return res.status(401).json({ message: "Invalid credentials" });
+        return res.status(401).json({
+          success: false,
+          message: "Invalid credentials"
+        });
       }
 
       user = users[0];
 
-      // CHECK IF OWNER IS BLOCKED
-      if (userType === "owner" && (user.is_blocked === 1 || user.is_blocked === true)) {
+      // CHECK IF OWNER IS BLOCKED (for owner login)
+      if (userType === "owner" && user.is_blocked == 1) {
         console.log('🚫 Blocked owner attempted login:', user.owner_id, user.email);
         return res.status(403).json({
           success: false,
@@ -424,7 +471,10 @@ const authController = {
       // Verify password
       const isValidPassword = await bcrypt.compare(password, user.password_hash);
       if (!isValidPassword) {
-        return res.status(401).json({ message: "Invalid credentials" });
+        return res.status(401).json({
+          success: false,
+          message: "Invalid credentials"
+        });
       }
 
       // Update last login for users
@@ -456,7 +506,7 @@ const authController = {
 
       const token = jwt.sign(
         tokenPayload,
-        process.env.JWT_SECRET || "09631e3f99caf686f08d48965782fcdb751c691bb08d610e51d893c300b6e694e86a3645ef38a94a414fd11f8d077292057c0ca7e94a6fb3db33cc2197891e35",
+        process.env.JWT_SECRET || "your-secret-key",
         { expiresIn: "7d" }
       );
 
@@ -492,14 +542,19 @@ const authController = {
       }
 
       res.json({
+        success: true,
         message: "Login successful",
         token,
         user: userData,
       });
 
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Server error", error: error.message });
+      console.error("Login error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Server error",
+        error: error.message
+      });
     }
   },
 
