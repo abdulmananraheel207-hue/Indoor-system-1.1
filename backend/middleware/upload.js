@@ -1,4 +1,5 @@
-// backend/middleware/upload.js - FULLY FIXED VERSION
+// backend/middleware/upload.js - Add logo upload handler
+
 const cloudinary = require("cloudinary").v2;
 const { CloudinaryStorage } = require("multer-storage-cloudinary");
 const multer = require("multer");
@@ -34,6 +35,12 @@ const getFolderName = (req, file) => {
     console.log("📍 Court Image Upload - Extracted court_id from URL:", courtId);
     return `sports-arena/courts/${courtId}`;
   }
+  // NEW: Arena logo upload
+  else if (file.fieldname === "arena_logo") {
+    // For registration, we don't have arena_id yet, so use a temporary folder
+    // The arena_id will be added after arena creation
+    return `sports-arena/arena-logos/temp`;
+  }
 
   return "sports-arena/others";
 };
@@ -65,6 +72,12 @@ const storage = new CloudinaryStorage({
     if (file.fieldname === "profile_picture") {
       transformations = [
         { width: 400, height: 400, crop: "fill", gravity: "face" },
+        { quality: "auto:good" },
+      ];
+    } else if (file.fieldname === "arena_logo") {
+      // Special transformation for logos
+      transformations = [
+        { width: 400, height: 400, crop: "fill" },
         { quality: "auto:good" },
       ];
     } else if (
@@ -115,7 +128,7 @@ const upload = multer({
   storage: storage,
   limits: {
     fileSize: 10 * 1024 * 1024, // 10MB per file
-    files: 3, // Max 3 files per upload (per your requirement)
+    files: 3, // Max 3 files per upload
   },
   fileFilter: fileFilter,
 });
@@ -153,6 +166,8 @@ const handleUpload = (uploadMethod) => {
         console.log(
           `✅ ${req.files.length} files received and processed by Cloudinary`
         );
+      } else if (req.file) {
+        console.log(`✅ 1 file received and processed by Cloudinary`);
       }
 
       next();
@@ -164,5 +179,7 @@ module.exports = {
   uploadProfilePicture: handleUpload(upload.single("profile_picture")),
   uploadArenaImages: handleUpload(upload.array("arena_images", 3)),
   uploadCourtImages: handleUpload(upload.array("court_images", 3)),
+  // NEW: Export logo upload handler
+  uploadArenaLogo: handleUpload(upload.single("arena_logo")),
   cloudinary,
 };

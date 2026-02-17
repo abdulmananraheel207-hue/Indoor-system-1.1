@@ -285,17 +285,15 @@ const arenaController = {
     }
   },
 
-  // File: arenaController.js - UPDATED getArenaReviews function
-  // ========================
-  // REVIEW FUNCTIONS - FIXED VERSION
-  // ========================
 
-  // Get pending reviews for user (arenas they've booked but not reviewed)
   getPendingReviews: async (req, res) => {
     try {
       const userId = req.user.id;
 
-      // Find COMPLETED bookings that are NOT reviewed
+      console.log(`🔍 Fetching pending reviews for user ID: ${userId}`);
+
+      // Find ALL COMPLETED bookings that don't have a review yet
+      // Remove the check for existing reviews on the same arena
       const [pendingReviews] = await pool.execute(`
       SELECT 
         b.booking_id,
@@ -317,13 +315,14 @@ const arenaController = {
         AND NOT EXISTS (
           SELECT 1 
           FROM arena_reviews ar 
-          WHERE ar.arena_id = b.arena_id 
-            AND ar.user_id = b.user_id
-            AND (ar.booking_id = b.booking_id OR ar.booking_id IS NULL)
+          WHERE ar.booking_id = b.booking_id  -- Only check for review on this specific booking
         )
+        AND (b.review_reminder_shown = 0 OR b.review_reminder_shown IS NULL)
       ORDER BY b.booking_date DESC
-      LIMIT 5
+      LIMIT 10
     `, [userId]);
+
+      console.log(`📦 Found ${pendingReviews.length} pending reviews for user ${userId}`);
 
       res.json({
         pending_reviews: pendingReviews,
@@ -399,14 +398,16 @@ const arenaController = {
     }
   },
 
-  // Add review - FIXED with proper booking check
   addReview: async (req, res) => {
     try {
+      console.log("=".repeat(50));
+      console.log("📝 ADD REVIEW CALLED");
       const { arena_id } = req.params;
       const { rating, comment, booking_id } = req.body;
       const userId = req.user.id;
 
-      console.log("📝 Adding review - Arena:", arena_id, "User:", userId, "Booking:", booking_id);
+      console.log("Request params:", { arena_id });
+      console.log("Request body:", { rating, comment, booking_id, userId });
 
       // Validate inputs
       if (!rating || rating < 1 || rating > 5) {
@@ -421,60 +422,50 @@ const arenaController = {
         });
       }
 
-      // CRITICAL FIX: Check if user has a COMPLETED booking at this arena
-      let bookingCheckQuery, bookingCheckParams;
-
-      if (booking_id) {
-        // If booking_id is provided, check that specific booking
-        bookingCheckQuery = `
-        SELECT b.booking_id, b.status 
-        FROM bookings b
-        WHERE b.booking_id = ? 
-          AND b.user_id = ? 
-          AND b.arena_id = ?
-      `;
-        bookingCheckParams = [booking_id, userId, arena_id];
-      } else {
-        // Otherwise check for any completed booking at this arena
-        bookingCheckQuery = `
-        SELECT b.booking_id, b.status 
-        FROM bookings b
-        WHERE b.user_id = ? 
-          AND b.arena_id = ? 
-          AND b.status = 'completed'
-        ORDER BY b.booking_date DESC
-        LIMIT 1
-      `;
-        bookingCheckParams = [userId, arena_id];
+      if (!booking_id) {
+        return res.status(400).json({
+          message: "Booking ID is required to submit a review",
+        });
       }
 
-      const [bookings] = await pool.execute(bookingCheckQuery, bookingCheckParams);
+      // CRITICAL: Check if this specific booking belongs to the user and is completed
+      const [bookings] = await pool.execute(`
+      SELECT b.*, a.name as arena_name
+      FROM bookings b
+      JOIN arenas a ON b.arena_id = a.arena_id
+      WHERE b.booking_id = ? 
+        AND b.user_id = ? 
+        AND b.arena_id = ?
+    `, [booking_id, userId, arena_id]);
+
+      console.log("Booking check result:", bookings);
 
       if (bookings.length === 0) {
         return res.status(400).json({
-          message: "You need to complete a booking at this arena before you can review it. Please book and play first!"
+          message: "Booking not found or does not belong to you"
         });
       }
 
       const booking = bookings[0];
 
-      // If specific booking was provided but it's not completed
-      if (booking_id && booking.status !== 'completed') {
+      // Check if booking is completed
+      if (booking.status !== 'completed') {
         return res.status(400).json({
-          message: "This booking is not completed yet. You can only review completed bookings."
+          message: "You can only review completed bookings. This booking is " + booking.status
         });
       }
 
-      // FIX: Check if user already reviewed this arena (any booking)
-      const [existingReview] = await pool.execute(
-        `SELECT review_id FROM arena_reviews 
-       WHERE user_id = ? AND arena_id = ?`,
-        [userId, arena_id]
-      );
+      // IMPORTANT CHANGE: Check if this SPECIFIC booking already has a review
+      const [existingReview] = await pool.execute(`
+      SELECT review_id FROM arena_reviews 
+      WHERE booking_id = ?
+    `, [booking_id]);
+
+      console.log("Existing review check:", existingReview);
 
       if (existingReview.length > 0) {
         return res.status(400).json({
-          message: "You have already reviewed this arena",
+          message: "You have already submitted a review for this booking",
         });
       }
 
@@ -487,24 +478,25 @@ const arenaController = {
         const [result] = await connection.execute(
           `INSERT INTO arena_reviews (user_id, arena_id, booking_id, rating, comment)
          VALUES (?, ?, ?, ?, ?)`,
-          [userId, arena_id, booking.booking_id, rating, comment.trim()]
+          [userId, arena_id, booking_id, rating, comment.trim()]
         );
 
-        // Update booking to mark reminder as shown (if it was a reminder)
+        console.log("✅ Review inserted with ID:", result.insertId);
+
+        // Update booking to mark reminder as shown
         await connection.execute(
           `UPDATE bookings SET review_reminder_shown = TRUE 
          WHERE booking_id = ?`,
-          [booking.booking_id]
+          [booking_id]
         );
 
-        // Update arena rating
+        // Update arena rating (average of all reviews for this arena)
         const [avgRating] = await connection.execute(
           `SELECT AVG(rating) as avg_rating, COUNT(*) as total_reviews
          FROM arena_reviews WHERE arena_id = ?`,
           [arena_id]
         );
 
-        // Update arenas table
         await connection.execute(
           `UPDATE arenas 
          SET rating = ROUND(?, 1), 
@@ -541,7 +533,7 @@ const arenaController = {
       }
 
     } catch (error) {
-      console.error("Error in addReview:", error);
+      console.error("❌ Error in addReview:", error);
       res.status(500).json({
         message: "Server error",
         error: error.message,
@@ -649,17 +641,21 @@ const arenaController = {
 
       console.log("Fetching details for arena:", arena_id);
 
-      // Get basic arena info
-      const [arenas] = await pool.execute(
-        "SELECT * FROM arenas WHERE arena_id = ? AND is_active = 1 AND is_blocked = 0",
-        [arena_id]
-      );
+      // Get basic arena info WITH google_maps_location from owners table
+      const [arenas] = await pool.execute(`
+      SELECT a.*, ao.google_maps_location, ao.owner_name, ao.phone_number as owner_phone 
+      FROM arenas a
+      LEFT JOIN arena_owners ao ON a.owner_id = ao.owner_id
+      WHERE a.arena_id = ? AND a.is_active = 1 AND a.is_blocked = 0
+    `, [arena_id]);
 
       if (arenas.length === 0) {
         return res.status(404).json({ message: "Arena not found" });
       }
 
       const arena = arenas[0];
+
+      console.log("Arena details fetched with google_maps_location:", arena.google_maps_location);
 
       // 1. Get courts with their sports
       const [courts] = await pool.execute(
@@ -748,6 +744,7 @@ const arenaController = {
         courtsCount: formattedCourts.length,
         sportsCount: uniqueSports.length,
         imagesCount: images.length,
+        hasGoogleMapsLink: !!arena.google_maps_location
       });
 
       res.json({

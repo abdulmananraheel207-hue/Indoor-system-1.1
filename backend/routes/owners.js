@@ -1,9 +1,10 @@
-// routes/owners.js - FINAL WORKING VERSION
+// routes/owners.js - Add logo upload route
+
 const express = require("express");
 const router = express.Router();
 const ownerController = require("../Controllers/ownerController");
 const auth = require("../middleware/auth");
-const { uploadArenaImages, uploadCourtImages } = require("../middleware/upload");
+const { uploadArenaImages, uploadCourtImages, uploadArenaLogo } = require("../middleware/upload");
 
 // =================== PUBLIC ROUTES ===================
 router.post("/register/complete", ownerController.registerOwnerComplete);
@@ -33,11 +34,21 @@ router.post("/debug/upload-test", uploadCourtImages, (req, res) => {
   });
 });
 
+// =================== LOGO UPLOAD ROUTE ===================
+// This will be called during registration after arena is created
+router.post(
+  "/arenas/:arena_id/logo",
+  auth.verifyToken,
+  auth.isOwnerOrManager,
+  uploadArenaLogo,
+  ownerController.uploadArenaLogo
+);
+
 // All routes below require owner authentication
 router.use(auth.verifyToken, auth.isOwnerOrManager);
 
 // =================== PHOTO UPLOAD API ENDPOINTS ===================
-// Court photos - THIS IS THE KEY ROUTE
+// Court photos
 router.post(
   "/courts/:court_id/photos",
   uploadCourtImages,
@@ -104,14 +115,8 @@ router.put("/bookings/:booking_id/complete", ownerController.completeBooking);
 router.get("/managers", ownerController.getManagers);
 router.post("/managers", ownerController.addManager);
 router.put("/managers/:manager_id", ownerController.updateManager);
-// Add this to your owners.js routes file
 router.delete("/managers/:manager_id", ownerController.deleteManager);
-// In owners.js - Add this route
-
-// Update manager credentials
-router.put("/managers/:manager_id/credentials",
-  ownerController.updateManagerCredentials
-);
+router.put("/managers/:manager_id/credentials", ownerController.updateManagerCredentials);
 
 // Reports
 router.get("/reports/export", ownerController.exportBookingData);
@@ -123,7 +128,5 @@ router.put("/profile/password", ownerController.updateOwnerPassword);
 
 // Cleanup
 router.post("/cleanup/expired-locks", ownerController.cleanupExpiredLocks);
-
-
 
 module.exports = router;

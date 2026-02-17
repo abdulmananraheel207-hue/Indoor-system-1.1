@@ -183,9 +183,7 @@ const OwnerAuth = (props) => {
           <p className="mt-2 text-sm text-gray-600">
             Manage your arena, bookings, and revenue
           </p>
-          <p className="mt-1 text-xs text-blue-600">
-            Managers: Please use the Manager Login page
-          </p>
+
         </div>
 
         {error && (

@@ -15,35 +15,13 @@ const ReviewReminderModal = () => {
 
     useEffect(() => {
         checkPendingReviews();
-
-        // FOR TESTING: Clear localStorage on component mount (remove this in production)
-        // localStorage.removeItem("reviewRemindersDismissedUntil");
     }, []);
 
     const checkPendingReviews = async () => {
         try {
             setLoading(true);
 
-            // Check localStorage first (30-day timeout for "Don't show again")
-            const lastDismissed = localStorage.getItem("reviewRemindersDismissedUntil");
-            console.log("Last dismissed until:", lastDismissed);
-
-            if (lastDismissed) {
-                const dismissDate = new Date(lastDismissed);
-                const now = new Date();
-                console.log("Dismiss date:", dismissDate);
-                console.log("Current date:", now);
-                console.log("Is dismissed still valid?", dismissDate > now);
-
-                if (dismissDate > now) {
-                    console.log("Reminders are dismissed until:", dismissDate);
-                    setLoading(false);
-                    return;
-                } else {
-                    // Clear expired dismissal
-                    localStorage.removeItem("reviewRemindersDismissedUntil");
-                }
-            }
+            // REMOVED: localStorage check for dismissals
 
             // Fetch pending reviews
             console.log("Fetching pending reviews...");
@@ -67,52 +45,9 @@ const ReviewReminderModal = () => {
         }
     };
 
-    const handleDismiss = async (bookingId) => {
-        try {
-            await integrationService.dismissReviewReminder(bookingId);
+    // REMOVED: handleDismiss function
 
-            // Remove this booking from pending list
-            const updatedPending = pendingReviews.filter(
-                review => review.booking_id !== bookingId
-            );
-
-            if (updatedPending.length === 0) {
-                // No more reviews, close modal
-                setIsVisible(false);
-                setPendingReviews([]);
-            } else {
-                setPendingReviews(updatedPending);
-                // Reset form for next review
-                setRating(5);
-                setComment("");
-                // Adjust index if needed
-                if (currentReviewIndex >= updatedPending.length) {
-                    setCurrentReviewIndex(updatedPending.length - 1);
-                }
-            }
-        } catch (error) {
-            console.error("Error dismissing reminder:", error);
-            alert("Failed to dismiss reminder. Please try again.");
-        }
-    };
-
-    const handleSkipAll = async () => {
-        try {
-            await integrationService.skipAllReviewReminders();
-
-            // Don't show again for 30 days
-            const nextMonth = new Date();
-            nextMonth.setDate(nextMonth.getDate() + 30);
-            localStorage.setItem("reviewRemindersDismissedUntil", nextMonth.toISOString());
-            console.log("Set new dismiss until:", nextMonth);
-
-            setIsVisible(false);
-            setPendingReviews([]);
-        } catch (error) {
-            console.error("Error skipping all reminders:", error);
-            alert("Failed to skip reminders. Please try again.");
-        }
-    };
+    // REMOVED: handleSkipAll function
 
     const handleSubmitReview = async () => {
         if (!comment.trim()) {
@@ -158,6 +93,9 @@ const ReviewReminderModal = () => {
                 if (currentReviewIndex >= updatedPending.length) {
                     setCurrentReviewIndex(updatedPending.length - 1);
                 }
+
+                // Show success message but keep modal open for next review
+                alert("Review submitted successfully! You have more reviews to complete.");
             }
 
         } catch (error) {
@@ -354,24 +292,6 @@ const ReviewReminderModal = () => {
                                     Submit Review
                                 </>
                             )}
-                        </button>
-
-                        <button
-                            onClick={() => handleDismiss(currentReview.booking_id)}
-                            disabled={submitting}
-                            className="border border-gray-300 text-gray-700 font-medium py-3 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
-                        >
-                            Maybe Later
-                        </button>
-                    </div>
-
-                    <div className="mt-6 text-center">
-                        <button
-                            onClick={handleSkipAll}
-                            disabled={submitting}
-                            className="text-gray-500 text-sm hover:text-gray-700 disabled:opacity-50"
-                        >
-                            Don't show these reminders again for 30 days
                         </button>
                     </div>
                 </div>

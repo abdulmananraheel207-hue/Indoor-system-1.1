@@ -90,12 +90,11 @@ const UserArenaDetails = () => {
       setLoading(true);
       const details = await integrationService.getArenaDetails(arenaId);
 
-      // DEBUG: Log the arena data to see what sports information we're getting
       console.log('Arena details received:', {
-        sports_list: details.sports_list,
-        sports: details.sports,
-        arena_sports: details.arena_sports,
-        court_sports: details.court_sports
+        name: details.name,
+        address: details.address,
+        google_maps_location: details.google_maps_location,
+        all_fields: Object.keys(details)
       });
 
       const transformedCourts = details.courts.map((court) => ({
@@ -577,6 +576,7 @@ const UserArenaDetails = () => {
                     <p className="font-medium">{arena.address}</p>
                   </div>
                 </div>
+                {/* Location with Link */}
                 <div className="flex items-center">
                   <svg
                     className="h-5 w-5 text-gray-400 mr-3"
@@ -588,11 +588,32 @@ const UserArenaDetails = () => {
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       strokeWidth={2}
-                      d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                      d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+                    />
                   </svg>
                   <div>
-                    <p className="text-sm text-gray-600">Courts</p>
-                    <p className="font-medium">{arena.number_of_courts}</p>
+                    <p className="text-sm text-gray-600">Location</p>
+                    <p className="font-medium">{arena.address}</p>
+                    {/* Google Maps Link */}
+                    {arena.google_maps_location && (
+                      <a
+                        href={arena.google_maps_location}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center mt-2 text-sm text-primary-600 hover:text-primary-700 hover:underline"
+                      >
+                        <svg className="h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                        </svg>
+                        View on Google Maps
+                      </a>
+                    )}
                   </div>
                 </div>
               </div>

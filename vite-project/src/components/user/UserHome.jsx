@@ -495,28 +495,65 @@ const UserHome = () => {
                       <span className="truncate">{arena.address || "Address not available"}</span>
                     </div>
 
-                    <div className="flex flex-wrap gap-2 mb-4">
-                      {Array.isArray(arena.sports) && arena.sports.length > 0 ? (
-                        arena.sports.slice(0, 3).map((sport, index) => (
-                          <span
-                            key={index}
-                            className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium"
-                          >
-                            {typeof sport === "string"
-                              ? sport
-                              : sport.sport_name || sport.name || sport}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="px-3 py-1 bg-gray-100 text-gray-800 rounded-full text-xs">
-                          No sports specified
-                        </span>
-                      )}
-                      {Array.isArray(arena.sports) && arena.sports.length > 3 && (
-                        <span className="px-3 py-1 bg-gray-100 text-gray-800 rounded-full text-xs">
-                          +{arena.sports.length - 3} more
-                        </span>
-                      )}
+
+                    {/* Sports Display */}
+                    <div className="flex flex-wrap gap-1 mb-4">
+                      {(() => {
+                        // Handle different possible data structures
+                        let sportsToDisplay = [];
+
+                        // Check if sports is a string (like "Football")
+                        if (arena.sports && typeof arena.sports === 'string') {
+                          // Split by comma if it's a comma-separated list, otherwise treat as single sport
+                          sportsToDisplay = arena.sports.includes(',')
+                            ? arena.sports.split(',').map(s => s.trim())
+                            : [arena.sports];
+                        }
+                        // Check if sports_list exists and is an array
+                        else if (arena.sports_list && Array.isArray(arena.sports_list) && arena.sports_list.length > 0) {
+                          sportsToDisplay = arena.sports_list;
+                        }
+                        // Check if sports is an array
+                        else if (arena.sports && Array.isArray(arena.sports) && arena.sports.length > 0) {
+                          sportsToDisplay = arena.sports.map(s => s.name || s.sport_name || s);
+                        }
+                        // Check if arena_sports exists
+                        else if (arena.arena_sports && Array.isArray(arena.arena_sports) && arena.arena_sports.length > 0) {
+                          sportsToDisplay = arena.arena_sports.map(s => s.name || s.sport_name || s);
+                        }
+
+                        if (sportsToDisplay.length > 0) {
+                          return sportsToDisplay.map((sport, index) => {
+                            // Get the sport name (ensure it's a string)
+                            const sportName = String(sport || '').trim();
+
+                            const getEmoji = (name) => {
+                              const lower = name.toLowerCase();
+                              if (lower.includes("badminton")) return "🏸";
+                              if (lower.includes("tennis")) return "🎾";
+                              if (lower.includes("squash")) return "🥎";
+                              if (lower.includes("basketball")) return "🏀";
+                              if (lower.includes("volleyball")) return "🏐";
+                              if (lower.includes("cricket")) return "🏏";
+                              if (lower.includes("football") || lower.includes("soccer")) return "⚽";
+                              if (lower.includes("table") || lower.includes("ping")) return "🏓";
+                              return "🎯";
+                            };
+
+                            return (
+                              <span
+                                key={index}
+                                className="text-lg"
+                                title={sportName}
+                              >
+                                {getEmoji(sportName)}
+                              </span>
+                            );
+                          });
+                        } else {
+                          return null; // Don't show anything if no sports
+                        }
+                      })()}
                     </div>
 
                     <div className="flex items-center justify-between pt-4 border-t border-gray-100">
@@ -531,7 +568,7 @@ const UserHome = () => {
                           e.stopPropagation();
                           handleViewDetails(arena.arena_id);
                         }}
-                        className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium"
+                        className="px-4 py-2 bg-primary-600 text-black rounded-lg hover:bg-primary-700 transition-colors font-medium"
                       >
                         View Details
                       </button>

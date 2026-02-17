@@ -5,10 +5,7 @@ const { generateTimeSlots } = require("../utils/timeSlotHelper");
 const decisionService = require("../utils/bookingDecisionService");
 
 const ownerController = {
-  // Complete owner registration with arena, courts, sports, and time slots
-  // In ownerController.js - Complete registerOwnerComplete function
 
-  // In ownerController.js - Fixed registerOwnerComplete function
 
   registerOwnerComplete: async (req, res) => {
     try {
@@ -120,7 +117,7 @@ const ownerController = {
             throw new Error(`Business address is required for arena: ${arenaData.arena_name}`);
           }
 
-          // Create arena - REMOVED phone_number from INSERT
+          // Create arena
           const [arenaResult] = await connection.execute(
             `INSERT INTO arenas 
            (owner_id, name, description, location_lat, location_lng,
@@ -137,6 +134,51 @@ const ownerController = {
 
           const arena_id = arenaResult.insertId;
           console.log(`✅ Arena created with ID: ${arena_id}`);
+
+          // ===== NEW: Handle logo upload if provided =====
+          if (arenaData.logo) {
+            console.log(`🖼️ Processing logo for arena ${arena_id}`);
+
+            try {
+              // If logo is a base64 string (from file upload)
+              if (arenaData.logo && arenaData.logo.startsWith('data:image')) {
+                // Upload to Cloudinary
+                const cloudinary = require('cloudinary').v2;
+
+                // Configure Cloudinary (if not already configured elsewhere)
+                cloudinary.config({
+                  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+                  api_key: process.env.CLOUDINARY_API_KEY,
+                  api_secret: process.env.CLOUDINARY_API_SECRET,
+                });
+
+                const uploadResult = await cloudinary.uploader.upload(arenaData.logo, {
+                  folder: `sports-arena/arenas/${arena_id}/logo`,
+                  public_id: `arena-${arena_id}-logo-${Date.now()}`,
+                  transformation: [
+                    { width: 400, height: 400, crop: "fill" },
+                    { quality: "auto:good" }
+                  ],
+                });
+
+                console.log(`✅ Logo uploaded to Cloudinary:`, uploadResult.secure_url);
+
+                // Save to arena_images table
+                await connection.execute(
+                  `INSERT INTO arena_images (arena_id, image_url, cloudinary_id, is_primary, uploaded_at)
+                   VALUES (?, ?, ?, TRUE, NOW())`,
+                  [arena_id, uploadResult.secure_url, uploadResult.public_id]
+                );
+
+                console.log(`✅ Logo saved to database for arena ${arena_id}`);
+              }
+            } catch (logoError) {
+              console.error(`❌ Error uploading logo for arena ${arena_id}:`, logoError);
+              // Don't throw - continue with registration even if logo fails
+              // Just log the error and proceed
+            }
+          }
+
           createdArenas.push({ arena_id, name: arenaData.arena_name });
 
           // Add sports to arena
@@ -212,7 +254,6 @@ const ownerController = {
               }
             }
           }
-
 
           // Generate time slots if opening/closing times are provided
           if (arenaData.opening_time && arenaData.closing_time) {
@@ -313,6 +354,7 @@ const ownerController = {
       });
     }
   },
+
   // Upload arena photos
   uploadArenaPhotos: async (req, res) => {
     try {
@@ -637,6 +679,93 @@ const ownerController = {
         success: false,
         message: "Failed to upload photos. Please try again.",
         error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      });
+    }
+  },
+
+  // In ownerController.js - Add this new method
+
+  // Upload arena logo (called after arena creation)
+  uploadArenaLogo: async (req, res) => {
+    try {
+      const { arena_id } = req.params;
+      const file = req.file; // Single file from Cloudinary
+
+      console.log("🚀 UPLOAD ARENA LOGO STARTED");
+      console.log("Arena ID:", arena_id);
+      console.log("File:", file ? file.originalname : "No file");
+
+      if (!file) {
+        return res.status(400).json({
+          success: false,
+          message: "No logo file uploaded"
+        });
+      }
+
+      // Verify owner owns this arena
+      const [arenaCheck] = await pool.execute(
+        "SELECT arena_id FROM arenas WHERE arena_id = ? AND owner_id = ?",
+        [arena_id, req.user.id]
+      );
+
+      if (arenaCheck.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Arena not found or access denied",
+        });
+      }
+
+      // Check if arena already has a logo
+      const [existingLogo] = await pool.execute(
+        "SELECT image_id FROM arena_images WHERE arena_id = ? AND is_primary = TRUE",
+        [arena_id]
+      );
+
+      const connection = await pool.getConnection();
+      await connection.beginTransaction();
+
+      try {
+        // If there's an existing logo, you might want to delete it from Cloudinary
+        if (existingLogo.length > 0) {
+          // Optional: Delete old logo from Cloudinary
+          // You can implement this if needed
+        }
+
+        // Save logo to database in arena_images table with is_primary = TRUE
+        const [result] = await connection.execute(
+          `INSERT INTO arena_images (arena_id, image_url, cloudinary_id, is_primary, uploaded_at)
+         VALUES (?, ?, ?, TRUE, NOW())`,
+          [arena_id, file.path, file.filename]
+        );
+
+        await connection.commit();
+
+        console.log(`✅ Logo saved to database with ID: ${result.insertId}`);
+
+        res.json({
+          success: true,
+          message: "Arena logo uploaded successfully",
+          logo: {
+            image_id: result.insertId,
+            image_url: file.path,
+            cloudinary_id: file.filename,
+            arena_id: parseInt(arena_id)
+          }
+        });
+
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      } finally {
+        connection.release();
+      }
+
+    } catch (error) {
+      console.error("❌ Error uploading arena logo:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to upload logo",
+        error: error.message
       });
     }
   },
