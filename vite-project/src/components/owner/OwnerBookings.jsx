@@ -17,9 +17,34 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
   // 🔥 NEW: Force refresh counter
   const [refreshCounter, setRefreshCounter] = useState(0);
 
-  const canViewBookings = isOwner || permissions.manage_bookings;
-  const canManageBookings = isOwner || permissions.manage_bookings;
-  const canViewFinancial = isOwner || permissions.view_financials;
+  // Get arena-specific permissions from localStorage
+  const [arenaPermissions, setArenaPermissions] = useState({});
+
+  useEffect(() => {
+    const storedArenaPerms = localStorage.getItem('arenaPermissions');
+    if (storedArenaPerms) {
+      try {
+        setArenaPermissions(JSON.parse(storedArenaPerms));
+      } catch (e) {
+        console.error("Error parsing arena permissions:", e);
+      }
+    }
+  }, []);
+
+  const hasPermissionForSelectedArena = (permissionName) => {
+    if (isOwner) return true;
+    if (!selectedArena) return false;
+
+    const arenaKey = `arena_${selectedArena.arena_id}`;
+    const arenaPerms = arenaPermissions[arenaKey] || {};
+    return arenaPerms[permissionName] || false;
+  };
+
+  const canViewBookings = isOwner || hasPermissionForSelectedArena('manage_bookings');
+  const canManageBookings = isOwner || hasPermissionForSelectedArena('manage_bookings');
+  const canViewFinancial = isOwner || hasPermissionForSelectedArena('view_financials');
+
+
 
   // 🔥 FIX: Fetch bookings whenever filters or selected arena changes
   useEffect(() => {

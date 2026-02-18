@@ -10,9 +10,10 @@ const pool = require("../db");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
-// In routes/managers.js - REPLACE the entire login endpoint
+// In routes/managers.js - REPLACE the login endpoint
 
-// Manager Login (public)
+// In routes/managers.js - REPLACE with this corrected version
+
 router.post("/login", async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -78,21 +79,46 @@ router.post("/login", async (req, res) => {
 
         // Parse permissions safely
         let permissions = {};
+        let arenaPermissions = {};
+        let initialStats = {}; // 🔥 KEEP THIS - CRITICAL FOR DASHBOARD
+
         try {
             permissions = typeof manager.permissions === 'string'
                 ? JSON.parse(manager.permissions)
                 : (manager.permissions || {});
 
-            console.log("📦 Parsed permissions:", permissions);
+            console.log("📦 Raw permissions from DB:", permissions);
+
+            // Store arena-specific permissions and collect initial stats
+            arenaPermissions = permissions; // Keep the arena-specific structure
+
+            // Extract initial stats from each arena's permissions
+            Object.keys(permissions).forEach(key => {
+                if (key.startsWith('arena_')) {
+                    const perms = permissions[key] || {};
+
+                    // Store initial stats for this arena if they exist
+                    if (perms.initial_stats) {
+                        const arenaId = parseInt(key.replace('arena_', ''));
+                        initialStats[arenaId] = perms.initial_stats;
+                    }
+                }
+            });
+
+            console.log("📦 Arena-specific permissions:", arenaPermissions);
+            console.log("📦 Initial stats from DB:", initialStats); // 🔥 Still here!
+
         } catch (parseError) {
             console.error("⚠️ Error parsing permissions:", parseError);
             permissions = {};
+            arenaPermissions = {};
+            initialStats = {};
         }
 
         // Get all arenas this manager has access to
         const accessibleArenaIds = [];
 
-        Object.keys(permissions).forEach(key => {
+        Object.keys(arenaPermissions).forEach(key => {
             if (key.startsWith('arena_')) {
                 const arenaId = parseInt(key.replace('arena_', ''));
                 if (!isNaN(arenaId)) {
@@ -103,7 +129,7 @@ router.post("/login", async (req, res) => {
 
         console.log("📋 Accessible arena IDs:", accessibleArenaIds);
 
-        // ✅ FIXED: Get arena details WITHOUT opening_time and closing_time
+        // Get arena details
         let arenas = [];
         if (accessibleArenaIds.length > 0) {
             try {
@@ -118,11 +144,26 @@ router.post("/login", async (req, res) => {
                 console.log(`✅ Found ${arenas.length} arenas`);
             } catch (arenaError) {
                 console.error("❌ Error fetching arenas:", arenaError);
-                // Don't throw error, just return empty arenas
             }
         }
 
-        // Create JWT token
+        // Helper function to flatten permissions for quick checks
+        const flattenPermissions = (arenaPerms) => {
+            const flattened = {};
+            Object.keys(arenaPerms).forEach(key => {
+                if (key.startsWith('arena_')) {
+                    const perms = arenaPerms[key] || {};
+                    Object.keys(perms).forEach(permKey => {
+                        if (permKey !== 'initial_stats' && perms[permKey]) {
+                            flattened[permKey] = true;
+                        }
+                    });
+                }
+            });
+            return flattened;
+        };
+
+        // Create JWT token - Store BOTH flattened and arena-specific permissions
         const jwtSecret = process.env.JWT_SECRET || "09631e3f99caf686f08d48965782fcdb751c691bb08d610e51d893c300b6e694e86a3645ef38a94a414fd11f8d077292057c0ca7e94a6fb3db33cc2197891e35";
 
         const token = jwt.sign(
@@ -132,7 +173,10 @@ router.post("/login", async (req, res) => {
                 name: manager.name,
                 email: manager.email,
                 role: "manager",
-                permissions: permissions
+                // Flattened permissions for quick checks in middleware
+                permissions: flattenPermissions(arenaPermissions),
+                // Keep arena-specific permissions for detailed checks
+                arena_permissions: arenaPermissions
             },
             jwtSecret,
             { expiresIn: "24h" }
@@ -145,13 +189,19 @@ router.post("/login", async (req, res) => {
             email: manager.email,
             phone_number: manager.phone_number,
             role: "manager",
-            permissions: permissions,
+            // Send BOTH formats to frontend
+            permissions: flattenPermissions(arenaPermissions), // Global flattened
+            arena_permissions: arenaPermissions, // Arena-specific
+            initial_stats: initialStats, // 🔥 KEEP THIS - IMPORTANT FOR DASHBOARD
             arenas: arenas,
             owner_id: manager.owner_id,
             owner_name: manager.owner_name || "Arena Owner"
         };
 
         console.log("✅ Login successful for manager:", manager.manager_id);
+        console.log("✅ Final permissions for frontend:", flattenPermissions(arenaPermissions));
+        console.log("✅ Arena-specific permissions:", arenaPermissions);
+        console.log("✅ Initial stats:", initialStats); // 🔥 Still logging
         console.log("=".repeat(50));
 
         res.json({
@@ -173,51 +223,25 @@ router.post("/login", async (req, res) => {
         });
     }
 });
-
 // All protected routes require manager authentication
 router.use(managerAuth.verifyToken);
 
-// In routes/managers.js - Find the dashboard route and replace it
-
-// Dashboard - accessible if has any permission
 router.get("/dashboard",
+    managerAuth.verifyToken, // Just verify token, no permission check
     (req, res, next) => {
         console.log("📊 Dashboard access attempt by manager:", req.manager.id);
         console.log("Manager permissions:", req.manager.permissions);
 
-        // Check if they have ANY permission
+        // Check if they have ANY permission to manage anything
         const permissions = req.manager.permissions || {};
 
-        // Flatten all permissions from all arenas
-        let hasAnyPermission = false;
-
-        // Check each arena's permissions
-        Object.keys(permissions).forEach(key => {
-            if (key.startsWith('arena_')) {
-                const arenaPerms = permissions[key];
-                if (arenaPerms.view_financials ||
-                    arenaPerms.manage_bookings ||
-                    arenaPerms.manage_calendar ||
-                    arenaPerms.manage_arena) {
-                    hasAnyPermission = true;
-                }
-            }
-        });
-
-        console.log("Has any permission:", hasAnyPermission);
-
-        if (hasAnyPermission) {
-            next();
-        } else {
-            console.log("❌ No permissions found for manager:", req.manager.id);
-            res.status(403).json({
-                success: false,
-                message: "No permissions to access dashboard"
-            });
-        }
+        // If they have no permissions at all, they can still view dashboard
+        // but with limited data
+        next();
     },
     managerController.getDashboard
 );
+
 // Bookings management - requires manage_bookings
 router.get("/bookings",
     (req, res, next) => {

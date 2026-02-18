@@ -41,16 +41,20 @@ const OwnerHome = ({
   const [loading, setLoading] = useState(false);
   const [statsLoading, setStatsLoading] = useState(false);
 
-  // Permission checks
+  // In OwnerHome.jsx - Make sure permissions are properly checked
+
   const canViewFinancial = isOwner || permissions.view_financials;
   const canManageBookings = isOwner || permissions.manage_bookings;
   const canViewBookings = canManageBookings;
 
   // 🔥 DEBUG: Update arena-specific stats when selectedArena changes or stats update
+  // In OwnerHome.jsx - Update the useEffect for stats
+
   useEffect(() => {
     console.log("🔍 DEBUG: selectedArena changed:", selectedArena);
     console.log("🔍 DEBUG: userData:", userData);
     console.log("🔍 DEBUG: userData.arena_stats:", userData?.arena_stats);
+    console.log("🔍 DEBUG: userData.initial_stats:", userData?.initial_stats);
 
     if (!selectedArena) {
       console.log("📊 No arena selected, using global stats");
@@ -68,28 +72,32 @@ const OwnerHome = ({
       console.log("📊 arena_stats array:", userData.arena_stats);
 
       const arenaStat = userData.arena_stats.find(
-        stat => {
-          console.log("Comparing:", stat.arena_id, "vs", selectedArena.arena_id);
-          return stat.arena_id === selectedArena.arena_id;
-        }
+        stat => stat.arena_id === selectedArena.arena_id
       );
 
       if (arenaStat) {
         console.log("✅ Found arena-specific stats:", arenaStat);
-        console.log("📊 arenaStat fields:", Object.keys(arenaStat));
-
         setArenaSpecificStats({
           today_bookings: arenaStat.today_bookings || 0,
           today_revenue: arenaStat.today_revenue || 0,
-          monthly_revenue: arenaStat.total_revenue || 0,
+          monthly_revenue: arenaStat.monthly_revenue || 0,
           pending_requests_count: arenaStat.pending_bookings || 0
         });
         return;
-      } else {
-        console.log("❌ No matching arena stat found for ID:", selectedArena.arena_id);
       }
-    } else {
-      console.log("❌ No arena_stats in userData or not an array");
+    }
+
+    // If no arena_stats, try initial_stats from when manager was created
+    if (userData?.initial_stats && userData.initial_stats[selectedArena.arena_id]) {
+      const initial = userData.initial_stats[selectedArena.arena_id];
+      console.log("📊 Using initial stats for arena:", initial);
+      setArenaSpecificStats({
+        today_bookings: initial.today_bookings || 0,
+        today_revenue: initial.today_revenue || 0,
+        monthly_revenue: initial.monthly_revenue || 0,
+        pending_requests_count: initial.pending_requests || 0
+      });
+      return;
     }
 
     // If no arena-specific stats, use filtered pending requests count

@@ -2,6 +2,8 @@
 import React, { useState, useEffect } from "react";
 import { ownerAPI } from "../../services/api";
 
+// In OwnerArenaSettings.jsx - Add arena-specific permission checks
+
 const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {}, selectedArena = null }) => {
   const [arenas, setArenas] = useState([]);
   // 🔥 Use selectedArena from props directly
@@ -25,9 +27,33 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {}, selected
     sports: [],
   });
 
-  const canViewArena = isOwner || permissions.manage_arena;
-  const canManageArena = isOwner || permissions.manage_arena;
-  const canUploadPhotos = isOwner || permissions.manage_arena;
+  // Get arena-specific permissions from localStorage
+  const [arenaPermissions, setArenaPermissions] = useState({});
+
+  useEffect(() => {
+    const storedArenaPerms = localStorage.getItem('arenaPermissions');
+    if (storedArenaPerms) {
+      try {
+        setArenaPermissions(JSON.parse(storedArenaPerms));
+      } catch (e) {
+        console.error("Error parsing arena permissions:", e);
+      }
+    }
+  }, []);
+
+  const hasPermissionForSelectedArena = (permissionName) => {
+    if (isOwner) return true;
+    if (!selectedArena) return false;
+
+    const arenaKey = `arena_${selectedArena.arena_id}`;
+    const arenaPerms = arenaPermissions[arenaKey] || {};
+    return arenaPerms[permissionName] || false;
+  };
+
+  const canViewArena = isOwner || hasPermissionForSelectedArena('manage_arena');
+  const canManageArena = isOwner || hasPermissionForSelectedArena('manage_arena');
+  const canUploadPhotos = isOwner || hasPermissionForSelectedArena('manage_arena');
+
 
   const availableSports = [
     { id: 1, name: "Badminton", icon: "🏸" },

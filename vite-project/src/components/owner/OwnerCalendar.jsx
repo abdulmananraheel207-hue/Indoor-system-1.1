@@ -4,6 +4,8 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { ownerAPI } from "../../services/api";
 
+// In OwnerCalendar.jsx - Update permission checks
+
 const OwnerCalendar = ({ arenas = [], isOwner, permissions = {}, selectedArena = null }) => {
   const [selectedDate, setSelectedDate] = useState(new Date());
   // 🔥 Use selectedArena from props directly - no need for local state
@@ -14,9 +16,34 @@ const OwnerCalendar = ({ arenas = [], isOwner, permissions = {}, selectedArena =
   const [saving, setSaving] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
 
-  const canManageCalendar = isOwner || permissions.manage_calendar;
+  // Get arena-specific permissions from localStorage
+  const [arenaPermissions, setArenaPermissions] = useState({});
+
+  useEffect(() => {
+    // Load arena-specific permissions from localStorage
+    const storedArenaPerms = localStorage.getItem('arenaPermissions');
+    if (storedArenaPerms) {
+      try {
+        setArenaPermissions(JSON.parse(storedArenaPerms));
+      } catch (e) {
+        console.error("Error parsing arena permissions:", e);
+      }
+    }
+  }, []);
+
+  // Check if manager has permission for the selected arena
+  const hasPermissionForSelectedArena = (permissionName) => {
+    if (isOwner) return true;
+    if (!selectedArena) return false;
+
+    const arenaKey = `arena_${selectedArena.arena_id}`;
+    const arenaPerms = arenaPermissions[arenaKey] || {};
+    return arenaPerms[permissionName] || false;
+  };
+  const canManageCalendar = isOwner || hasPermissionForSelectedArena('manage_calendar');
   const canViewCalendar = canManageCalendar;
-  const canManageArena = isOwner || permissions.manage_arena;
+  const canManageArena = isOwner || hasPermissionForSelectedArena('manage_arena');
+
 
   const [showAddSlotForm, setShowAddSlotForm] = useState(false);
   const [newSlot, setNewSlot] = useState({

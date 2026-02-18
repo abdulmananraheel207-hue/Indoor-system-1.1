@@ -875,135 +875,228 @@ const ownerController = {
     }
   },
 
-  // In ownerController.js - Update getDashboard function
+  // In ownerController.js - COMPLETE REPLACEMENT for getDashboard
 
   getDashboard: async (req, res) => {
     try {
       const owner_id = req.user.id;
       const today = new Date().toISOString().split("T")[0];
 
-      // Today's bookings count
+      console.log("=".repeat(50));
+      console.log("📊 OWNER DASHBOARD - Owner ID:", owner_id);
+      console.log("Today:", today);
+
+      // Get all arenas for this owner
+      const [arenas] = await pool.execute(
+        "SELECT arena_id, name, address FROM arenas WHERE owner_id = ? AND is_active = TRUE",
+        [owner_id]
+      );
+
+      console.log(`✅ Found ${arenas.length} arenas for owner`);
+
+      if (arenas.length === 0) {
+        return res.json({
+          dashboard: {
+            today_bookings: 0,
+            today_revenue: 0,
+            monthly_revenue: 0,
+            total_lost_revenue: 0,
+            total_arenas: 0,
+            pending_requests_count: 0,
+            upcoming_bookings_count: 0,
+          },
+          pending_requests: [],
+          upcoming_bookings: [],
+          arenas: [],
+          arena_stats: []
+        });
+      }
+
+      const arenaIds = arenas.map(a => a.arena_id);
+      const placeholders = arenaIds.map(() => '?').join(',');
+
+      // TODAY'S BOOKINGS COUNT (all arenas)
       const [todayBookings] = await pool.execute(
         `SELECT COUNT(*) as count 
-       FROM bookings b
-       JOIN arenas a ON b.arena_id = a.arena_id
-       JOIN time_slots ts ON b.slot_id = ts.slot_id
-       WHERE a.owner_id = ? AND ts.date = ?`,
-        [owner_id, today]
+             FROM bookings b
+             JOIN time_slots ts ON b.slot_id = ts.slot_id
+             WHERE b.arena_id IN (${placeholders}) AND DATE(ts.date) = ?`,
+        [...arenaIds, today]
       );
 
-      // Total revenue for today
+      // TODAY'S REVENUE (completed bookings only)
       const [todayRevenue] = await pool.execute(
         `SELECT COALESCE(SUM(b.total_amount), 0) as revenue
-       FROM bookings b
-       JOIN arenas a ON b.arena_id = a.arena_id
-       JOIN time_slots ts ON b.slot_id = ts.slot_id
-       WHERE a.owner_id = ? AND ts.date = ? AND b.status = 'completed'`,
-        [owner_id, today]
+             FROM bookings b
+             JOIN time_slots ts ON b.slot_id = ts.slot_id
+             WHERE b.arena_id IN (${placeholders}) 
+               AND DATE(ts.date) = ? 
+               AND b.status = 'completed'`,
+        [...arenaIds, today]
       );
 
-      // Monthly revenue
+      // MONTHLY REVENUE
       const [monthlyRevenue] = await pool.execute(
         `SELECT COALESCE(SUM(b.total_amount), 0) as revenue
-       FROM bookings b
-       JOIN arenas a ON b.arena_id = a.arena_id
-       JOIN time_slots ts ON b.slot_id = ts.slot_id
-       WHERE a.owner_id = ? 
-         AND MONTH(ts.date) = MONTH(CURRENT_DATE())
-         AND YEAR(ts.date) = YEAR(CURRENT_DATE())
-         AND b.status = 'completed'`,
-        [owner_id]
+             FROM bookings b
+             JOIN time_slots ts ON b.slot_id = ts.slot_id
+             WHERE b.arena_id IN (${placeholders}) 
+               AND MONTH(ts.date) = MONTH(CURRENT_DATE())
+               AND YEAR(ts.date) = YEAR(CURRENT_DATE())
+               AND b.status = 'completed'`,
+        arenaIds
       );
 
-      // Pending booking requests
+      // PENDING REQUESTS COUNT
+      const [pendingCount] = await pool.execute(
+        `SELECT COUNT(*) as count 
+             FROM bookings b
+             WHERE b.arena_id IN (${placeholders}) AND b.status = 'pending'`,
+        arenaIds
+      );
+
+      // UPCOMING BOOKINGS COUNT (accepted but not completed, future dates)
+      const [upcomingCount] = await pool.execute(
+        `SELECT COUNT(*) as count 
+             FROM bookings b
+             JOIN time_slots ts ON b.slot_id = ts.slot_id
+             WHERE b.arena_id IN (${placeholders}) 
+               AND b.status = 'accepted' 
+               AND ts.date >= CURDATE()`,
+        arenaIds
+      );
+
+      // PENDING REQUESTS DETAILS
       const [pendingRequests] = await pool.execute(
         `SELECT b.*, u.name as user_name, u.phone_number as user_phone,
-              st.name as sport_name, a.name as arena_name,
-              ts.date, ts.start_time, ts.end_time
-       FROM bookings b
-       JOIN arenas a ON b.arena_id = a.arena_id
-       JOIN users u ON b.user_id = u.user_id
-       JOIN sports_types st ON b.sport_id = st.sport_id
-       JOIN time_slots ts ON b.slot_id = ts.slot_id
-       WHERE a.owner_id = ? AND b.status = 'pending'
-       ORDER BY ts.date ASC, ts.start_time ASC
-       LIMIT 10`,
-        [owner_id]
+                    st.name as sport_name, a.name as arena_name,
+                    ts.date, ts.start_time, ts.end_time,
+                    a.arena_id
+             FROM bookings b
+             JOIN arenas a ON b.arena_id = a.arena_id
+             JOIN users u ON b.user_id = u.user_id
+             JOIN sports_types st ON b.sport_id = st.sport_id
+             JOIN time_slots ts ON b.slot_id = ts.slot_id
+             WHERE a.arena_id IN (${placeholders}) AND b.status = 'pending'
+             ORDER BY ts.date ASC, ts.start_time ASC
+             LIMIT 10`,
+        arenaIds
       );
 
-      // Upcoming bookings (accepted but not completed)
+      // UPCOMING BOOKINGS DETAILS
       const [upcomingBookings] = await pool.execute(
         `SELECT b.*, u.name as user_name, u.phone_number as user_phone,
-              st.name as sport_name, a.name as arena_name,
-              ts.date, ts.start_time, ts.end_time,
-              DATEDIFF(ts.date, CURDATE()) as days_until
-       FROM bookings b
-       JOIN arenas a ON b.arena_id = a.arena_id
-       JOIN users u ON b.user_id = u.user_id
-       JOIN sports_types st ON b.sport_id = st.sport_id
-       JOIN time_slots ts ON b.slot_id = ts.slot_id
-       WHERE a.owner_id = ? AND b.status = 'accepted' AND ts.date >= CURDATE()
-       ORDER BY ts.date ASC, ts.start_time ASC
-       LIMIT 10`,
-        [owner_id]
+                    st.name as sport_name, a.name as arena_name,
+                    ts.date, ts.start_time, ts.end_time,
+                    DATEDIFF(ts.date, CURDATE()) as days_until,
+                    a.arena_id
+             FROM bookings b
+             JOIN arenas a ON b.arena_id = a.arena_id
+             JOIN users u ON b.user_id = u.user_id
+             JOIN sports_types st ON b.sport_id = st.sport_id
+             JOIN time_slots ts ON b.slot_id = ts.slot_id
+             WHERE a.arena_id IN (${placeholders}) 
+               AND b.status = 'accepted' 
+               AND ts.date >= CURDATE()
+             ORDER BY ts.date ASC, ts.start_time ASC
+             LIMIT 10`,
+        arenaIds
       );
 
-      // Get arenas owned by this owner
-      const [arenas] = await pool.execute(
-        "SELECT * FROM arenas WHERE owner_id = ?",
-        [owner_id]
-      );
+      // PER-ARENA STATISTICS
+      const arenaStats = [];
 
-      // Get total lost revenue
+      for (const arena of arenas) {
+        // Today's bookings for this arena
+        const [arenaTodayBookings] = await pool.execute(
+          `SELECT COUNT(*) as count 
+                 FROM bookings b
+                 JOIN time_slots ts ON b.slot_id = ts.slot_id
+                 WHERE b.arena_id = ? AND DATE(ts.date) = ?`,
+          [arena.arena_id, today]
+        );
+
+        // Pending requests for this arena
+        const [arenaPending] = await pool.execute(
+          `SELECT COUNT(*) as count 
+                 FROM bookings b
+                 WHERE b.arena_id = ? AND b.status = 'pending'`,
+          [arena.arena_id]
+        );
+
+        // Today's revenue for this arena
+        const [arenaTodayRevenue] = await pool.execute(
+          `SELECT COALESCE(SUM(b.total_amount), 0) as revenue
+                 FROM bookings b
+                 JOIN time_slots ts ON b.slot_id = ts.slot_id
+                 WHERE b.arena_id = ? AND DATE(ts.date) = ? AND b.status = 'completed'`,
+          [arena.arena_id, today]
+        );
+
+        // Monthly revenue for this arena
+        const [arenaMonthlyRevenue] = await pool.execute(
+          `SELECT COALESCE(SUM(b.total_amount), 0) as revenue
+                 FROM bookings b
+                 JOIN time_slots ts ON b.slot_id = ts.slot_id
+                 WHERE b.arena_id = ? 
+                   AND MONTH(ts.date) = MONTH(CURRENT_DATE())
+                   AND YEAR(ts.date) = YEAR(CURRENT_DATE())
+                   AND b.status = 'completed'`,
+          [arena.arena_id]
+        );
+
+        // Total completed bookings for this arena
+        const [arenaCompleted] = await pool.execute(
+          `SELECT COUNT(*) as count 
+                 FROM bookings b
+                 WHERE b.arena_id = ? AND b.status = 'completed'`,
+          [arena.arena_id]
+        );
+
+        arenaStats.push({
+          arena_id: arena.arena_id,
+          arena_name: arena.name,
+          today_bookings: arenaTodayBookings[0].count || 0,
+          pending_bookings: arenaPending[0].count || 0,
+          today_revenue: arenaTodayRevenue[0].revenue || 0,
+          monthly_revenue: arenaMonthlyRevenue[0].revenue || 0,
+          completed_bookings: arenaCompleted[0].count || 0,
+          total_revenue: arenaMonthlyRevenue[0].revenue || 0 // Will be overwritten if needed
+        });
+      }
+
+      // Get lost revenue
       const [lostRevenue] = await pool.execute(
         `SELECT COALESCE(SUM(lost_revenue), 0) as total_lost
-       FROM arena_owners WHERE owner_id = ?`,
+             FROM arena_owners WHERE owner_id = ?`,
         [owner_id]
       );
 
-      // 🔥 NEW: Get per-arena statistics
-      const [arenaStats] = await pool.execute(
-        `SELECT 
-         a.arena_id,
-         a.name as arena_name,
-         COUNT(DISTINCT b.booking_id) as total_bookings,
-         SUM(CASE WHEN b.status = 'completed' THEN 1 ELSE 0 END) as completed_bookings,
-         SUM(CASE WHEN b.status = 'pending' THEN 1 ELSE 0 END) as pending_bookings,
-         SUM(CASE WHEN b.status = 'accepted' THEN 1 ELSE 0 END) as accepted_bookings,
-         COALESCE(SUM(CASE WHEN b.status = 'completed' THEN b.total_amount ELSE 0 END), 0) as total_revenue,
-         COALESCE(SUM(CASE WHEN b.status = 'completed' AND ts.date = CURDATE() THEN b.total_amount ELSE 0 END), 0) as today_revenue,
-         COUNT(DISTINCT CASE WHEN ts.date = CURDATE() THEN b.booking_id END) as today_bookings
-       FROM arenas a
-       LEFT JOIN bookings b ON a.arena_id = b.arena_id
-       LEFT JOIN time_slots ts ON b.slot_id = ts.slot_id
-       WHERE a.owner_id = ?
-       GROUP BY a.arena_id, a.name`,
-        [owner_id]
-      );
+      const dashboard = {
+        today_bookings: todayBookings[0].count || 0,
+        today_revenue: todayRevenue[0].revenue || 0,
+        monthly_revenue: monthlyRevenue[0].revenue || 0,
+        total_lost_revenue: lostRevenue[0].total_lost || 0,
+        total_arenas: arenas.length,
+        pending_requests_count: pendingCount[0].count || 0,
+        upcoming_bookings_count: upcomingCount[0].count || 0,
+      };
 
-      console.log("📊 Arena stats:", arenaStats);
+      console.log("✅ Owner Dashboard Stats:", dashboard);
+      console.log("✅ Arena Stats:", arenaStats);
 
       res.json({
-        dashboard: {
-          today_bookings: todayBookings[0].count,
-          today_revenue: todayRevenue[0].revenue,
-          monthly_revenue: monthlyRevenue[0].revenue,
-          total_lost_revenue: lostRevenue[0].total_lost,
-          total_arenas: arenas.length,
-          pending_requests_count: pendingRequests.length,
-          upcoming_bookings_count: upcomingBookings.length,
-        },
+        dashboard,
         pending_requests: pendingRequests,
         upcoming_bookings: upcomingBookings,
         arenas: arenas,
-        arena_stats: arenaStats, // 🔥 ADD THIS LINE
+        arena_stats: arenaStats,
       });
     } catch (error) {
-      console.error(error);
+      console.error("❌ Owner Dashboard Error:", error);
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
-
   // Get all booking requests for owner
   getOwnerBookings: async (req, res) => {
     try {
@@ -2068,6 +2161,7 @@ const ownerController = {
   },
 
   // In ownerController.js - REPLACE your addManager function with this
+  // In ownerController.js - REPLACE your addManager function
 
   addManager: async (req, res) => {
     try {
@@ -2114,7 +2208,62 @@ const ownerController = {
       // Hash password
       const hashedPassword = await bcrypt.hash(password, 10);
 
-      // ✅ FIXED: Build permissions object with arena-specific permissions
+      // ✅ Get current stats for each arena to initialize manager stats
+      const today = new Date().toISOString().split("T")[0];
+      const arenaStats = {};
+
+      for (const ap of arena_permissions) {
+        if (!ap.arena_id) continue;
+
+        // Get today's bookings for this arena
+        const [todayBookings] = await pool.execute(
+          `SELECT COUNT(*) as count 
+                 FROM bookings b
+                 JOIN time_slots ts ON b.slot_id = ts.slot_id
+                 WHERE b.arena_id = ? AND DATE(ts.date) = ?`,
+          [ap.arena_id, today]
+        );
+
+        // Get today's revenue for this arena
+        const [todayRevenue] = await pool.execute(
+          `SELECT COALESCE(SUM(b.total_amount), 0) as revenue
+                 FROM bookings b
+                 JOIN time_slots ts ON b.slot_id = ts.slot_id
+                 WHERE b.arena_id = ? AND DATE(ts.date) = ? AND b.status = 'completed'`,
+          [ap.arena_id, today]
+        );
+
+        // Get monthly revenue for this arena
+        const [monthlyRevenue] = await pool.execute(
+          `SELECT COALESCE(SUM(b.total_amount), 0) as revenue
+                 FROM bookings b
+                 JOIN time_slots ts ON b.slot_id = ts.slot_id
+                 WHERE b.arena_id = ? 
+                   AND MONTH(ts.date) = MONTH(CURRENT_DATE())
+                   AND YEAR(ts.date) = YEAR(CURRENT_DATE())
+                   AND b.status = 'completed'`,
+          [ap.arena_id]
+        );
+
+        // Get pending requests for this arena
+        const [pendingCount] = await pool.execute(
+          `SELECT COUNT(*) as count 
+                 FROM bookings b
+                 WHERE b.arena_id = ? AND b.status = 'pending'`,
+          [ap.arena_id]
+        );
+
+        arenaStats[ap.arena_id] = {
+          today_bookings: todayBookings[0].count || 0,
+          today_revenue: todayRevenue[0].revenue || 0,
+          monthly_revenue: monthlyRevenue[0].revenue || 0,
+          pending_requests: pendingCount[0].count || 0
+        };
+
+        console.log(`📊 Stats for arena ${ap.arena_id}:`, arenaStats[ap.arena_id]);
+      }
+
+      // ✅ Build permissions object with arena-specific permissions
       const permissionsObj = {};
 
       if (Array.isArray(arena_permissions)) {
@@ -2130,7 +2279,14 @@ const ownerController = {
             view_financials: ap.permissions?.view_financials === true,
             manage_bookings: ap.permissions?.manage_bookings === true,
             manage_calendar: ap.permissions?.manage_calendar === true,
-            manage_arena: ap.permissions?.manage_arena === true
+            manage_arena: ap.permissions?.manage_arena === true,
+            // ✅ Store initial stats with the permissions
+            initial_stats: arenaStats[ap.arena_id] || {
+              today_bookings: 0,
+              today_revenue: 0,
+              monthly_revenue: 0,
+              pending_requests: 0
+            }
           };
         });
       }
@@ -2155,7 +2311,7 @@ const ownerController = {
       console.log("✅ Manager inserted with ID:", result.insertId);
       console.log("=".repeat(50));
 
-      // Return the created manager data
+      // Return the created manager data with initial stats
       res.status(201).json({
         success: true,
         message: "Manager added successfully",
@@ -2166,7 +2322,8 @@ const ownerController = {
           email,
           phone_number,
           is_active: 1,
-          permissions: permissionsObj
+          permissions: permissionsObj,
+          initial_stats: arenaStats // Send initial stats to frontend
         }
       });
 

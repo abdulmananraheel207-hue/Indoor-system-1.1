@@ -1,7 +1,6 @@
 const jwt = require("jsonwebtoken");
 
 const managerAuth = {
-    // Verify token for managers
     verifyToken: async (req, res, next) => {
         try {
             const token = req.headers.authorization?.split(" ")[1];
@@ -17,25 +16,33 @@ const managerAuth = {
                 process.env.JWT_SECRET || "your-secret-key"
             );
 
-            // Check if this is a manager token
             if (decoded.role !== "manager") {
                 return res.status(403).json({
                     message: "Access denied. Invalid token type."
                 });
             }
 
-            // Attach manager info to request
+            console.log("📦 Decoded manager token:", {
+                id: decoded.id,
+                email: decoded.email,
+                role: decoded.role,
+                hasPermissions: !!decoded.permissions,
+                hasArenaPermissions: !!decoded.arena_permissions
+            });
+
+            // Attach manager info to request - INCLUDE BOTH
             req.manager = {
                 id: decoded.id,
                 owner_id: decoded.owner_id,
                 name: decoded.name,
                 email: decoded.email,
                 role: decoded.role,
-                permissions: decoded.permissions || {},
+                permissions: decoded.permissions || {}, // Flattened for quick checks
+                arena_permissions: decoded.arena_permissions || {}, // Arena-specific
                 arena_name: decoded.arena_name
             };
 
-            console.log("Manager authenticated:", req.manager.email);
+            console.log("✅ Manager authenticated:", req.manager.email);
             next();
         } catch (error) {
             console.error("Token verification error:", error);
@@ -52,49 +59,26 @@ const managerAuth = {
         }
     },
 
-    // Check specific permission
-    hasPermission: (permission) => {
+    // NEW: Check permission for a specific arena
+    hasPermissionForArena: (permission) => {
         return (req, res, next) => {
+            const { arena_id } = req.params;
+
             if (!req.manager) {
-                return res.status(401).json({
-                    message: "Authentication required"
-                });
+                return res.status(401).json({ message: "Authentication required" });
             }
 
-            // Check if manager has the required permission
-            const hasPermission = req.manager.permissions[permission] === true;
+            // Check if manager has this permission for the specific arena
+            const arenaKey = `arena_${arena_id}`;
+            const arenaPerms = req.manager.arena_permissions[arenaKey] || {};
 
-            if (!hasPermission) {
-                return res.status(403).json({
-                    message: `Insufficient permissions. Required: ${permission}`
+            if (arenaPerms[permission]) {
+                next();
+            } else {
+                res.status(403).json({
+                    message: `Permission denied: ${permission} required for this arena`
                 });
             }
-
-            next();
-        };
-    },
-
-    // Check any of the permissions
-    hasAnyPermission: (permissions) => {
-        return (req, res, next) => {
-            if (!req.manager) {
-                return res.status(401).json({
-                    message: "Authentication required"
-                });
-            }
-
-            // Check if manager has any of the required permissions
-            const hasAnyPermission = permissions.some(
-                permission => req.manager.permissions[permission] === true
-            );
-
-            if (!hasAnyPermission) {
-                return res.status(403).json({
-                    message: `Insufficient permissions. Required one of: ${permissions.join(", ")}`
-                });
-            }
-
-            next();
         };
     }
 };

@@ -1,8 +1,7 @@
 const pool = require("../db");
 
 const managerController = {
-  // In managerController.js - Update getDashboard to return better stats
-  // In managerController.js - Update getDashboard to handle arena-specific permissions
+  // In managerController.js - Update getDashboard to use initial stats
 
   getDashboard: async (req, res) => {
     try {
@@ -10,26 +9,63 @@ const managerController = {
       const today = new Date().toISOString().split("T")[0];
 
       console.log("📊 Building dashboard for manager:", manager_id);
-      console.log("Permissions:", permissions);
+      console.log("Permissions from req.manager:", permissions);
+
+      // Get the raw permissions from the database to extract arena IDs and initial stats
+      let accessibleArenaIds = [];
+      let arenaPermissionsMap = {};
+      let initialStats = {};
+
+      const [managerData] = await pool.execute(
+        `SELECT permissions FROM arena_managers WHERE manager_id = ?`,
+        [manager_id]
+      );
+
+      if (managerData.length > 0) {
+        let rawPermissions = {};
+        try {
+          rawPermissions = typeof managerData[0].permissions === 'string'
+            ? JSON.parse(managerData[0].permissions)
+            : managerData[0].permissions || {};
+
+          console.log("📦 Raw permissions from DB:", rawPermissions);
+
+          // Extract arena IDs, their permissions, and initial stats
+          Object.keys(rawPermissions).forEach(key => {
+            if (key.startsWith('arena_')) {
+              const arenaId = parseInt(key.replace('arena_', ''));
+              accessibleArenaIds.push(arenaId);
+              arenaPermissionsMap[arenaId] = rawPermissions[key] || {};
+
+              // Get initial stats if they exist
+              if (rawPermissions[key]?.initial_stats) {
+                initialStats[arenaId] = rawPermissions[key].initial_stats;
+              }
+            }
+          });
+        } catch (e) {
+          console.error("Error parsing permissions:", e);
+        }
+      }
+
+      console.log("Accessible arenas from DB:", accessibleArenaIds);
+      console.log("Initial stats from permissions:", initialStats);
 
       const dashboardData = {
         permissions: permissions,
-        stats: {},
+        arena_permissions: arenaPermissionsMap,
+        stats: {
+          today_bookings: 0,
+          pending_requests_count: 0,
+          total_arenas: accessibleArenaIds.length,
+          today_revenue: 0,
+          monthly_revenue: 0
+        },
         pending_requests: [],
         recent_bookings: [],
         arenas: [],
+        arena_stats: []
       };
-
-      // Get all arenas this manager has access to
-      const accessibleArenaIds = [];
-      Object.keys(permissions).forEach(key => {
-        if (key.startsWith('arena_')) {
-          const arenaId = parseInt(key.replace('arena_', ''));
-          accessibleArenaIds.push(arenaId);
-        }
-      });
-
-      console.log("Accessible arenas:", accessibleArenaIds);
 
       if (accessibleArenaIds.length === 0) {
         return res.json(dashboardData);
@@ -37,142 +73,182 @@ const managerController = {
 
       const placeholders = accessibleArenaIds.map(() => '?').join(',');
 
-      // Today's bookings count for accessible arenas
-      const [todayBookings] = await pool.execute(
-        `SELECT COUNT(*) as count 
-       FROM bookings b
-       JOIN arenas a ON b.arena_id = a.arena_id
-       WHERE a.arena_id IN (${placeholders}) AND DATE(b.booking_date) = ?`,
-        [...accessibleArenaIds, today]
-      );
-      dashboardData.stats.today_bookings = todayBookings[0].count || 0;
-
-      // Total pending requests count for accessible arenas
-      const [pendingCount] = await pool.execute(
-        `SELECT COUNT(*) as count 
-       FROM bookings b
-       JOIN arenas a ON b.arena_id = a.arena_id
-       WHERE a.arena_id IN (${placeholders}) AND b.status = 'pending'`,
+      // Get arena details
+      const [arenas] = await pool.execute(
+        `SELECT arena_id, name, address, base_price_per_hour 
+             FROM arenas 
+             WHERE arena_id IN (${placeholders}) AND is_active = TRUE`,
         accessibleArenaIds
       );
-      dashboardData.stats.pending_requests_count = pendingCount[0].count || 0;
+      dashboardData.arenas = arenas;
 
-      // Total arenas count (only accessible ones)
-      dashboardData.stats.total_arenas = accessibleArenaIds.length;
+      // Get current stats for each arena (or use initial stats if no current data)
+      for (let arena of arenas) {
+        // Today's bookings for this arena
+        const [todayBookings] = await pool.execute(
+          `SELECT COUNT(*) as count 
+                 FROM bookings b
+                 JOIN time_slots ts ON b.slot_id = ts.slot_id
+                 WHERE b.arena_id = ? AND DATE(ts.date) = ?`,
+          [arena.arena_id, today]
+        );
 
-      // Check if manager has view_financials permission for ANY arena
-      let canViewFinancials = false;
-      Object.keys(permissions).forEach(key => {
-        if (key.startsWith('arena_') && permissions[key]?.view_financials) {
-          canViewFinancials = true;
-        }
-      });
+        // Pending requests for this arena
+        const [pendingCount] = await pool.execute(
+          `SELECT COUNT(*) as count 
+                 FROM bookings b
+                 WHERE b.arena_id = ? AND b.status = 'pending'`,
+          [arena.arena_id]
+        );
 
-      if (canViewFinancials) {
-        // Today's revenue
+        // Today's revenue for this arena
         const [todayRevenue] = await pool.execute(
           `SELECT COALESCE(SUM(b.total_amount), 0) as revenue
-         FROM bookings b
-         JOIN arenas a ON b.arena_id = a.arena_id
-         WHERE a.arena_id IN (${placeholders}) 
-           AND DATE(b.booking_date) = ? 
-           AND b.status = 'completed'`,
-          [...accessibleArenaIds, today]
+                 FROM bookings b
+                 JOIN time_slots ts ON b.slot_id = ts.slot_id
+                 WHERE b.arena_id = ? AND DATE(ts.date) = ? AND b.status = 'completed'`,
+          [arena.arena_id, today]
         );
-        dashboardData.stats.today_revenue = todayRevenue[0].revenue || 0;
 
-        // Monthly revenue
+        // Monthly revenue for this arena
         const [monthlyRevenue] = await pool.execute(
           `SELECT COALESCE(SUM(b.total_amount), 0) as revenue
-         FROM bookings b
-         JOIN arenas a ON b.arena_id = a.arena_id
-         JOIN time_slots ts ON b.slot_id = ts.slot_id
-         WHERE a.arena_id IN (${placeholders}) 
-           AND MONTH(ts.date) = MONTH(CURRENT_DATE())
-           AND YEAR(ts.date) = YEAR(CURRENT_DATE())
-           AND b.status = 'completed'`,
-          accessibleArenaIds
+                 FROM bookings b
+                 JOIN time_slots ts ON b.slot_id = ts.slot_id
+                 WHERE b.arena_id = ? 
+                   AND MONTH(ts.date) = MONTH(CURRENT_DATE())
+                   AND YEAR(ts.date) = YEAR(CURRENT_DATE())
+                   AND b.status = 'completed'`,
+          [arena.arena_id]
         );
-        dashboardData.stats.monthly_revenue = monthlyRevenue[0].revenue || 0;
+
+        // Get initial stats for this arena if they exist
+        const arenaInitialStats = initialStats[arena.arena_id] || {};
+
+        // Use current stats, fallback to initial stats if current is 0
+        const currentTodayBookings = todayBookings[0].count || 0;
+        const currentPendingCount = pendingCount[0].count || 0;
+        const currentTodayRevenue = todayRevenue[0].revenue || 0;
+        const currentMonthlyRevenue = monthlyRevenue[0].revenue || 0;
+
+        dashboardData.arena_stats.push({
+          arena_id: arena.arena_id,
+          arena_name: arena.name,
+          today_bookings: currentTodayBookings || arenaInitialStats.today_bookings || 0,
+          pending_bookings: currentPendingCount || arenaInitialStats.pending_requests || 0,
+          today_revenue: currentTodayRevenue || arenaInitialStats.today_revenue || 0,
+          monthly_revenue: currentMonthlyRevenue || arenaInitialStats.monthly_revenue || 0,
+          permissions: arenaPermissionsMap[arena.arena_id] || {}
+        });
+
+        // Add to global stats (use current or initial)
+        dashboardData.stats.today_bookings += currentTodayBookings || arenaInitialStats.today_bookings || 0;
+        dashboardData.stats.pending_requests_count += currentPendingCount || arenaInitialStats.pending_requests || 0;
+        dashboardData.stats.today_revenue += currentTodayRevenue || arenaInitialStats.today_revenue || 0;
+        dashboardData.stats.monthly_revenue += currentMonthlyRevenue || arenaInitialStats.monthly_revenue || 0;
       }
 
-      // Check if manager has manage_bookings permission for ANY arena
-      let canManageBookings = false;
-      Object.keys(permissions).forEach(key => {
-        if (key.startsWith('arena_') && permissions[key]?.manage_bookings) {
-          canManageBookings = true;
-        }
-      });
-
-      if (canManageBookings) {
+      // Get pending requests (only if manager has permission)
+      if (permissions.manage_bookings) {
         const [pendingRequests] = await pool.execute(
           `SELECT b.*, u.name as user_name, u.phone_number as user_phone,
-                st.name as sport_name, a.name as arena_name,
-                ts.date, ts.start_time, ts.end_time
-         FROM bookings b
-         JOIN arenas a ON b.arena_id = a.arena_id
-         JOIN users u ON b.user_id = u.user_id
-         JOIN sports_types st ON b.sport_id = st.sport_id
-         JOIN time_slots ts ON b.slot_id = ts.slot_id
-         WHERE a.arena_id IN (${placeholders}) AND b.status = 'pending'
-         ORDER BY ts.date ASC, ts.start_time ASC
-         LIMIT 10`,
+                        st.name as sport_name, a.name as arena_name,
+                        ts.date, ts.start_time, ts.end_time,
+                        a.arena_id
+                 FROM bookings b
+                 JOIN arenas a ON b.arena_id = a.arena_id
+                 JOIN users u ON b.user_id = u.user_id
+                 JOIN sports_types st ON b.sport_id = st.sport_id
+                 JOIN time_slots ts ON b.slot_id = ts.slot_id
+                 WHERE a.arena_id IN (${placeholders}) AND b.status = 'pending'
+                 ORDER BY ts.date ASC, ts.start_time ASC
+                 LIMIT 10`,
           accessibleArenaIds
         );
         dashboardData.pending_requests = pendingRequests;
 
         const [recentBookings] = await pool.execute(
           `SELECT b.*, u.name as user_name, st.name as sport_name,
-                a.name as arena_name, ts.date, ts.start_time, ts.end_time
-         FROM bookings b
-         JOIN arenas a ON b.arena_id = a.arena_id
-         JOIN users u ON b.user_id = u.user_id
-         JOIN sports_types st ON b.sport_id = st.sport_id
-         JOIN time_slots ts ON b.slot_id = ts.slot_id
-         WHERE a.arena_id IN (${placeholders})
-         ORDER BY b.booking_date DESC
-         LIMIT 5`,
+                        a.name as arena_name, ts.date, ts.start_time, ts.end_time,
+                        a.arena_id
+                 FROM bookings b
+                 JOIN arenas a ON b.arena_id = a.arena_id
+                 JOIN users u ON b.user_id = u.user_id
+                 JOIN sports_types st ON b.sport_id = st.sport_id
+                 JOIN time_slots ts ON b.slot_id = ts.slot_id
+                 WHERE a.arena_id IN (${placeholders})
+                 ORDER BY b.booking_date DESC
+                 LIMIT 5`,
           accessibleArenaIds
         );
         dashboardData.recent_bookings = recentBookings;
       }
 
-      // Get accessible arenas
-      const [arenas] = await pool.execute(
-        `SELECT arena_id, name FROM arenas 
-       WHERE arena_id IN (${placeholders}) AND is_active = TRUE`,
-        accessibleArenaIds
-      );
-      dashboardData.arenas = arenas;
-
-      console.log("✅ Dashboard data prepared");
+      console.log("✅ Dashboard data prepared with arena stats:", dashboardData.arena_stats);
       res.json(dashboardData);
     } catch (error) {
       console.error("Dashboard error:", error);
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
-  // Get bookings
+  // In managerController.js - Update getBookings
+
   getBookings: async (req, res) => {
     try {
-      const { owner_id } = req.manager;
-      const { status, date_from, date_to, type = "all" } = req.query;
+      const { owner_id, id: manager_id } = req.manager;
+      const { status, date_from, date_to, type = "all", arena_id } = req.query;
+
+      // Get all arenas this manager has access to
+      const [managerData] = await pool.execute(
+        `SELECT permissions FROM arena_managers WHERE manager_id = ?`,
+        [manager_id]
+      );
+
+      let accessibleArenaIds = [];
+      if (managerData.length > 0) {
+        let permissions = {};
+        try {
+          permissions = typeof managerData[0].permissions === 'string'
+            ? JSON.parse(managerData[0].permissions)
+            : managerData[0].permissions || {};
+
+          Object.keys(permissions).forEach(key => {
+            if (key.startsWith('arena_')) {
+              const arenaId = parseInt(key.replace('arena_', ''));
+              accessibleArenaIds.push(arenaId);
+            }
+          });
+        } catch (e) {
+          console.error("Error parsing permissions:", e);
+        }
+      }
+
+      if (accessibleArenaIds.length === 0) {
+        return res.json([]);
+      }
 
       let query = `
-                SELECT b.booking_id, b.status, b.total_amount, b.commission_amount,
-                       b.booking_date, b.payment_status, u.name as user_name,
-                       u.email as user_email, u.phone_number as user_phone,
-                       st.name as sport_name, a.name as arena_name,
-                       ts.date, ts.start_time, ts.end_time
-                FROM bookings b
-                JOIN arenas a ON b.arena_id = a.arena_id
-                JOIN users u ON b.user_id = u.user_id
-                JOIN sports_types st ON b.sport_id = st.sport_id
-                JOIN time_slots ts ON b.slot_id = ts.slot_id
-                WHERE a.owner_id = ?
-            `;
+            SELECT b.booking_id, b.status, b.total_amount, b.commission_amount,
+                   b.booking_date, b.payment_status, u.name as user_name,
+                   u.email as user_email, u.phone_number as user_phone,
+                   st.name as sport_name, a.name as arena_name,
+                   ts.date, ts.start_time, ts.end_time,
+                   a.arena_id
+            FROM bookings b
+            JOIN arenas a ON b.arena_id = a.arena_id
+            JOIN users u ON b.user_id = u.user_id
+            JOIN sports_types st ON b.sport_id = st.sport_id
+            JOIN time_slots ts ON b.slot_id = ts.slot_id
+            WHERE a.arena_id IN (${accessibleArenaIds.map(() => '?').join(',')})
+        `;
 
-      const params = [owner_id];
+      const params = [...accessibleArenaIds];
+
+      // Filter by specific arena if provided
+      if (arena_id) {
+        query += " AND a.arena_id = ?";
+        params.push(arena_id);
+      }
 
       if (status && status !== "all") {
         query += " AND b.status = ?";
@@ -180,7 +256,7 @@ const managerController = {
       }
 
       if (type === "upcoming") {
-        query += " AND b.status IN ('accepted', 'pending')";
+        query += " AND b.status IN ('accepted', 'pending') AND ts.date >= CURDATE()";
       } else if (type === "history") {
         query += " AND b.status IN ('completed', 'cancelled', 'rejected')";
       }
@@ -313,24 +389,39 @@ const managerController = {
   },
 
   // In managerController.js - Update getCalendar
+
   getCalendar: async (req, res) => {
     try {
-      const { owner_id } = req.manager;
-      const { arena_id, date, court_id } = req.query; // Add court_id here
+      const { id: manager_id } = req.manager;
+      const { arena_id, date, court_id } = req.query;
 
       if (!date) {
         return res.status(400).json({ message: "Date is required" });
       }
 
-      // Verify arena belongs to owner
-      const [arenaCheck] = await pool.execute(
-        "SELECT arena_id FROM arenas WHERE arena_id = ? AND owner_id = ?",
-        [arena_id, owner_id]
+      // Verify this manager has access to this arena
+      const [managerData] = await pool.execute(
+        `SELECT permissions FROM arena_managers WHERE manager_id = ?`,
+        [manager_id]
       );
 
-      if (arenaCheck.length === 0) {
-        return res.status(404).json({
-          message: "Arena not found or access denied"
+      let hasAccess = false;
+      if (managerData.length > 0) {
+        let permissions = {};
+        try {
+          permissions = typeof managerData[0].permissions === 'string'
+            ? JSON.parse(managerData[0].permissions)
+            : managerData[0].permissions || {};
+
+          hasAccess = permissions[`arena_${arena_id}`] !== undefined;
+        } catch (e) {
+          console.error("Error parsing permissions:", e);
+        }
+      }
+
+      if (!hasAccess) {
+        return res.status(403).json({
+          message: "You don't have access to this arena"
         });
       }
 
@@ -534,22 +625,36 @@ const managerController = {
     }
   },
 
-  // Get courts
-  // In managerController.js - Update getCourts to include images
+  // In managerController.js - Update getCourts
+
   getCourts: async (req, res) => {
     try {
       const { arena_id } = req.params;
-      const { owner_id } = req.manager;
+      const { id: manager_id } = req.manager;
 
-      // Verify arena belongs to owner
-      const [arenaCheck] = await pool.execute(
-        "SELECT arena_id FROM arenas WHERE arena_id = ? AND owner_id = ?",
-        [arena_id, owner_id]
+      // Verify manager has access to this arena
+      const [managerData] = await pool.execute(
+        `SELECT permissions FROM arena_managers WHERE manager_id = ?`,
+        [manager_id]
       );
 
-      if (arenaCheck.length === 0) {
-        return res.status(404).json({
-          message: "Arena not found or access denied"
+      let hasAccess = false;
+      if (managerData.length > 0) {
+        let permissions = {};
+        try {
+          permissions = typeof managerData[0].permissions === 'string'
+            ? JSON.parse(managerData[0].permissions)
+            : managerData[0].permissions || {};
+
+          hasAccess = permissions[`arena_${arena_id}`] !== undefined;
+        } catch (e) {
+          console.error("Error parsing permissions:", e);
+        }
+      }
+
+      if (!hasAccess) {
+        return res.status(403).json({
+          message: "You don't have access to this arena"
         });
       }
 
@@ -565,7 +670,7 @@ const managerController = {
         [arena_id]
       );
 
-      // FIX: Also fetch images for each court
+      // Fetch images for each court
       for (let court of courts) {
         const [images] = await pool.execute(
           `SELECT image_id, image_url, cloudinary_id, is_primary, uploaded_at

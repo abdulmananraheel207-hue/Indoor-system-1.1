@@ -46,6 +46,10 @@ const OwnerDashboard = () => {
     }
   }, [selectedArena]);
 
+  // In OwnerDashboard.jsx - Replace the getPermissions function
+
+  // In OwnerDashboard.jsx - Update getPermissions function
+
   const getPermissions = () => {
     if (isOwner) {
       return {
@@ -59,7 +63,16 @@ const OwnerDashboard = () => {
       if (userDataStr) {
         try {
           const userData = JSON.parse(userDataStr);
-          return userData.permissions || {};
+          console.log("📋 User data from localStorage:", userData);
+
+          // Get BOTH flattened and arena-specific permissions
+          const permissions = userData.permissions || {}; // Flattened
+          const arenaPermissions = userData.arena_permissions || {}; // Arena-specific
+
+          // Store arena permissions in localStorage for later use
+          localStorage.setItem('arenaPermissions', JSON.stringify(arenaPermissions));
+
+          return permissions;
         } catch (e) {
           console.error("Error parsing manager permissions:", e);
           return {};
@@ -68,7 +81,6 @@ const OwnerDashboard = () => {
     }
     return {};
   };
-
   const permissions = getPermissions();
 
   const canAccessTab = (tab) => {
@@ -115,6 +127,8 @@ const OwnerDashboard = () => {
     return () => clearInterval(interval);
   }, [currentTab, userRole]);
 
+  // In OwnerDashboard.jsx - Update the fetchUserData function
+
   const fetchUserData = async () => {
     setLoading(true);
     try {
@@ -129,6 +143,8 @@ const OwnerDashboard = () => {
         throw new Error("Unknown user role");
       }
 
+      console.log("📡 Fetching dashboard from:", endpoint);
+
       const response = await fetch(endpoint, {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -136,31 +152,15 @@ const OwnerDashboard = () => {
       });
 
       const data = await response.json();
+      console.log("📥 Dashboard response:", data);
 
       if (response.ok) {
         setUserData(data);
 
-        let statsToSave = null;
-
-        if (isOwner && data.dashboard) {
-          statsToSave = {
-            ...data.dashboard,
-            lastUpdated: new Date().toISOString()
-          };
-        } else if (isManager && data.stats) {
-          statsToSave = {
-            ...data.stats,
-            lastUpdated: new Date().toISOString()
-          };
-        }
-
-        if (statsToSave) {
-          localStorage.setItem('dashboardStats', JSON.stringify(statsToSave));
-          setDashboardStats(statsToSave);
-        }
-
-        // 🔥 IMPROVED: Handle arena selection
+        // Handle arena selection
         if (data.arenas && data.arenas.length > 0) {
+          console.log("🏟️ Arenas available:", data.arenas);
+
           // Check if previously selected arena still exists
           if (selectedArena) {
             const stillExists = data.arenas.some(a => a.arena_id === selectedArena.arena_id);
@@ -173,7 +173,25 @@ const OwnerDashboard = () => {
             setSelectedArena(data.arenas[0]);
           }
         } else {
+          console.log("⚠️ No arenas found in response");
           setSelectedArena(null);
+        }
+
+        // Update dashboard stats
+        if (isOwner && data.dashboard) {
+          const statsToSave = {
+            ...data.dashboard,
+            lastUpdated: new Date().toISOString()
+          };
+          localStorage.setItem('dashboardStats', JSON.stringify(statsToSave));
+          setDashboardStats(statsToSave);
+        } else if (isManager && data.stats) {
+          const statsToSave = {
+            ...data.stats,
+            lastUpdated: new Date().toISOString()
+          };
+          localStorage.setItem('dashboardStats', JSON.stringify(statsToSave));
+          setDashboardStats(statsToSave);
         }
       } else if (response.status === 401) {
         handleLogout();
