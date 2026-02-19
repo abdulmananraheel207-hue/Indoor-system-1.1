@@ -1,4 +1,3 @@
-// Create new file: src/hooks/useRequireAuth.js
 import { useNavigate } from "react-router-dom";
 import { useState } from "react";
 
@@ -7,8 +6,6 @@ const useRequireAuth = () => {
     const [showModal, setShowModal] = useState(false);
     const [pendingAction, setPendingAction] = useState(null);
 
-    // Get auth state from your context/props
-    // You'll need to pass auth from App.jsx or use context
     const isGuest = localStorage.getItem("isGuest") === "true";
     const isAuthenticated = !!localStorage.getItem("token");
 
