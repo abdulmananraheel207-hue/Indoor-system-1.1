@@ -657,7 +657,6 @@ const arenaController = {
 
       console.log("Arena details fetched with google_maps_location:", arena.google_maps_location);
 
-      // 1. Get courts with their sports
       const [courts] = await pool.execute(
         `SELECT 
         cd.*,

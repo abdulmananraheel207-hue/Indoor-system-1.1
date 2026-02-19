@@ -588,13 +588,14 @@ const superAdminController = {
     // Add to superAdminController.js
 
     // Block owner
+    // Block Owner (trigger handles managers automatically)
     blockOwner: async (req, res) => {
         try {
             const { owner_id } = req.params;
-            const { reason, notify_owner, block_arenas } = req.body;
+            const { reason, notify_owner } = req.body;
             const admin_id = req.user?.id;
 
-            console.log('🔒 Blocking owner:', { owner_id, reason, block_arenas, admin_id });
+            console.log('🔒 Blocking owner:', { owner_id, reason });
 
             if (!reason) {
                 return res.status(400).json({
@@ -603,14 +604,38 @@ const superAdminController = {
                 });
             }
 
-            // Get a connection for transaction
+            // Check if owner exists
+            const [owner] = await pool.execute(
+                'SELECT * FROM arena_owners WHERE owner_id = ?',
+                [owner_id]
+            );
+
+            if (owner.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Owner not found'
+                });
+            }
+
+            // Get counts for response (before update)
+            const [arenaCount] = await pool.execute(
+                'SELECT COUNT(*) as count FROM arenas WHERE owner_id = ?',
+                [owner_id]
+            );
+
+            const [managerCount] = await pool.execute(
+                'SELECT COUNT(*) as count FROM arena_managers WHERE owner_id = ?',
+                [owner_id]
+            );
+
+            // Start transaction
             const connection = await pool.getConnection();
+            await connection.beginTransaction();
 
             try {
-                await connection.query('START TRANSACTION');
-
                 // 1. Block the owner account
-                const [ownerResult] = await connection.execute(
+                // TRIGGER will automatically handle managers (set is_active = 0)
+                await connection.execute(
                     `UPDATE arena_owners 
                  SET is_blocked = TRUE,
                      blocked_reason = ?,
@@ -619,23 +644,14 @@ const superAdminController = {
                     [reason, owner_id]
                 );
 
-                if (ownerResult.affectedRows === 0) {
-                    await connection.query('ROLLBACK');
-                    connection.release();
-                    return res.status(404).json({
-                        success: false,
-                        message: 'Owner not found'
-                    });
-                }
-
-                // 2. Block all arenas of this owner (if requested)
-                if (block_arenas) {
+                // 2. Block ALL arenas for this owner
+                if (arenaCount[0].count > 0) {
                     await connection.execute(
                         `UPDATE arenas 
                      SET is_blocked = TRUE,
                          blocked_reason = ?,
                          blocked_at = NOW()
-                     WHERE owner_id = ? AND is_blocked = FALSE`,
+                     WHERE owner_id = ?`,
                         [reason, owner_id]
                     );
                 }
@@ -644,23 +660,22 @@ const superAdminController = {
                 await connection.execute(
                     `INSERT INTO admin_actions 
                  (admin_id, action_type, target_id, target_type, details, ip_address)
-                 VALUES (?, ?, ?, ?, ?, ?)`,
+                 VALUES (?, 'owner_blocked', ?, 'owner', ?, ?)`,
                     [
                         admin_id,
-                        'owner_blocked',
                         owner_id,
-                        'owner',
                         JSON.stringify({
                             reason,
-                            block_arenas,
                             notify_owner,
-                            timestamp: new Date().toISOString()
+                            arenas_blocked: arenaCount[0].count,
+                            managers_affected: managerCount[0].count,
+                            trigger_handled: true
                         }),
                         req.ip || '127.0.0.1'
                     ]
                 );
 
-                await connection.query('COMMIT');
+                await connection.commit();
                 connection.release();
 
                 // Get updated owner data
@@ -673,11 +688,15 @@ const superAdminController = {
                 res.json({
                     success: true,
                     message: 'Owner blocked successfully',
-                    data: updatedOwner[0]
+                    data: {
+                        ...updatedOwner[0],
+                        arenas_blocked: arenaCount[0].count,
+                        managers_affected: managerCount[0].count
+                    }
                 });
 
             } catch (error) {
-                await connection.query('ROLLBACK');
+                await connection.rollback();
                 connection.release();
                 throw error;
             }
@@ -687,28 +706,52 @@ const superAdminController = {
             res.status(500).json({
                 success: false,
                 message: 'Failed to block owner',
-                error: process.env.NODE_ENV === 'development' ? error.message : undefined
+                error: error.message
             });
         }
     },
 
-    // UNBLOCK OWNER - Complete function
+    // Unblock Owner (trigger handles managers automatically)
     unblockOwner: async (req, res) => {
         try {
             const { owner_id } = req.params;
-            const { notify_owner, unblock_arenas = true } = req.body;
+            const { notify_owner } = req.body;
             const admin_id = req.user?.id;
 
-            console.log('🔓 Unblocking owner:', { owner_id, unblock_arenas, admin_id });
+            console.log('🔓 Unblocking owner:', { owner_id });
 
-            // Get a connection for transaction
+            // Check if owner exists
+            const [owner] = await pool.execute(
+                'SELECT * FROM arena_owners WHERE owner_id = ?',
+                [owner_id]
+            );
+
+            if (owner.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Owner not found'
+                });
+            }
+
+            // Get counts for response
+            const [arenaCount] = await pool.execute(
+                'SELECT COUNT(*) as count FROM arenas WHERE owner_id = ?',
+                [owner_id]
+            );
+
+            const [managerCount] = await pool.execute(
+                'SELECT COUNT(*) as count FROM arena_managers WHERE owner_id = ?',
+                [owner_id]
+            );
+
+            // Start transaction
             const connection = await pool.getConnection();
+            await connection.beginTransaction();
 
             try {
-                await connection.query('START TRANSACTION');
-
                 // 1. Unblock the owner account
-                const [ownerResult] = await connection.execute(
+                // TRIGGER will automatically handle managers (set is_active = 1)
+                await connection.execute(
                     `UPDATE arena_owners 
                  SET is_blocked = FALSE,
                      blocked_reason = NULL,
@@ -717,17 +760,8 @@ const superAdminController = {
                     [owner_id]
                 );
 
-                if (ownerResult.affectedRows === 0) {
-                    await connection.query('ROLLBACK');
-                    connection.release();
-                    return res.status(404).json({
-                        success: false,
-                        message: 'Owner not found'
-                    });
-                }
-
-                // 2. Unblock all arenas of this owner
-                if (unblock_arenas) {
+                // 2. Unblock ALL arenas for this owner
+                if (arenaCount[0].count > 0) {
                     await connection.execute(
                         `UPDATE arenas 
                      SET is_blocked = FALSE,
@@ -742,22 +776,21 @@ const superAdminController = {
                 await connection.execute(
                     `INSERT INTO admin_actions 
                  (admin_id, action_type, target_id, target_type, details, ip_address)
-                 VALUES (?, ?, ?, ?, ?, ?)`,
+                 VALUES (?, 'owner_unblocked', ?, 'owner', ?, ?)`,
                     [
                         admin_id,
-                        'owner_unblocked',
                         owner_id,
-                        'owner',
                         JSON.stringify({
-                            unblock_arenas,
                             notify_owner,
-                            timestamp: new Date().toISOString()
+                            arenas_unblocked: arenaCount[0].count,
+                            managers_affected: managerCount[0].count,
+                            trigger_handled: true
                         }),
                         req.ip || '127.0.0.1'
                     ]
                 );
 
-                await connection.query('COMMIT');
+                await connection.commit();
                 connection.release();
 
                 // Get updated owner data
@@ -770,11 +803,15 @@ const superAdminController = {
                 res.json({
                     success: true,
                     message: 'Owner unblocked successfully',
-                    data: updatedOwner[0]
+                    data: {
+                        ...updatedOwner[0],
+                        arenas_unblocked: arenaCount[0].count,
+                        managers_affected: managerCount[0].count
+                    }
                 });
 
             } catch (error) {
-                await connection.query('ROLLBACK');
+                await connection.rollback();
                 connection.release();
                 throw error;
             }
@@ -784,10 +821,12 @@ const superAdminController = {
             res.status(500).json({
                 success: false,
                 message: 'Failed to unblock owner',
-                error: process.env.NODE_ENV === 'development' ? error.message : undefined
+                error: error.message
             });
         }
     },
+
+
 
 
     // 4. PAYMENT ENFORCEMENT: Block Arena for Non-Payment

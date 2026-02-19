@@ -21,7 +21,7 @@ const ReviewReminderModal = () => {
         try {
             setLoading(true);
 
-            // REMOVED: localStorage check for dismissals
+            // REMOVED: 30-day localStorage check
 
             // Fetch pending reviews
             console.log("Fetching pending reviews...");
@@ -45,7 +45,34 @@ const ReviewReminderModal = () => {
         }
     };
 
-    // REMOVED: handleDismiss function
+    const handleDismiss = async (bookingId) => {
+        try {
+            await integrationService.dismissReviewReminder(bookingId);
+
+            // Remove this booking from pending list
+            const updatedPending = pendingReviews.filter(
+                review => review.booking_id !== bookingId
+            );
+
+            if (updatedPending.length === 0) {
+                // No more reviews, close modal
+                setIsVisible(false);
+                setPendingReviews([]);
+            } else {
+                setPendingReviews(updatedPending);
+                // Reset form for next review
+                setRating(5);
+                setComment("");
+                // Adjust index if needed
+                if (currentReviewIndex >= updatedPending.length) {
+                    setCurrentReviewIndex(updatedPending.length - 1);
+                }
+            }
+        } catch (error) {
+            console.error("Error dismissing reminder:", error);
+            alert("Failed to dismiss reminder. Please try again.");
+        }
+    };
 
     // REMOVED: handleSkipAll function
 
@@ -93,9 +120,6 @@ const ReviewReminderModal = () => {
                 if (currentReviewIndex >= updatedPending.length) {
                     setCurrentReviewIndex(updatedPending.length - 1);
                 }
-
-                // Show success message but keep modal open for next review
-                alert("Review submitted successfully! You have more reviews to complete.");
             }
 
         } catch (error) {
@@ -293,7 +317,17 @@ const ReviewReminderModal = () => {
                                 </>
                             )}
                         </button>
+
+                        <button
+                            onClick={() => handleDismiss(currentReview.booking_id)}
+                            disabled={submitting}
+                            className="border border-gray-300 text-gray-700 font-medium py-3 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+                        >
+                            Maybe Later
+                        </button>
                     </div>
+
+                    {/* REMOVED: "Don't show these reminders again for 30 days" link */}
                 </div>
             </div>
         </div>
