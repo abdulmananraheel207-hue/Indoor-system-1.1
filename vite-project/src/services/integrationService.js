@@ -853,26 +853,51 @@ export const integrationService = {
     }
   },
 
-  // ===== BOOKING FLOW =====
+  // Update the createBooking method in integrationService.js
+  // In integrationService.js - Update createBooking method
   createBooking: async (bookingData) => {
     try {
+      // Check if we have multiple slots
+      const slotIds = bookingData.slot_ids || bookingData.slotIds || [];
+
+      // Determine if this is a multi-slot booking
+      const isMultiSlot = slotIds.length > 1;
+
+      // FIX: Ensure total_amount is a proper number
+      let totalAmount = bookingData.totalPrice || bookingData.total_amount;
+
+      // Convert to number and fix to 2 decimal places
+      if (totalAmount) {
+        totalAmount = Number(parseFloat(totalAmount).toFixed(2));
+      }
+
+      // Get the first and last slot info for display
+      let startTime = bookingData.startTime;
+      let endTime = bookingData.endTime;
+
+      // If we have slots but no start/end times, we'll let backend handle it
       const payload = {
         arena_id: bookingData.arenaId,
         court_id: bookingData.courtId,
-        date: bookingData.date,
-        start_time: bookingData.startTime,
-        end_time: bookingData.endTime,
-        total_amount: bookingData.totalPrice || bookingData.total_amount,
+        total_amount: totalAmount, // Use the fixed amount
         sport_id: bookingData.sportId || bookingData.sport_id || undefined,
         notes: bookingData.notes || "",
+        is_multi_slot: isMultiSlot,
       };
 
+      // Handle different slot formats
       if (bookingData.slot_id) payload.slot_id = bookingData.slot_id;
       if (bookingData.slotId) payload.slot_id = bookingData.slotId;
-      if (bookingData.slot_ids || bookingData.slotIds) {
-        const ids = bookingData.slot_ids || bookingData.slotIds;
-        payload.slot_ids = Array.isArray(ids) ? ids : [ids];
+      if (slotIds.length > 0) {
+        payload.slot_ids = slotIds;
       }
+
+      // For date+time format
+      if (bookingData.date) payload.date = bookingData.date;
+      if (bookingData.startTime) payload.start_time = bookingData.startTime;
+      if (bookingData.endTime) payload.end_time = bookingData.endTime;
+
+      console.log("📤 Creating booking with payload:", payload);
 
       const response = await fetch(
         "http://localhost:5000/api/bookings",
@@ -883,14 +908,25 @@ export const integrationService = {
         }
       );
 
-      if (!response.ok) throw new Error("Failed to create booking");
-      return await response.json();
+      const responseText = await response.text();
+      console.log("📡 Booking response:", responseText);
+
+      if (!response.ok) {
+        let errorData;
+        try {
+          errorData = JSON.parse(responseText);
+        } catch (e) {
+          errorData = { message: responseText };
+        }
+        throw new Error(errorData.message || "Failed to create booking");
+      }
+
+      return JSON.parse(responseText);
     } catch (error) {
       console.error("Error creating booking:", error);
       throw error;
     }
   },
-
   getUserBookings: async (filters = {}) => {
     try {
       const queryParams = new URLSearchParams();
@@ -906,7 +942,21 @@ export const integrationService = {
       );
 
       if (!response.ok) throw new Error("Failed to fetch bookings");
-      return await response.json();
+
+      const data = await response.json();
+
+      // Process bookings to add multi-slot info
+      if (data.bookings) {
+        data.bookings = data.bookings.map(booking => ({
+          ...booking,
+          slot_count: booking.is_multi_slot && booking.slot_ids
+            ? (Array.isArray(booking.slot_ids) ? booking.slot_ids.length :
+              (typeof booking.slot_ids === 'string' ? JSON.parse(booking.slot_ids).length : 1))
+            : 1
+        }));
+      }
+
+      return data;
     } catch (error) {
       console.error("Error fetching user bookings:", error);
       throw error;
@@ -1307,6 +1357,24 @@ export const integrationService = {
   },
 
   // ===== TIME SLOT LOCKING =====
+  getCourtSlots: async (arenaId, courtId, date, sportId = null) => {
+    try {
+      let url = `http://localhost:5000/api/arenas/${arenaId}/courts/${courtId}/slots?date=${date}`;
+      if (sportId) {
+        url += `&sport_id=${sportId}`;
+      }
+
+      const response = await fetch(url, {
+        headers: getAuthHeaders(),
+      });
+
+      if (!response.ok) throw new Error("Failed to fetch court slots");
+      return await response.json();
+    } catch (error) {
+      console.error("Error fetching court slots:", error);
+      throw error;
+    }
+  },
   lockSlot: async (slotId) => {
     try {
       const response = await fetch(
@@ -1316,6 +1384,11 @@ export const integrationService = {
           headers: getAuthHeaders(),
         }
       );
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to lock slot');
+      }
       return await response.json();
     } catch (error) {
       console.error("Error locking slot:", error);
@@ -1323,6 +1396,7 @@ export const integrationService = {
     }
   },
 
+  // Update releaseSlot
   releaseSlot: async (slotId) => {
     try {
       const response = await fetch(
@@ -1332,12 +1406,18 @@ export const integrationService = {
           headers: getAuthHeaders(),
         }
       );
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to release slot');
+      }
       return await response.json();
     } catch (error) {
       console.error("Error releasing slot:", error);
       throw error;
     }
   },
+
 
   // ===== PAYMENT =====
   uploadPaymentScreenshot: async (bookingId, paymentData) => {

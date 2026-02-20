@@ -1,12 +1,132 @@
-// File: bookingController.js - COMPLETE FIXED VERSION
 const pool = require("../db");
 const { sendNotification } = require("../utils/notificationService");
+
+// ===== HELPER FUNCTIONS - DEFINED AT THE TOP =====
+
+// Helper function to check if slots are consecutive
+function areSlotsConsecutive(slots) {
+  if (!slots || slots.length <= 1) return false;
+
+  try {
+    // Sort slots by date and start time
+    const sorted = [...slots].sort((a, b) => {
+      // Handle date comparison safely
+      let dateCompare = 0;
+      if (a.date && b.date) {
+        const dateA = a.date instanceof Date ? a.date.toISOString().split('T')[0] : String(a.date);
+        const dateB = b.date instanceof Date ? b.date.toISOString().split('T')[0] : String(b.date);
+        dateCompare = dateA.localeCompare(dateB);
+      }
+
+      if (dateCompare !== 0) return dateCompare;
+
+      // Then sort by start time
+      const timeA = a.start_time ? String(a.start_time) : '';
+      const timeB = b.start_time ? String(b.start_time) : '';
+      return timeA.localeCompare(timeB);
+    });
+
+    for (let i = 0; i < sorted.length - 1; i++) {
+      // Check if they're on the same date
+      const prevDate = sorted[i].date ? (sorted[i].date instanceof Date ? sorted[i].date.toISOString().split('T')[0] : String(sorted[i].date)) : '';
+      const currentDate = sorted[i + 1].date ? (sorted[i + 1].date instanceof Date ? sorted[i + 1].date.toISOString().split('T')[0] : String(sorted[i + 1].date)) : '';
+
+      // Check if they are consecutive (current end time equals next start time)
+      const currentEnd = sorted[i].end_time ? String(sorted[i].end_time) : '';
+      const nextStart = sorted[i + 1].start_time ? String(sorted[i + 1].start_time) : '';
+
+      if (prevDate !== currentDate || currentEnd !== nextStart) {
+        return false;
+      }
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Error checking consecutive slots:", error);
+    return false;
+  }
+}
+
+// Helper function to group consecutive slots
+function groupConsecutiveSlots(slots) {
+  console.log("groupConsecutiveSlots called with", slots?.length, "slots"); // ADD THIS DEBUG LINE
+
+  if (!slots || slots.length === 0) {
+    console.log("No slots provided");
+    return [];
+  }
+
+  if (slots.length === 1) {
+    console.log("Only one slot, returning as single group");
+    return [slots];
+  }
+
+  try {
+    // Sort slots by date and start time
+    const sorted = [...slots].sort((a, b) => {
+      // Handle date comparison safely
+      let dateCompare = 0;
+      if (a.date && b.date) {
+        const dateA = a.date instanceof Date ? a.date.toISOString().split('T')[0] : String(a.date);
+        const dateB = b.date instanceof Date ? b.date.toISOString().split('T')[0] : String(b.date);
+        dateCompare = dateA.localeCompare(dateB);
+      }
+
+      if (dateCompare !== 0) return dateCompare;
+
+      // Then sort by start time
+      const timeA = a.start_time ? String(a.start_time) : '';
+      const timeB = b.start_time ? String(b.start_time) : '';
+      return timeA.localeCompare(timeB);
+    });
+
+    console.log("Sorted slots:", sorted.map(s => `${s.date} ${s.start_time}-${s.end_time}`));
+
+    const groups = [];
+    let currentGroup = [sorted[0]];
+
+    for (let i = 1; i < sorted.length; i++) {
+      const prevSlot = sorted[i - 1];
+      const currentSlot = sorted[i];
+
+      // Safely get date strings
+      const prevDate = prevSlot.date ? (prevSlot.date instanceof Date ? prevSlot.date.toISOString().split('T')[0] : String(prevSlot.date)) : '';
+      const currentDate = currentSlot.date ? (currentSlot.date instanceof Date ? currentSlot.date.toISOString().split('T')[0] : String(currentSlot.date)) : '';
+
+      // Safely get time strings
+      const prevEnd = prevSlot.end_time ? String(prevSlot.end_time) : '';
+      const currentStart = currentSlot.start_time ? String(currentSlot.start_time) : '';
+
+      console.log(`Comparing: ${prevDate} ${prevEnd} with ${currentDate} ${currentStart}`);
+
+      // Check if current slot is consecutive to previous (same date and end_time matches next start_time)
+      if (prevDate === currentDate && prevEnd === currentStart) {
+        console.log("Consecutive, adding to current group");
+        currentGroup.push(currentSlot);
+      } else {
+        console.log("Not consecutive, starting new group");
+        groups.push([...currentGroup]);
+        currentGroup = [currentSlot];
+      }
+    }
+
+    groups.push(currentGroup);
+    console.log(`Created ${groups.length} groups`);
+    return groups;
+  } catch (error) {
+    console.error("Error grouping consecutive slots:", error);
+    // If grouping fails, treat each slot as separate group
+    return slots.map(slot => [slot]);
+  }
+}
 
 const bookingController = {
   // Create a new booking - FIXED VERSION
   createBooking: async (req, res) => {
     const connection = await pool.getConnection();
     try {
+      console.log("createBooking called with body:", req.body); // ADD DEBUG
+
       const body = req.body || {};
       const arena_id = body.arena_id || body.arenaId || body.arena || null;
       const slot_id = body.slot_id || body.slotId || null;
@@ -16,28 +136,40 @@ const bookingController = {
       const date = body.date || body.bookingDate || null;
       const start_time = body.start_time || body.startTime || null;
       const end_time = body.end_time || body.endTime || null;
-      const total_amount =
-        body.total_amount || body.totalAmount || body.totalPrice || null;
+
+      // Process total_amount with multiple field name options
+      const total_amount = body.total_amount || body.totalAmount || body.totalPrice || null;
+
+      // Convert to number properly and validate
+      const totalAmountNum = total_amount ? parseFloat(total_amount) : null;
+
+      // Add validation for total_amount format
+      if (totalAmountNum && isNaN(totalAmountNum)) {
+        return res.status(400).json({
+          message: "Invalid total_amount format"
+        });
+      }
+
+      // Make sure totalAmountNum is a number with max 2 decimal places
+      const validTotalAmount = totalAmountNum ?
+        Number(parseFloat(totalAmountNum).toFixed(2)) : null;
+
       const payment_method = body.payment_method || body.paymentMethod || null;
 
       const arenaIdNum = arena_id ? Number(arena_id) : null;
       const slotIdNum = slot_id ? Number(slot_id) : null;
       const sportIdNum = sport_id ? Number(sport_id) : null;
       const courtIdNum = court_id ? Number(court_id) : null;
-      const totalAmountNum = total_amount ? Number(total_amount) : null;
       const slotIds = Array.isArray(slotIdsRaw)
         ? [...new Set(slotIdsRaw.map(Number).filter((id) => Number(id) > 0))]
         : [];
+
+      console.log("Processed slotIds:", slotIds); // ADD DEBUG
 
       // Validate required fields
       if (!arenaIdNum) {
         return res.status(400).json({ message: "Arena ID is required" });
       }
-
-      // Add court validation
-      // if (!courtIdNum) {
-      // return res.status(400).json({ message: "Court ID is required" });
-      //}
 
       if (
         slotIds.length === 0 &&
@@ -67,10 +199,14 @@ const bookingController = {
         await connection.rollback();
         return res.status(403).json({ message: "Arena is blocked" });
       }
-      // === ADD THIS VALIDATION BLOCK HERE ===
+
       // Function to check if a slot is in the past
       const isSlotInPast = (slotDate, slotTime) => {
-        const slotDateTimeStr = `${slotDate}T${slotTime}:00`;
+        const dateStr = slotDate instanceof Date
+          ? slotDate.toISOString().split('T')[0]
+          : String(slotDate);
+
+        const slotDateTimeStr = `${dateStr}T${slotTime}:00`;
         const slotStart = new Date(slotDateTimeStr);
         const now = new Date();
         return slotStart.getTime() < now.getTime();
@@ -82,28 +218,31 @@ const bookingController = {
       let createdBookings = [];
 
       if (slotIds.length > 0) {
-        // Multiple slots booking
+        // MULTIPLE SLOTS BOOKING
+        console.log("Processing multiple slots booking with IDs:", slotIds); // ADD DEBUG
+
         const placeholders = slotIds.map(() => "?").join(",");
 
         // Check all slots are available and belong to the same arena and court
-        // Multiple slots booking
         const [slots] = await connection.execute(
           `SELECT ts.*, 
-          b.booking_id as existing_booking,
-          b.status as existing_status
-   FROM time_slots ts
-   LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
-     AND b.status IN ('pending', 'accepted', 'completed')
-   WHERE ts.slot_id IN (${placeholders})
-     AND ts.arena_id = ?
-     AND ts.court_id = ?`,
-          [...slotIds, arenaIdNum, courtIdNum || null] // Add courtIdNum
+                  b.booking_id as existing_booking,
+                  b.status as existing_status
+           FROM time_slots ts
+           LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
+             AND b.status IN ('pending', 'accepted', 'completed')
+           WHERE ts.slot_id IN (${placeholders})
+             AND ts.arena_id = ?
+             AND ts.court_id = ?`,
+          [...slotIds, arenaIdNum, courtIdNum || null]
         );
+
+        console.log("Found slots:", slots.length); // ADD DEBUG
+
         if (slots.length !== slotIds.length) {
           await connection.rollback();
           return res.status(400).json({
-            message:
-              "One or more selected slots were not found for this arena and court",
+            message: "One or more selected slots were not found for this arena and court",
           });
         }
 
@@ -130,7 +269,7 @@ const bookingController = {
             })),
           });
         }
-        // === ADD THIS CHECK HERE ===
+
         // Check for past time slots
         const pastSlots = slots.filter((s) =>
           isSlotInPast(s.date, s.start_time)
@@ -148,6 +287,7 @@ const bookingController = {
             })),
           });
         }
+
         // Check for expired locks
         const lockedSlots = slots.filter(
           (s) =>
@@ -170,94 +310,125 @@ const bookingController = {
           });
         }
 
-        // Create bookings for each slot
-        for (const slot of slots) {
-          const priceForSlot = slot.price || totalAmountNum || 500;
-          const commission_amount =
-            priceForSlot * (commission_percentage / 100);
+        // Group consecutive slots - CALL THE STANDALONE FUNCTION
+        console.log("Calling groupConsecutiveSlots...");
+        const slotGroups = groupConsecutiveSlots(slots);
+        console.log("Slot groups created:", slotGroups.length);
 
-          // Add this validation BEFORE the INSERT statement
-          if (!sportIdNum && !slot.sport_id) {
+        // Create bookings for each group (consecutive slots become ONE booking)
+        for (const group of slotGroups) {
+          // Calculate total price for the group - ensure numbers are properly parsed
+          const totalPriceForGroup = group.reduce((sum, slot) => {
+            const price = slot.price ? parseFloat(slot.price) : 0;
+            return sum + price;
+          }, 0);
+
+          // Format to 2 decimal places
+          const finalTotalPrice = Number(totalPriceForGroup.toFixed(2));
+          const commission_amount = finalTotalPrice * (commission_percentage / 100);
+
+          // Use the first slot's details for basic info
+          const firstSlot = group[0];
+          const lastSlot = group[group.length - 1];
+
+          // Validate sport_id
+          if (!sportIdNum && !firstSlot.sport_id) {
             await connection.rollback();
             return res.status(400).json({
               message: "Sport ID is required for booking",
-              slot_id: slot.slot_id,
-              date: slot.date,
-              start_time: slot.start_time,
-              court_id: slot.court_id,
+              slot_ids: group.map(s => s.slot_id),
+              date: firstSlot.date,
+              start_time: firstSlot.start_time,
+              end_time: lastSlot.end_time,
+              court_id: firstSlot.court_id,
             });
           }
 
           // Ensure court_id is valid
-          const finalCourtId = courtIdNum || slot.court_id;
+          const finalCourtId = courtIdNum || firstSlot.court_id;
           if (!finalCourtId) {
             await connection.rollback();
             return res.status(400).json({
               message: "Court ID is required for booking",
-              slot_id: slot.slot_id,
-              date: slot.date,
-              start_time: slot.start_time,
+              slot_ids: group.map(s => s.slot_id),
+              date: firstSlot.date,
+              start_time: firstSlot.start_time,
             });
           }
 
           // Ensure sport_id is valid
-          const finalSportId = sportIdNum || slot.sport_id;
+          const finalSportId = sportIdNum || firstSlot.sport_id;
 
+          // Create ONE booking for the entire group of consecutive slots
           const [bookingResult] = await connection.execute(
             `INSERT INTO bookings 
-   (user_id, arena_id, slot_id, sport_id, court_id, total_amount, 
-    commission_percentage, commission_amount, payment_method, status, booking_date)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NOW())`,
+             (user_id, arena_id, sport_id, court_id, total_amount, 
+              commission_percentage, commission_amount, payment_method, status, booking_date,
+              slot_id, start_time, end_time, date, is_multi_slot, slot_ids)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', NOW(), ?, ?, ?, ?, ?, ?)`,
             [
               req.user.id,
               arenaIdNum,
-              slot.slot_id,
               finalSportId,
-              finalCourtId, // court_id value
-              priceForSlot,
+              finalCourtId,
+              finalTotalPrice,
               commission_percentage,
               commission_amount,
               payment_method || "pay_after",
+              firstSlot.slot_id,
+              firstSlot.start_time,
+              lastSlot.end_time,
+              firstSlot.date,
+              group.length > 1 ? 1 : 0,
+              JSON.stringify(group.map(s => s.slot_id))
             ]
           );
 
           const bookingId = bookingResult.insertId;
           bookingIds.push(bookingId);
           totalCommission += commission_amount;
+
           createdBookings.push({
             booking_id: bookingId,
-            slot_id: slot.slot_id,
-            date: slot.date,
-            start_time: slot.start_time,
-            end_time: slot.end_time,
-            court_id: slot.court_id,
-            price: priceForSlot,
+            slot_ids: group.map(s => s.slot_id),
+            date: firstSlot.date,
+            start_time: firstSlot.start_time,
+            end_time: lastSlot.end_time,
+            court_id: firstSlot.court_id,
+            total_price: finalTotalPrice,
+            slot_count: group.length,
+            is_multi_slot: group.length > 1
           });
 
-          // Mark slot as unavailable and clear any locks
-          await connection.execute(
-            `UPDATE time_slots 
-             SET is_available = FALSE,
-                 locked_until = NULL,
-                 locked_by_user_id = NULL
-             WHERE slot_id = ?`,
-            [slot.slot_id]
-          );
+          // Mark ALL slots in the group as unavailable and clear locks
+          for (const slot of group) {
+            await connection.execute(
+              `UPDATE time_slots 
+               SET is_available = FALSE,
+                   locked_until = NULL,
+                   locked_by_user_id = NULL
+               WHERE slot_id = ?`,
+              [slot.slot_id]
+            );
+          }
         }
       } else if (slotIdNum) {
-        // Single slot booking
+        // SINGLE SLOT BOOKING
+        console.log("Processing single slot booking with ID:", slotIdNum); // ADD DEBUG
+
         const [slots] = await connection.execute(
           `SELECT ts.*, 
-          b.booking_id as existing_booking,
-          b.status as existing_status
-   FROM time_slots ts
-   LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
-     AND b.status IN ('pending', 'accepted', 'completed')
-   WHERE ts.slot_id = ? 
-     AND ts.arena_id = ?
-     AND ts.court_id = ?`,
+                  b.booking_id as existing_booking,
+                  b.status as existing_status
+           FROM time_slots ts
+           LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
+             AND b.status IN ('pending', 'accepted', 'completed')
+           WHERE ts.slot_id = ? 
+             AND ts.arena_id = ?
+             AND ts.court_id = ?`,
           [slotIdNum, arenaIdNum, courtIdNum || null]
         );
+
         if (slots.length === 0) {
           await connection.rollback();
           return res.status(400).json({
@@ -287,7 +458,6 @@ const bookingController = {
           });
         }
 
-        // === ADD THIS CHECK FOR PAST SLOT ===
         // Check for past time slot
         if (isSlotInPast(slot.date, slot.start_time)) {
           await connection.rollback();
@@ -299,7 +469,6 @@ const bookingController = {
             reason: "Time has already passed",
           });
         }
-        // === END CHECK ===
 
         // Check if locked by another user
         if (
@@ -315,10 +484,13 @@ const bookingController = {
           });
         }
 
-        const priceForSlot = slot.price || totalAmountNum || 500;
-        const commission_amount = priceForSlot * (commission_percentage / 100);
+        // Calculate price for slot - ensure it's a proper number
+        const priceForSlot = slot.price || validTotalAmount || 500;
+        // Make sure priceForSlot is a number with 2 decimal places
+        const finalPriceForSlot = Number(parseFloat(priceForSlot).toFixed(2));
+        const commission_amount = finalPriceForSlot * (commission_percentage / 100);
 
-        // Add this validation BEFORE the INSERT statement
+        // Validate sport_id
         if (!sportIdNum && !slot.sport_id) {
           await connection.rollback();
           return res.status(400).json({
@@ -347,21 +519,27 @@ const bookingController = {
 
         const [bookingResult] = await connection.execute(
           `INSERT INTO bookings 
-   (user_id, arena_id, slot_id, sport_id, court_id, total_amount, 
-    commission_percentage, commission_amount, payment_method, status, booking_date)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NOW())`,
+           (user_id, arena_id, slot_id, sport_id, court_id, total_amount, 
+            commission_percentage, commission_amount, payment_method, status, booking_date,
+            start_time, end_time, date, is_multi_slot, slot_ids)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NOW(), ?, ?, ?, 0, ?)`,
           [
             req.user.id,
             arenaIdNum,
             slot.slot_id,
             finalSportId,
-            finalCourtId, // court_id value
-            priceForSlot,
+            finalCourtId,
+            finalPriceForSlot,
             commission_percentage,
             commission_amount,
             payment_method || "pay_after",
+            slot.start_time,
+            slot.end_time,
+            slot.date,
+            JSON.stringify([slot.slot_id])
           ]
         );
+
         const bookingId = bookingResult.insertId;
         bookingIds.push(bookingId);
         totalCommission = commission_amount;
@@ -372,7 +550,8 @@ const bookingController = {
           start_time: slot.start_time,
           end_time: slot.end_time,
           court_id: slot.court_id,
-          price: priceForSlot,
+          price: finalPriceForSlot,
+          is_multi_slot: false
         });
 
         // Mark slot as unavailable and clear locks
@@ -384,6 +563,11 @@ const bookingController = {
            WHERE slot_id = ?`,
           [slot.slot_id]
         );
+      } else {
+        await connection.rollback();
+        return res.status(400).json({
+          message: "Please provide slot_id or slot_ids for booking"
+        });
       }
 
       // Update arena commission
@@ -403,14 +587,14 @@ const bookingController = {
         const placeholders = bookingIds.map(() => "?").join(",");
         const [bookings] = await pool.execute(
           `SELECT b.*, a.name as arena_name, st.name as sport_name,
-        ts.date, ts.start_time, ts.end_time, ts.court_id, 
-        ao.arena_name as owner_name,
-        ao.owner_id, ao.email as owner_email, ao.phone_number as owner_phone
+                  ts.date, ts.start_time, ts.end_time, ts.court_id, 
+                  ao.arena_name as owner_name,
+                  ao.owner_id, ao.email as owner_email, ao.phone_number as owner_phone
            FROM bookings b
            JOIN arenas a ON b.arena_id = a.arena_id
            JOIN arena_owners ao ON a.owner_id = ao.owner_id
            JOIN sports_types st ON b.sport_id = st.sport_id
-           JOIN time_slots ts ON b.slot_id = ts.slot_id
+           LEFT JOIN time_slots ts ON b.slot_id = ts.slot_id
            WHERE b.booking_id IN (${placeholders})`,
           bookingIds
         );
@@ -432,22 +616,21 @@ const bookingController = {
         }
 
         return res.status(201).json({
-          message:
-            "Booking request created successfully. Waiting for owner approval.",
+          message: "Booking request created successfully. Waiting for owner approval.",
           bookings,
+          createdBookings
         });
       }
 
       res.status(400).json({ message: "No bookings were created" });
     } catch (error) {
       await connection.rollback();
-      console.error(error);
+      console.error("Error in createBooking:", error);
       res.status(500).json({ message: "Server error", error: error.message });
     } finally {
       connection.release();
     }
   },
-
   // Get user bookings - FIXED
   getUserBookings: async (req, res) => {
     try {

@@ -215,6 +215,30 @@ const UserArenaDetails = () => {
 
     toggleSelection();
   };
+  const getConsolidatedBookingInfo = () => {
+    if (!selectedSlots || selectedSlots.length === 0) return null;
+
+    const sorted = [...selectedSlots].sort((a, b) =>
+      a.start_time.localeCompare(b.start_time)
+    );
+
+    // Check if slots are consecutive
+    let isConsecutive = true;
+    for (let i = 0; i < sorted.length - 1; i++) {
+      if (sorted[i].end_time !== sorted[i + 1].start_time) {
+        isConsecutive = false;
+        break;
+      }
+    }
+
+    return {
+      startTime: sorted[0].start_time,
+      endTime: sorted[sorted.length - 1].end_time,
+      totalHours: sorted.length,
+      isConsecutive,
+      totalPrice: sorted.reduce((sum, s) => sum + Number(s.price || 0), 0)
+    };
+  };
 
   const handleBooking = async () => {
     const canProceed = await requireAuth(() => { }, "book a court");
@@ -243,10 +267,23 @@ const UserArenaDetails = () => {
       );
       const startTime = sorted[0].start_time;
       const endTime = sorted[sorted.length - 1].end_time;
+
+      // FIX: Calculate total price properly as a number
       const totalPrice = sorted.reduce(
         (sum, s) => sum + Number(s.price || 0),
         0
       );
+
+      // Ensure totalPrice is a number with 2 decimal places
+      const formattedTotalPrice = Number(totalPrice.toFixed(2));
+
+      console.log("Booking details:", {
+        arenaId: parseInt(arenaId),
+        slotIds: selectedSlots.map((s) => s.slot_id),
+        selectedSportId,
+        totalPrice: formattedTotalPrice,
+        courtId: selectedCourt.court_id
+      });
 
       let sportToSend = selectedSportId;
 
@@ -264,7 +301,7 @@ const UserArenaDetails = () => {
           arenaId: parseInt(arenaId),
           slot_ids: slotIds,
           sportId: selectedSportId,
-          totalPrice,
+          totalPrice: formattedTotalPrice, // Use the formatted number
           courtId: selectedCourt.court_id,
           notes: "",
         });
@@ -273,7 +310,7 @@ const UserArenaDetails = () => {
           arenaId: parseInt(arenaId),
           slot_id: slotIds[0],
           sport_id: selectedSportId,
-          totalPrice,
+          totalPrice: formattedTotalPrice, // Use the formatted number
           courtId: selectedCourt.court_id,
           notes: "",
         });
@@ -284,7 +321,7 @@ const UserArenaDetails = () => {
           date: integrationService.formatDate(selectedDate),
           startTime,
           endTime,
-          totalPrice,
+          totalPrice: formattedTotalPrice, // Use the formatted number
           sportId: sportToSend,
           notes: "",
         });
@@ -926,7 +963,7 @@ const UserArenaDetails = () => {
                 </div>
               )}
 
-              {/* Booking Summary */}
+              {/* Enhanced Booking Summary */}
               {selectedSlots && selectedSlots.length > 0 && (
                 <div className="mb-6 p-4 bg-gray-50 rounded-lg">
                   <h4 className="font-medium text-gray-900 mb-3">
@@ -937,41 +974,57 @@ const UserArenaDetails = () => {
                       <span className="text-gray-600">Date:</span>
                       <span>{selectedDate.toLocaleDateString()}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Time Range:</span>
-                      <span>
-                        {(() => {
-                          const sorted = [...selectedSlots].sort((a, b) =>
-                            a.start_time.localeCompare(b.start_time)
-                          );
-                          return `${sorted[0].start_time} - ${sorted[sorted.length - 1].end_time}`;
-                        })()}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Court:</span>
-                      <span>{selectedCourt?.court_name || `Court ${selectedCourt?.court_number}`}</span>
-                    </div>
-                    <div className="flex justify-between font-medium">
-                      <span>Total:</span>
-                      <span>
-                        Rs{" "}
-                        {selectedSlots.reduce(
-                          (s, it) => s + Number(it.price || 0),
-                          0
-                        )}
-                      </span>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-600">Selected slots:</p>
-                      <div className="text-sm">
-                        {selectedSlots.map((s) => (
-                          <div key={s.slot_id}>
-                            {s.start_time} - {s.end_time}
+
+                    {(() => {
+                      const info = getConsolidatedBookingInfo();
+                      if (!info) return null;
+
+                      return (
+                        <>
+                          <div className="flex justify-between">
+                            <span className="text-gray-600">Time Range:</span>
+                            <span>
+                              {info.startTime} - {info.endTime}
+                              {info.isConsecutive && info.totalHours > 1 && (
+                                <span className="ml-2 text-green-600 text-xs">
+                                  ({info.totalHours} hour{info.totalHours > 1 ? 's' : ''} continuous)
+                                </span>
+                              )}
+                            </span>
                           </div>
-                        ))}
-                      </div>
-                    </div>
+
+                          {!info.isConsecutive && info.totalHours > 1 && (
+                            <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded">
+                              <p className="text-xs text-yellow-700">
+                                ⚠️ Non-consecutive slots will be booked separately
+                              </p>
+                            </div>
+                          )}
+
+                          <div className="flex justify-between">
+                            <span className="text-gray-600">Court:</span>
+                            <span>{selectedCourt?.court_name || `Court ${selectedCourt?.court_number}`}</span>
+                          </div>
+
+                          <div className="flex justify-between font-medium pt-2 border-t">
+                            <span>Total:</span>
+                            <span>Rs {info.totalPrice}</span>
+                          </div>
+
+                          <div>
+                            <p className="text-sm text-gray-600 mb-1">Selected slots:</p>
+                            <div className="text-sm max-h-32 overflow-y-auto space-y-1">
+                              {selectedSlots.map((s) => (
+                                <div key={s.slot_id} className="flex justify-between text-xs">
+                                  <span>{s.start_time} - {s.end_time}</span>
+                                  <span>Rs {s.price}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
               )}

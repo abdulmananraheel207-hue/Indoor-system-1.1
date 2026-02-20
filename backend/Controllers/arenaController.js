@@ -13,7 +13,7 @@ const arenaController = {
     }
   },
 
-  // Get available time slots for an arena - FIXED VERSION
+  // Get available time slots for an arena - FIXED VERSION with multi-slot support
   // File: arenaController.js - UPDATED getAvailableSlots function
   getAvailableSlots: async (req, res) => {
     try {
@@ -57,27 +57,36 @@ const arenaController = {
 
       // Get available slots for the specific date
       let query = `
-    SELECT 
-      ts.*, 
-      st.name as sport_name,
-      b.booking_id,
-      b.status as booking_status,
-      CASE
-        WHEN b.booking_id IS NOT NULL AND b.status IN ('pending', 'accepted', 'completed') THEN FALSE
-        WHEN ts.is_blocked_by_owner = TRUE THEN FALSE
-        WHEN ts.is_holiday = TRUE THEN FALSE
-        WHEN ts.locked_until > NOW() AND ts.locked_by_user_id IS NOT NULL THEN FALSE
-        ELSE TRUE
-      END as actually_available
-    FROM time_slots ts
-    LEFT JOIN sports_types st ON ts.sport_id = st.sport_id
-    LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
-      AND b.status IN ('pending', 'accepted', 'completed')
-    WHERE ts.arena_id = ?
-      AND ts.date = ?
+      SELECT 
+        ts.*, 
+        st.name as sport_name,
+        cd.court_name,
+        cd.court_number,
+        b.booking_id,
+        b.status as booking_status,
+        b.is_multi_slot as existing_multi_slot,
+        b.slot_ids as existing_slot_ids,
+        CASE
+          WHEN b.booking_id IS NOT NULL AND b.status IN ('pending', 'accepted', 'completed') THEN FALSE
+          WHEN ts.is_blocked_by_owner = TRUE THEN FALSE
+          WHEN ts.is_holiday = TRUE THEN FALSE
+          WHEN ts.locked_until > NOW() AND ts.locked_by_user_id IS NOT NULL AND ts.locked_by_user_id != ? THEN FALSE
+          ELSE TRUE
+        END as actually_available,
+        CASE
+          WHEN ts.locked_until > NOW() AND ts.locked_by_user_id = ? THEN TRUE
+          ELSE FALSE
+        END as locked_by_me
+      FROM time_slots ts
+      LEFT JOIN sports_types st ON ts.sport_id = st.sport_id
+      LEFT JOIN court_details cd ON ts.court_id = cd.court_id
+      LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
+        AND b.status IN ('pending', 'accepted', 'completed')
+      WHERE ts.arena_id = ?
+        AND ts.date = ?
     `;
 
-      const params = [arena_id, date];
+      const params = [req.user?.id || null, req.user?.id || null, arena_id, date];
 
       // Add court_id filter if provided
       if (court_id) {
@@ -91,7 +100,7 @@ const arenaController = {
         params.push(sport_id);
       }
 
-      query += " ORDER BY ts.start_time";
+      query += " ORDER BY cd.court_number, ts.start_time";
 
       console.log("Executing query:", query, "with params:", params);
 
@@ -99,31 +108,116 @@ const arenaController = {
 
       console.log("Found", slots.length, "slots");
 
-      // Filter to show only actually available slots
-      const availableSlots = slots.filter(
-        (slot) =>
-          slot.actually_available === 1 || slot.actually_available === true
-      );
+      // Group slots by court for multi-slot grouping
+      const slotsByCourt = {};
+      slots.forEach(slot => {
+        if (!slotsByCourt[slot.court_id]) {
+          slotsByCourt[slot.court_id] = [];
+        }
+        slotsByCourt[slot.court_id].push(slot);
+      });
 
-      // Format the response
-      const formattedSlots = availableSlots.map((slot) => ({
+      // Process each court's slots to identify consecutive relationships
+      Object.keys(slotsByCourt).forEach(courtId => {
+        const courtSlots = slotsByCourt[courtId].sort((a, b) =>
+          a.start_time.localeCompare(b.start_time)
+        );
+
+        // Mark consecutive slots
+        for (let i = 0; i < courtSlots.length; i++) {
+          const slot = courtSlots[i];
+          const nextSlot = i < courtSlots.length - 1 ? courtSlots[i + 1] : null;
+          const prevSlot = i > 0 ? courtSlots[i - 1] : null;
+
+          slot.can_group_with_next = nextSlot ? slot.end_time === nextSlot.start_time : false;
+          slot.can_group_with_prev = prevSlot ? prevSlot.end_time === slot.start_time : false;
+          slot.is_available_for_booking = slot.actually_available === 1 || slot.actually_available === true;
+
+          // Add group ID for consecutive slots
+          if (slot.is_available_for_booking) {
+            if (!prevSlot || !prevSlot.is_available_for_booking || prevSlot.end_time !== slot.start_time) {
+              slot.is_group_start = true;
+            }
+            if (!nextSlot || !nextSlot.is_available_for_booking || slot.end_time !== nextSlot.start_time) {
+              slot.is_group_end = true;
+            }
+          }
+        }
+      });
+
+      // Format the response with multi-slot metadata
+      const formattedSlots = slots.map((slot) => ({
         slot_id: slot.slot_id,
         arena_id: slot.arena_id,
+        court_id: slot.court_id,
+        court_name: slot.court_name,
+        court_number: slot.court_number,
         sport_id: slot.sport_id,
         sport_name: slot.sport_name,
         date: slot.date,
         start_time: slot.start_time,
         end_time: slot.end_time,
         price: slot.price,
-        is_available: true, // Since we filtered for available slots
-        actually_available: true,
+        is_available: slot.actually_available === 1 || slot.actually_available === true,
+        actually_available: slot.actually_available === 1 || slot.actually_available === true,
+        locked_by_me: slot.locked_by_me === 1 || slot.locked_by_me === true,
         is_blocked_by_owner: slot.is_blocked_by_owner || false,
         is_holiday: slot.is_holiday || false,
+        // Multi-slot specific fields
+        can_group_with_next: slot.can_group_with_next || false,
+        can_group_with_prev: slot.can_group_with_prev || false,
+        is_group_start: slot.is_group_start || false,
+        is_group_end: slot.is_group_end || false,
       }));
 
-      console.log("Returning", formattedSlots.length, "available slots");
+      // Calculate consecutive slot groups for each court
+      const consecutiveGroups = {};
+      Object.keys(slotsByCourt).forEach(courtId => {
+        const courtSlots = formattedSlots.filter(s => s.court_id == courtId && s.is_available);
+        const groups = [];
+        let currentGroup = [];
 
-      res.json(formattedSlots);
+        courtSlots.forEach((slot, index) => {
+          if (currentGroup.length === 0) {
+            currentGroup.push(slot);
+          } else {
+            const lastSlot = currentGroup[currentGroup.length - 1];
+            if (lastSlot.end_time === slot.start_time) {
+              currentGroup.push(slot);
+            } else {
+              if (currentGroup.length > 0) {
+                groups.push([...currentGroup]);
+              }
+              currentGroup = [slot];
+            }
+          }
+        });
+
+        if (currentGroup.length > 0) {
+          groups.push(currentGroup);
+        }
+
+        consecutiveGroups[courtId] = groups.map(group => ({
+          slot_ids: group.map(s => s.slot_id),
+          start_time: group[0].start_time,
+          end_time: group[group.length - 1].end_time,
+          total_price: group.reduce((sum, s) => sum + s.price, 0),
+          slot_count: group.length
+        }));
+      });
+
+      console.log("Returning", formattedSlots.filter(s => s.is_available).length, "available slots");
+
+      res.json({
+        slots: formattedSlots,
+        meta: {
+          total_slots: formattedSlots.length,
+          available_slots: formattedSlots.filter(s => s.is_available).length,
+          consecutive_groups: consecutiveGroups,
+          supports_multi_slot: true,
+          max_consecutive_slots: 4
+        }
+      });
     } catch (error) {
       console.error("Error in getAvailableSlots:", error);
       res.status(500).json({
@@ -133,6 +227,176 @@ const arenaController = {
       });
     }
   },
+
+  // Lock multiple time slots for multi-slot booking - NEW FUNCTION
+  lockMultipleTimeSlots: async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+      const { slot_ids } = req.body; // Array of slot IDs
+      const lockDuration = 10 * 60 * 1000; // 10 minutes
+
+      if (!slot_ids || !Array.isArray(slot_ids) || slot_ids.length === 0) {
+        return res.status(400).json({ message: "Slot IDs array is required" });
+      }
+
+      await connection.beginTransaction();
+
+      // Check if slots are consecutive
+      const placeholders = slot_ids.map(() => '?').join(',');
+      const [slots] = await connection.execute(
+        `SELECT ts.*, 
+              b.booking_id,
+              b.status as booking_status
+       FROM time_slots ts
+       LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
+         AND b.status IN ('pending', 'accepted', 'completed')
+       WHERE ts.slot_id IN (${placeholders})
+         AND ts.is_blocked_by_owner = FALSE
+         AND ts.is_holiday = FALSE
+         AND (b.booking_id IS NULL OR b.status NOT IN ('pending', 'accepted', 'completed'))
+         AND (ts.locked_until IS NULL OR ts.locked_until <= NOW())`,
+        slot_ids
+      );
+
+      if (slots.length !== slot_ids.length) {
+        await connection.rollback();
+        return res.status(400).json({
+          message: "One or more slots are not available",
+          unavailable_slots: slot_ids.filter(id => !slots.find(s => s.slot_id === id))
+        });
+      }
+
+      // Check if slots are consecutive and on same court
+      const sortedSlots = slots.sort((a, b) => a.start_time.localeCompare(b.start_time));
+      const firstCourt = sortedSlots[0].court_id;
+      const firstDate = sortedSlots[0].date;
+
+      for (let i = 0; i < sortedSlots.length; i++) {
+        const slot = sortedSlots[i];
+
+        // Check court consistency
+        if (slot.court_id !== firstCourt) {
+          await connection.rollback();
+          return res.status(400).json({
+            message: "All slots must be from the same court"
+          });
+        }
+
+        // Check date consistency
+        if (slot.date !== firstDate) {
+          await connection.rollback();
+          return res.status(400).json({
+            message: "All slots must be on the same date"
+          });
+        }
+
+        // Check if any slot is in the past
+        const slotDateTimeStr = `${slot.date}T${slot.start_time}:00Z`;
+        const slotStart = new Date(slotDateTimeStr);
+        if (slotStart.getTime() < new Date().getTime()) {
+          await connection.rollback();
+          return res.status(400).json({
+            message: `Cannot lock past time slots: ${slot.start_time}`,
+            slot_id: slot.slot_id
+          });
+        }
+
+        // Check consecutiveness
+        if (i > 0) {
+          const prevSlot = sortedSlots[i - 1];
+          if (prevSlot.end_time !== slot.start_time) {
+            await connection.rollback();
+            return res.status(400).json({
+              message: "Slots must be consecutive",
+              gap_between: `${prevSlot.end_time} and ${slot.start_time}`
+            });
+          }
+        }
+
+        // Check if locked by someone else
+        if (slot.locked_until &&
+          slot.locked_until > new Date() &&
+          slot.locked_by_user_id !== req.user.id) {
+          await connection.rollback();
+          return res.status(400).json({
+            message: `Slot ${slot.start_time} is locked by another user`,
+            slot_id: slot.slot_id,
+            locked_until: slot.locked_until
+          });
+        }
+      }
+
+      // Lock all slots
+      for (const slot of sortedSlots) {
+        await connection.execute(
+          `UPDATE time_slots 
+         SET locked_until = DATE_ADD(NOW(), INTERVAL 10 MINUTE),
+             locked_by_user_id = ?
+         WHERE slot_id = ?`,
+          [req.user.id, slot.slot_id]
+        );
+      }
+
+      await connection.commit();
+
+      res.json({
+        message: `${sortedSlots.length} slots locked for 10 minutes`,
+        locked_until: new Date(Date.now() + lockDuration),
+        slots: sortedSlots.map(s => ({
+          slot_id: s.slot_id,
+          date: s.date,
+          start_time: s.start_time,
+          end_time: s.end_time,
+          price: s.price
+        })),
+        total_price: sortedSlots.reduce((sum, s) => sum + s.price, 0),
+        time_range: `${sortedSlots[0].start_time} - ${sortedSlots[sortedSlots.length - 1].end_time}`
+      });
+    } catch (error) {
+      await connection.rollback();
+      console.error("Error locking multiple slots:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    } finally {
+      connection.release();
+    }
+  },
+
+  // Release multiple locked time slots - NEW FUNCTION
+  releaseMultipleTimeSlots: async (req, res) => {
+    try {
+      const { slot_ids } = req.body; // Array of slot IDs
+
+      if (!slot_ids || !Array.isArray(slot_ids) || slot_ids.length === 0) {
+        return res.status(400).json({ message: "Slot IDs array is required" });
+      }
+
+      const placeholders = slot_ids.map(() => '?').join(',');
+      const [result] = await pool.execute(
+        `UPDATE time_slots 
+       SET locked_until = NULL,
+           locked_by_user_id = NULL
+       WHERE slot_id IN (${placeholders}) AND locked_by_user_id = ?`,
+        [...slot_ids, req.user.id]
+      );
+
+      if (result.affectedRows === 0) {
+        return res.status(400).json({
+          message: "No slots found or not locked by you",
+        });
+      }
+
+      res.json({
+        message: `${result.affectedRows} slots released successfully`,
+        released_count: result.affectedRows,
+        slot_ids: slot_ids
+      });
+    } catch (error) {
+      console.error("Error releasing multiple slots:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+
+  // Keep original lockTimeSlot for backward compatibility
   lockTimeSlot: async (req, res) => {
     const connection = await pool.getConnection();
     try {
@@ -143,16 +407,16 @@ const arenaController = {
 
       const [slots] = await connection.execute(
         `SELECT ts.*, 
-              b.booking_id,
-              b.status as booking_status
-       FROM time_slots ts
-       LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
-         AND b.status IN ('pending', 'accepted', 'completed')
-       WHERE ts.slot_id = ?
-         AND ts.is_blocked_by_owner = FALSE
-         AND ts.is_holiday = FALSE
-         AND (b.booking_id IS NULL OR b.status NOT IN ('pending', 'accepted', 'completed'))
-         AND (ts.locked_until IS NULL OR ts.locked_until <= NOW())`,
+            b.booking_id,
+            b.status as booking_status
+     FROM time_slots ts
+     LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
+       AND b.status IN ('pending', 'accepted', 'completed')
+     WHERE ts.slot_id = ?
+       AND ts.is_blocked_by_owner = FALSE
+       AND ts.is_holiday = FALSE
+       AND (b.booking_id IS NULL OR b.status NOT IN ('pending', 'accepted', 'completed'))
+       AND (ts.locked_until IS NULL OR ts.locked_until <= NOW())`,
         [slot_id]
       );
 
@@ -166,12 +430,10 @@ const arenaController = {
       const slot = slots[0];
       const now = new Date();
 
-      // *** SIMPLE BULLETPROOF SOLUTION ***
-      // Combine date and time into a single datetime string
       // Fix: Add seconds and ensure proper ISO format
       const slotDateTimeStr = `${slot.date}T${slot.start_time}:00Z`;
       const slotStart = new Date(slotDateTimeStr);
-      // Log for debugging
+
       console.log("=== LOCK VALIDATION ===");
       console.log("Slot date/time string:", slotDateTimeStr);
       console.log("Parsed slot start:", slotStart);
@@ -208,9 +470,9 @@ const arenaController = {
       // Lock the slot for current user
       await connection.execute(
         `UPDATE time_slots 
-       SET locked_until = DATE_ADD(NOW(), INTERVAL 10 MINUTE),
-           locked_by_user_id = ?
-       WHERE slot_id = ?`,
+     SET locked_until = DATE_ADD(NOW(), INTERVAL 10 MINUTE),
+         locked_by_user_id = ?
+     WHERE slot_id = ?`,
         [req.user.id, slot_id]
       );
 
@@ -233,7 +495,7 @@ const arenaController = {
     }
   },
 
-  // Release a locked time slot - FIXED VERSION
+  // Keep original releaseTimeSlot for backward compatibility
   releaseTimeSlot: async (req, res) => {
     try {
       const { slot_id } = req.params;
@@ -241,9 +503,9 @@ const arenaController = {
       // Only release if locked by current user
       const [result] = await pool.execute(
         `UPDATE time_slots 
-         SET locked_until = NULL,
-             locked_by_user_id = NULL
-         WHERE slot_id = ? AND locked_by_user_id = ?`,
+       SET locked_until = NULL,
+           locked_by_user_id = NULL
+       WHERE slot_id = ? AND locked_by_user_id = ?`,
         [slot_id, req.user.id]
       );
 
@@ -262,7 +524,6 @@ const arenaController = {
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
-
   // Clean up expired locks - NEW FUNCTION (call this periodically)
   cleanupExpiredLocks: async () => {
     try {
