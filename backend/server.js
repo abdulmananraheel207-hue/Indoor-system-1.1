@@ -23,6 +23,8 @@ const chatRoutes = require("./routes/chats");
 const managerRoutes = require("./routes/managers");
 const ownerBookingsRoutes = require("./routes/ownerBookings");
 const superAdminRoutes = require('./routes/superAdmin');
+// Import the new routes
+const bookingSlotsRoutes = require('./routes/bookingSlotsRoutes');
 
 const app = express();
 const { applySchemaPatches } = require("./utils/schemaPatches");
@@ -133,6 +135,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/arenas", arenaRoutes);
 app.use("/api/owners", ownerRoutes);
 app.use("/api/bookings", bookingRoutes);
+app.use('/api/bookings', bookingSlotsRoutes);
 app.use("/api/chats", chatRoutes);
 app.use("/api/managers", managerRoutes);
 // 404 handler

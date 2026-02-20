@@ -578,18 +578,18 @@ const userController = {
 
       const [arenas] = await pool.execute(
         `SELECT a.*, 
-            ao.arena_name as owner_name,
-            ao.phone_number as owner_phone,
-            GROUP_CONCAT(DISTINCT st.name) as sports,
-            AVG(ar.rating) as avg_rating,
-            COUNT(ar.review_id) as total_reviews
-     FROM arenas a
-     JOIN arena_owners ao ON a.owner_id = ao.owner_id
-     LEFT JOIN arena_sports asp ON a.arena_id = asp.arena_id
-     LEFT JOIN sports_types st ON asp.sport_id = st.sport_id
-     LEFT JOIN arena_reviews ar ON a.arena_id = ar.arena_id
-     WHERE a.arena_id = ? AND a.is_active = TRUE
-     GROUP BY a.arena_id`,
+          ao.arena_name as owner_name,
+          ao.phone_number as owner_phone,
+          GROUP_CONCAT(DISTINCT st.name) as sports,
+          AVG(ar.rating) as avg_rating,
+          COUNT(ar.review_id) as total_reviews
+   FROM arenas a
+   JOIN arena_owners ao ON a.owner_id = ao.owner_id
+   LEFT JOIN arena_sports asp ON a.arena_id = asp.arena_id
+   LEFT JOIN sports_types st ON asp.sport_id = st.sport_id
+   LEFT JOIN arena_reviews ar ON a.arena_id = ar.arena_id
+   WHERE a.arena_id = ? AND a.is_active = TRUE
+   GROUP BY a.arena_id`,
         [arena_id]
       );
 
@@ -608,13 +608,13 @@ const userController = {
       // Get all courts for this arena WITH IMAGES
       const [courts] = await pool.execute(
         `SELECT cd.*, 
-            GROUP_CONCAT(DISTINCT st.name) as sports_names
-     FROM court_details cd
-     LEFT JOIN court_sports cs ON cd.court_id = cs.court_id
-     LEFT JOIN sports_types st ON cs.sport_id = st.sport_id
-     WHERE cd.arena_id = ?
-     GROUP BY cd.court_id
-     ORDER BY cd.court_number`,
+          GROUP_CONCAT(DISTINCT st.name) as sports_names
+   FROM court_details cd
+   LEFT JOIN court_sports cs ON cd.court_id = cs.court_id
+   LEFT JOIN sports_types st ON cs.sport_id = st.sport_id
+   WHERE cd.arena_id = ?
+   GROUP BY cd.court_id
+   ORDER BY cd.court_number`,
         [arena_id]
       );
 
@@ -623,9 +623,9 @@ const userController = {
         courts.map(async (court) => {
           const [courtImages] = await pool.execute(
             `SELECT image_id, image_url, cloudinary_id, is_primary, uploaded_at
-         FROM court_images 
-         WHERE court_id = ? 
-         ORDER BY is_primary DESC, uploaded_at DESC`,
+       FROM court_images 
+       WHERE court_id = ? 
+       ORDER BY is_primary DESC, uploaded_at DESC`,
             [court.court_id]
           );
 
@@ -637,49 +637,50 @@ const userController = {
         })
       );
 
-      // Get time slots for next 7 days (all courts)
+      // Get time slots for next 7 days (all courts) - FIXED to include multi-slot info
       const [slots] = await pool.execute(
         `SELECT ts.*, cd.court_name, cd.court_number,
-            b.booking_id as existing_booking_id,
-            b.status as booking_status
-     FROM time_slots ts
-     JOIN court_details cd ON ts.court_id = cd.court_id
-     LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
-       AND b.status IN ('pending', 'accepted', 'completed')
-     WHERE ts.arena_id = ? 
-       AND ts.date >= CURDATE() 
-       AND ts.date <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)
-     ORDER BY ts.date, ts.start_time`,
+          b.booking_id as existing_booking_id,
+          b.status as booking_status,
+          b.is_multi_slot as existing_multi_slot,
+          b.slot_ids as existing_slot_ids
+   FROM time_slots ts
+   JOIN court_details cd ON ts.court_id = cd.court_id
+   LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
+     AND b.status IN ('pending', 'accepted', 'completed')
+   WHERE ts.arena_id = ? 
+     AND ts.date >= CURDATE() 
+     AND ts.date <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)
+   ORDER BY ts.date, ts.start_time`,
         [arena_id]
       );
 
       // Get reviews
       const [reviews] = await pool.execute(
         `SELECT ar.*, u.name as user_name, u.profile_picture_url
-     FROM arena_reviews ar
-     JOIN users u ON ar.user_id = u.user_id
-     WHERE ar.arena_id = ?
-     ORDER BY ar.created_at DESC
-     LIMIT 10`,
+   FROM arena_reviews ar
+   JOIN users u ON ar.user_id = u.user_id
+   WHERE ar.arena_id = ?
+   ORDER BY ar.created_at DESC
+   LIMIT 10`,
         [arena_id]
       );
 
-      // Get ALL sports available at this arena (from arena_sports and court_sports)
+      // Get ALL sports available at this arena
       const [arenaSports] = await pool.execute(
         `SELECT DISTINCT st.name 
-     FROM sports_types st
-     JOIN arena_sports ars ON st.sport_id = ars.sport_id
-     WHERE ars.arena_id = ?
-     UNION
-     SELECT DISTINCT st.name 
-     FROM sports_types st
-     JOIN court_sports cs ON st.sport_id = cs.sport_id
-     JOIN court_details cd ON cs.court_id = cd.court_id
-     WHERE cd.arena_id = ?`,
+   FROM sports_types st
+   JOIN arena_sports ars ON st.sport_id = ars.sport_id
+   WHERE ars.arena_id = ?
+   UNION
+   SELECT DISTINCT st.name 
+   FROM sports_types st
+   JOIN court_sports cs ON st.sport_id = cs.sport_id
+   JOIN court_details cd ON cs.court_id = cd.court_id
+   WHERE cd.arena_id = ?`,
         [arena_id, arena_id]
       );
 
-      // Create sports_list array from the query results
       const sports_list = arenaSports.map(s => s.name);
 
       // Check if arena is in user's favorites
@@ -692,17 +693,38 @@ const userController = {
         is_favorite = fav.length > 0;
       }
 
-      // Organize slots by court for easier frontend consumption
+      // Organize slots by court with grouping information
       const slotsByCourt = {};
       slots.forEach(slot => {
         const courtId = slot.court_id;
         if (!slotsByCourt[courtId]) {
           slotsByCourt[courtId] = [];
         }
-        slotsByCourt[courtId].push(slot);
+
+        // Add slot with grouping info
+        slotsByCourt[courtId].push({
+          ...slot,
+          can_be_grouped: true, // Indicates this slot can be part of multi-slot booking
+          group_with_next: false, // Will be set by frontend based on consecutive times
+          group_with_prev: false
+        });
       });
 
-      // Send response with sports_list properly populated
+      // For each court, identify consecutive slots that can be grouped
+      Object.keys(slotsByCourt).forEach(courtId => {
+        const courtSlots = slotsByCourt[courtId].sort((a, b) =>
+          a.start_time.localeCompare(b.start_time)
+        );
+
+        // Mark consecutive slots
+        for (let i = 0; i < courtSlots.length - 1; i++) {
+          if (courtSlots[i].end_time === courtSlots[i + 1].start_time) {
+            courtSlots[i].can_group_with_next = true;
+            courtSlots[i + 1].can_group_with_prev = true;
+          }
+        }
+      });
+
       res.json({
         ...arena,
         images,
@@ -710,7 +732,9 @@ const userController = {
         slots: slotsByCourt,
         reviews,
         is_favorite,
-        sports_list: sports_list, // Make sure this is included
+        sports_list: sports_list,
+        multi_slot_supported: true, // Indicates arena supports multi-slot bookings
+        max_consecutive_slots: 4, // Configurable limit
       });
     } catch (error) {
       console.error(error);
@@ -718,6 +742,7 @@ const userController = {
     }
   },
 
+  // FIXED getCourtSlots function
   getCourtSlots: async (req, res) => {
     try {
       const { arena_id, court_id } = req.params;
@@ -728,23 +753,26 @@ const userController = {
       }
 
       let query = `
-      SELECT ts.*, cd.court_name, cd.court_number,
-             CASE 
-               WHEN b.booking_id IS NOT NULL THEN FALSE
-               WHEN ts.is_blocked_by_owner = TRUE THEN FALSE
-               WHEN ts.is_holiday = TRUE THEN FALSE
-               WHEN ts.locked_until > NOW() AND ts.locked_by_user_id IS NOT NULL THEN FALSE
-               ELSE ts.is_available 
-             END as actually_available
-      FROM time_slots ts
-      JOIN court_details cd ON ts.court_id = cd.court_id
-      LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
-        AND b.status IN ('pending', 'accepted', 'completed')
-      WHERE ts.arena_id = ? 
-        AND ts.court_id = ?
-        AND ts.date = ?
-        AND (b.booking_id IS NULL OR b.status NOT IN ('pending', 'accepted', 'completed'))
-    `;
+    SELECT ts.*, cd.court_name, cd.court_number,
+           CASE 
+             WHEN b.booking_id IS NOT NULL THEN FALSE
+             WHEN ts.is_blocked_by_owner = TRUE THEN FALSE
+             WHEN ts.is_holiday = TRUE THEN FALSE
+             WHEN ts.locked_until > NOW() AND ts.locked_by_user_id IS NOT NULL THEN FALSE
+             ELSE ts.is_available 
+           END as actually_available,
+           b.booking_id as existing_booking,
+           b.status as booking_status,
+           b.is_multi_slot as existing_multi_slot
+    FROM time_slots ts
+    JOIN court_details cd ON ts.court_id = cd.court_id
+    LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
+      AND b.status IN ('pending', 'accepted', 'completed')
+    WHERE ts.arena_id = ? 
+      AND ts.court_id = ?
+      AND ts.date = ?
+      AND (b.booking_id IS NULL OR b.status NOT IN ('pending', 'accepted', 'completed'))
+  `;
 
       const params = [arena_id, court_id, date];
 
@@ -757,12 +785,46 @@ const userController = {
 
       const [slots] = await pool.execute(query, params);
 
-      res.json(slots);
+      // Process slots to add grouping information
+      const processedSlots = slots.map((slot, index, array) => {
+        const prevSlot = index > 0 ? array[index - 1] : null;
+        const nextSlot = index < array.length - 1 ? array[index + 1] : null;
+
+        return {
+          ...slot,
+          // Indicate if this slot can be grouped with next slot
+          can_group_with_next: nextSlot ? slot.end_time === nextSlot.start_time : false,
+          // Indicate if this slot can be grouped with previous slot
+          can_group_with_prev: prevSlot ? prevSlot.end_time === slot.start_time : false,
+          // Suggest if this is part of a consecutive series
+          is_consecutive_series_start: prevSlot ? prevSlot.end_time !== slot.start_time : true,
+          is_consecutive_series_end: nextSlot ? slot.end_time !== nextSlot.start_time : true,
+          // Group ID for consecutive slots (same for slots in same consecutive series)
+          consecutive_group_id: null // Will be set by frontend
+        };
+      });
+
+      // Assign group IDs to consecutive slots
+      let groupId = 1;
+      for (let i = 0; i < processedSlots.length; i++) {
+        if (processedSlots[i].is_consecutive_series_start) {
+          let j = i;
+          while (j < processedSlots.length &&
+            (j === i || processedSlots[j].can_group_with_prev)) {
+            processedSlots[j].consecutive_group_id = groupId;
+            j++;
+          }
+          groupId++;
+        }
+      }
+
+      res.json(processedSlots);
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
+
   // Get user's favorite arenas
 
   // Then in getFavoriteArenas:
@@ -871,22 +933,25 @@ const userController = {
       console.log("🔍 Query params:", { date, sport_id, court_id });
 
       let query = `
-        SELECT ts.*, cd.court_name, cd.court_number, st.name as sport_name,
-               CASE 
-                 WHEN b.booking_id IS NOT NULL THEN FALSE
-                 WHEN ts.is_blocked_by_owner = TRUE THEN FALSE
-                 WHEN ts.is_holiday = TRUE THEN FALSE
-                 WHEN ts.locked_until > NOW() AND ts.locked_by_user_id IS NOT NULL THEN FALSE
-                 ELSE ts.is_available 
-               END as actually_available
-        FROM time_slots ts
-        JOIN court_details cd ON ts.court_id = cd.court_id
-        LEFT JOIN sports_types st ON ts.sport_id = st.sport_id
-        LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
-          AND b.status IN ('pending', 'accepted', 'completed')
-        WHERE ts.arena_id = ?
-          AND (b.booking_id IS NULL OR b.status NOT IN ('pending', 'accepted', 'completed'))
-      `;
+      SELECT ts.*, cd.court_name, cd.court_number, st.name as sport_name,
+             CASE 
+               WHEN b.booking_id IS NOT NULL THEN FALSE
+               WHEN ts.is_blocked_by_owner = TRUE THEN FALSE
+               WHEN ts.is_holiday = TRUE THEN FALSE
+               WHEN ts.locked_until > NOW() AND ts.locked_by_user_id IS NOT NULL THEN FALSE
+               ELSE ts.is_available 
+             END as actually_available,
+             b.booking_id as existing_booking,
+             b.status as booking_status,
+             b.is_multi_slot as existing_multi_slot
+      FROM time_slots ts
+      JOIN court_details cd ON ts.court_id = cd.court_id
+      LEFT JOIN sports_types st ON ts.sport_id = st.sport_id
+      LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
+        AND b.status IN ('pending', 'accepted', 'completed')
+      WHERE ts.arena_id = ?
+        AND (b.booking_id IS NULL OR b.status NOT IN ('pending', 'accepted', 'completed'))
+    `;
 
       const params = [arena_id];
 
@@ -914,7 +979,49 @@ const userController = {
 
       console.log(`✅ Found ${slots.length} slots`);
 
-      res.json(slots);
+      // Group slots by court and date for multi-slot suggestions
+      const slotsByCourtAndDate = {};
+      slots.forEach(slot => {
+        const key = `${slot.court_id}_${slot.date}`;
+        if (!slotsByCourtAndDate[key]) {
+          slotsByCourtAndDate[key] = [];
+        }
+        slotsByCourtAndDate[key].push(slot);
+      });
+
+      // Process each group to identify consecutive slots
+      Object.keys(slotsByCourtAndDate).forEach(key => {
+        const courtSlots = slotsByCourtAndDate[key].sort((a, b) =>
+          a.start_time.localeCompare(b.start_time)
+        );
+
+        // Mark consecutive relationships
+        for (let i = 0; i < courtSlots.length; i++) {
+          const slot = courtSlots[i];
+          slot.can_group_with_next = i < courtSlots.length - 1 ?
+            slot.end_time === courtSlots[i + 1].start_time : false;
+          slot.can_group_with_prev = i > 0 ?
+            courtSlots[i - 1].end_time === slot.start_time : false;
+        }
+      });
+
+      // Add multi-slot metadata to response
+      const response = {
+        slots: slots,
+        meta: {
+          multi_slot_supported: true,
+          max_consecutive_slots: 4,
+          total_slots: slots.length,
+          slots_by_court: Object.keys(slotsByCourtAndDate).reduce((acc, key) => {
+            const [courtId] = key.split('_');
+            if (!acc[courtId]) acc[courtId] = 0;
+            acc[courtId] += slotsByCourtAndDate[key].length;
+            return acc;
+          }, {})
+        }
+      };
+
+      res.json(response);
     } catch (error) {
       console.error("❌ Error in getAvailableSlots:", error);
       res.status(500).json({

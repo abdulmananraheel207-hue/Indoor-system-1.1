@@ -1,4 +1,4 @@
-// File: OwnerBookings.jsx - COMPLETELY FIXED version
+// File: OwnerBookings.jsx - COMPLETE FIXED VERSION with multi-slot support
 import React, { useState, useEffect } from "react";
 import integrationService from "../../services/integrationService";
 
@@ -44,8 +44,6 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
   const canManageBookings = isOwner || hasPermissionForSelectedArena('manage_bookings');
   const canViewFinancial = isOwner || hasPermissionForSelectedArena('view_financials');
 
-
-
   // 🔥 FIX: Fetch bookings whenever filters or selected arena changes
   useEffect(() => {
     if (canViewBookings && selectedArena) {
@@ -66,8 +64,6 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
 
     return () => clearInterval(interval);
   }, [canViewBookings]);
-
-  // In OwnerBookings.jsx - Update the fetchBookings function
 
   const fetchBookings = async () => {
     if (!canViewBookings) return;
@@ -141,14 +137,6 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
       if (bookingsData.length > 0) {
         console.log("📋 First booking structure:", bookingsData[0]);
         console.log("🔑 Available fields in booking:", Object.keys(bookingsData[0]));
-        console.log("🏟️ Arena ID field value:", {
-          arena_id: bookingsData[0].arena_id,
-          arenaId: bookingsData[0].arenaId,
-          arenaID: bookingsData[0].arenaID,
-          arena: bookingsData[0].arena,
-          arena_name: bookingsData[0].arena_name,
-          arenaName: bookingsData[0].arenaName
-        });
       }
 
       // Try multiple possible field names for arena ID
@@ -209,6 +197,7 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
       setLoading(false);
     }
   };
+
   const fetchStats = async () => {
     if (!canViewFinancial || !selectedArena) return;
 
@@ -688,11 +677,18 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
                     {filteredBookings.map((booking) => {
                       const daysUntil = getDaysUntilBooking(booking);
                       const timePassed = isBookingTimePassed(booking);
+                      const isMultiSlot = booking.is_multi_slot || booking.slot_count > 1;
+                      const slotCount = booking.slot_count || 1;
 
                       return (
                         <tr key={booking.booking_id} className="hover:bg-gray-50">
                           <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
                             #{booking.booking_id}
+                            {isMultiSlot && (
+                              <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                                {slotCount} slots
+                              </span>
+                            )}
                           </td>
                           <td className="px-4 py-3">
                             <div>
@@ -710,14 +706,28 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
                             </div>
                             <div className="text-xs text-gray-500">
                               {booking.arena_name}
+                              {booking.court_name && (
+                                <span> • {booking.court_name}</span>
+                              )}
                             </div>
                           </td>
-                          <td className="px-4 py-3 whitespace-nowrap">
+                          <td className="px-4 py-3">
                             <div className="text-sm text-gray-900">
                               {formatDate(booking.date)}
                             </div>
                             <div className="text-xs text-gray-500">
-                              {formatTime(booking.start_time)} - {formatTime(booking.end_time)}
+                              {isMultiSlot ? (
+                                <div>
+                                  <div>{formatTime(booking.start_time)} - {formatTime(booking.end_time)}</div>
+                                  <div className="text-purple-600 font-medium">
+                                    {slotCount} consecutive slots
+                                  </div>
+                                </div>
+                              ) : (
+                                <div>
+                                  {formatTime(booking.start_time)} - {formatTime(booking.end_time)}
+                                </div>
+                              )}
                               {activeTab === "upcoming" && timePassed && (
                                 <span className="ml-2 text-red-500">(Time Passed)</span>
                               )}
@@ -805,6 +815,8 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
                 {filteredBookings.map((booking) => {
                   const daysUntil = getDaysUntilBooking(booking);
                   const timePassed = isBookingTimePassed(booking);
+                  const isMultiSlot = booking.is_multi_slot || booking.slot_count > 1;
+                  const slotCount = booking.slot_count || 1;
 
                   return (
                     <div
@@ -815,6 +827,11 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
                         <div>
                           <div className="font-medium text-gray-900">
                             #{booking.booking_id}
+                            {isMultiSlot && (
+                              <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                                {slotCount} slots
+                              </span>
+                            )}
                           </div>
                           <div className="text-sm text-gray-500">
                             {booking.user_name}
@@ -838,6 +855,12 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
                           <span className="text-gray-500">Arena:</span>
                           <span className="font-medium">{booking.arena_name}</span>
                         </div>
+                        {booking.court_name && (
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Court:</span>
+                            <span className="font-medium">{booking.court_name}</span>
+                          </div>
+                        )}
                         <div className="flex justify-between">
                           <span className="text-gray-500">Date:</span>
                           <span className="font-medium">
@@ -847,7 +870,14 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
                         <div className="flex justify-between">
                           <span className="text-gray-500">Time:</span>
                           <span className="font-medium">
-                            {formatTime(booking.start_time)} - {formatTime(booking.end_time)}
+                            {isMultiSlot ? (
+                              <div className="text-right">
+                                <div>{formatTime(booking.start_time)} - {formatTime(booking.end_time)}</div>
+                                <div className="text-purple-600 text-xs">{slotCount} consecutive slots</div>
+                              </div>
+                            ) : (
+                              <span>{formatTime(booking.start_time)} - {formatTime(booking.end_time)}</span>
+                            )}
                           </span>
                         </div>
                         {daysUntil !== null && !timePassed && activeTab === "upcoming" && (
@@ -939,7 +969,7 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
           <div className="relative top-4 mx-auto p-4 border w-full shadow-lg rounded-md bg-white md:top-20 md:p-5 md:max-w-2xl">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-base font-medium text-gray-900 md:text-lg">
-                Booking Details
+                Booking Details {selectedBooking.is_multi_slot && `(${selectedBooking.slot_count} slots)`}
               </h3>
               <button
                 onClick={() => setSelectedBooking(null)}
@@ -1004,6 +1034,16 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
                     {selectedBooking.arena_name}
                   </p>
                 </div>
+                {selectedBooking.court_name && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Court
+                    </label>
+                    <p className="mt-1 text-sm text-gray-900">
+                      {selectedBooking.court_name}
+                    </p>
+                  </div>
+                )}
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
                     Date
@@ -1014,7 +1054,7 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
-                    Time
+                    Time Range
                   </label>
                   <p className="mt-1 text-sm text-gray-900">
                     {formatTime(selectedBooking.start_time)} - {formatTime(selectedBooking.end_time)}
@@ -1039,6 +1079,51 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
                   </div>
                 )}
               </div>
+
+              {/* Multi-slot details section */}
+              {selectedBooking.is_multi_slot && selectedBooking.slot_count > 1 && (
+                <div className="border-t pt-4 mt-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-3">
+                    All Time Slots ({selectedBooking.slot_count} slots)
+                  </label>
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <div className="space-y-3 max-h-60 overflow-y-auto">
+                      {selectedBooking.all_slots && selectedBooking.all_slots.length > 0 ? (
+                        selectedBooking.all_slots.map((slot, index) => (
+                          <div key={index} className="flex justify-between items-center text-sm border-b border-gray-200 pb-2 last:border-0">
+                            <div className="text-gray-600 font-medium">Slot {index + 1}</div>
+                            <div className="text-gray-800">
+                              {formatTime(slot.start_time)} - {formatTime(slot.end_time)}
+                            </div>
+                            <div className="text-gray-600">Rs {slot.price}</div>
+                          </div>
+                        ))
+                      ) : (
+                        // Fallback if all_slots is not available
+                        <div className="text-sm text-gray-600">
+                          <div className="flex justify-between py-1">
+                            <span>Main Slot:</span>
+                            <span>{formatTime(selectedBooking.start_time)} - {formatTime(selectedBooking.end_time)}</span>
+                          </div>
+                          <div className="text-purple-600 text-xs mt-2">
+                            {selectedBooking.slot_count} consecutive slots • Total duration: {selectedBooking.slot_count} hours
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Booking creation time */}
+              {selectedBooking.booking_date && (
+                <div className="border-t pt-4 mt-2">
+                  <p className="text-xs text-gray-500">
+                    Booked on: {new Date(selectedBooking.booking_date).toLocaleString()}
+                  </p>
+                </div>
+              )}
+
               <div className="pt-4 border-t">
                 <div className="flex justify-end">
                   <button
