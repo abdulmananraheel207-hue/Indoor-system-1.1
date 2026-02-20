@@ -1,4 +1,4 @@
-// OwnerRegistration.jsx - Updated with Logo Upload
+// OwnerRegistration.jsx - Complete version with logo upload
 
 import React, { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
@@ -15,7 +15,7 @@ const OwnerRegistration = () => {
     const stepTitles = [
         "Owner Information",
         "Number of Arenas",
-        "Arena Details & Logo", // Updated title
+        "Arena Details & Logo",
         "Court Configuration",
         "Sports & Operating Hours",
         "Review & Submit"
@@ -42,7 +42,7 @@ const OwnerRegistration = () => {
             description: "",
             number_of_courts: 1,
 
-            // NEW: Logo related fields
+            // Logo related fields
             logo: null,
             logo_preview: null,
 
@@ -115,8 +115,10 @@ const OwnerRegistration = () => {
         });
     };
 
-    // NEW: Handle logo upload
+    // Handle logo upload
     const handleLogoUpload = (arenaIndex, file) => {
+        console.log("📁 handleLogoUpload called", { arenaIndex, file });
+
         if (!file) return;
 
         // Validate file type
@@ -148,7 +150,7 @@ const OwnerRegistration = () => {
         reader.readAsDataURL(file);
     };
 
-    // NEW: Remove logo
+    // Remove logo
     const handleRemoveLogo = (arenaIndex) => {
         const updatedArenas = [...formData.arenas];
         updatedArenas[arenaIndex] = {
@@ -160,6 +162,112 @@ const OwnerRegistration = () => {
             ...formData,
             arenas: updatedArenas
         });
+    };
+
+
+    const LogoUploader = ({ arenaIndex }) => {
+        const arena = formData.arenas[arenaIndex];
+        const fileInputRef = React.useRef(null);
+
+        const handleFileSelect = (event) => {
+            event.preventDefault();
+            fileInputRef.current.click();
+        };
+
+        const handleFileChange = (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            console.log("✅ File selected:", file.name);
+
+            // Validate file type
+            if (!file.type.startsWith('image/')) {
+                setError('Please upload an image file');
+                return;
+            }
+
+            // Validate file size (max 5MB)
+            if (file.size > 5 * 1024 * 1024) {
+                setError('File size must be less than 5MB');
+                return;
+            }
+
+            // Create preview
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const updatedArenas = [...formData.arenas];
+                updatedArenas[arenaIndex] = {
+                    ...updatedArenas[arenaIndex],
+                    logo: file,
+                    logo_preview: e.target.result
+                };
+                setFormData({ ...formData, arenas: updatedArenas });
+                setError("");
+            };
+            reader.readAsDataURL(file);
+        };
+
+        const handleRemove = () => {
+            const updatedArenas = [...formData.arenas];
+            updatedArenas[arenaIndex] = {
+                ...updatedArenas[arenaIndex],
+                logo: null,
+                logo_preview: null
+            };
+            setFormData({ ...formData, arenas: updatedArenas });
+            if (fileInputRef.current) {
+                fileInputRef.current.value = '';
+            }
+        };
+
+        return (
+            <div className="mt-6 p-6 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50">
+                <h3 className="text-lg font-medium text-gray-900 mb-4">Arena Logo</h3>
+
+                {/* Hidden file input */}
+                <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleFileChange}
+                    className="hidden"
+                />
+
+                {!arena.logo_preview ? (
+                    <div
+                        onClick={handleFileSelect}
+                        className="cursor-pointer hover:bg-gray-100 transition-colors"
+                    >
+                        <div className="flex flex-col items-center justify-center py-8">
+                            <svg className="w-16 h-16 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"
+                                    d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                            <p className="text-gray-600 mb-2">Click to upload arena logo</p>
+                            <p className="text-sm text-gray-500">PNG, JPG, GIF up to 5MB</p>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="relative">
+                        <img
+                            src={arena.logo_preview}
+                            alt="Logo preview"
+                            className="w-32 h-32 object-cover rounded-lg mx-auto"
+                        />
+                        <button
+                            type="button"
+                            onClick={handleRemove}
+                            className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 shadow-lg"
+                        >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+                        <p className="text-sm text-gray-600 mt-2 text-center">{arena.logo?.name}</p>
+                    </div>
+                )}
+            </div>
+        );
     };
 
     const handleCourtChange = (arenaIndex, courtIndex, field, value) => {
@@ -278,7 +386,6 @@ const OwnerRegistration = () => {
                 if (!currentArena.google_maps_location?.trim()) return "Google Maps location is required";
                 if (!currentArena.description?.trim()) return "Arena description is required";
                 if (currentArena.number_of_courts < 1) return "Number of courts must be at least 1";
-                // Logo is optional, so no validation needed
                 return null;
 
             case 4:
@@ -287,7 +394,6 @@ const OwnerRegistration = () => {
                     return "Please configure at least one court";
                 }
 
-                // Validate each court has required fields
                 for (let i = 0; i < arenaForCourts.courts.length; i++) {
                     const court = arenaForCourts.courts[i];
                     if (!court.court_name?.trim()) return `Court ${i + 1}: Court name is required`;
@@ -316,7 +422,6 @@ const OwnerRegistration = () => {
         }
 
         if (step === 2) {
-            // Initialize arenas array based on number selected
             const newArenas = [];
             for (let i = 0; i < formData.number_of_arenas; i++) {
                 if (formData.arenas[i]) {
@@ -355,15 +460,13 @@ const OwnerRegistration = () => {
         }
 
         if (step === 3) {
-            // Initialize courts when moving to court configuration step
             initializeCourts(currentArenaIndex);
         }
 
         if (step === 5) {
-            // Check if we have more arenas to configure
             if (currentArenaIndex < formData.arenas.length - 1) {
                 setCurrentArenaIndex(currentArenaIndex + 1);
-                setStep(3); // Go back to arena details for next arena
+                setStep(3);
                 return;
             }
         }
@@ -401,7 +504,6 @@ const OwnerRegistration = () => {
         return slots;
     };
 
-    // NEW: Convert logo file to base64 for API submission
     const logoToBase64 = (file) => {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -421,7 +523,6 @@ const OwnerRegistration = () => {
         setError("");
 
         try {
-            // Prepare data for API
             const registrationData = {
                 owner_name: formData.owner_name,
                 personal_number: formData.personal_number || null,
@@ -431,9 +532,9 @@ const OwnerRegistration = () => {
                 agreed_to_terms: formData.agreed_to_terms ? 1 : 0,
 
                 arenas: await Promise.all(formData.arenas.map(async (arena) => {
-                    // Convert logo to base64 if exists
                     let logoBase64 = null;
                     if (arena.logo) {
+                        console.log(`🎨 Converting logo to base64...`);
                         logoBase64 = await logoToBase64(arena.logo);
                     }
 
@@ -444,10 +545,8 @@ const OwnerRegistration = () => {
                         description: arena.description || "",
                         number_of_courts: parseInt(arena.number_of_courts) || 1,
 
-                        // NEW: Add logo
                         logo: logoBase64,
 
-                        // Courts configuration
                         courts: (arena.courts || []).map(court => ({
                             court_number: court.court_number,
                             court_name: court.court_name,
@@ -457,22 +556,11 @@ const OwnerRegistration = () => {
                             sports: court.sports || arena.selected_sports || []
                         })),
 
-                        // Sports
                         selected_sports: arena.selected_sports || [],
-
-                        // Operating hours (per arena)
                         opening_time: arena.opening_time || "06:00",
                         closing_time: arena.closing_time || "22:00",
                         slot_duration: parseInt(arena.slot_duration) || 60,
-                        days_available: arena.days_available || {
-                            monday: true,
-                            tuesday: true,
-                            wednesday: true,
-                            thursday: true,
-                            friday: true,
-                            saturday: true,
-                            sunday: false
-                        }
+                        days_available: arena.days_available
                     };
                 }))
             };
@@ -494,102 +582,19 @@ const OwnerRegistration = () => {
                 localStorage.setItem("userRole", "owner");
                 localStorage.setItem("ownerData", JSON.stringify(data.owner));
 
-                alert(`Registration successful! You have registered ${data.arenas.length} arena(s). You can now upload photos from your Settings.`);
+                alert(`Registration successful! You have registered ${data.arenas.length} arena(s).`);
                 navigate("/owner/dashboard");
             } else {
                 setError(data.message || "Registration failed. Please try again.");
             }
         } catch (error) {
-            console.error("Error:", error);
+            console.error("❌ Error:", error);
             setError("An error occurred. Please try again.");
         } finally {
             setLoading(false);
         }
     };
 
-    // NEW: Logo Upload Component
-    const LogoUploader = ({ arenaIndex }) => {
-        const arena = formData.arenas[arenaIndex];
-
-        return (
-            <div className="mt-6 p-6 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50">
-                <h3 className="text-lg font-medium text-gray-900 mb-4">Arena Logo (Optional)</h3>
-                <p className="text-sm text-gray-600 mb-4">
-                    Upload a logo for your arena. This will be displayed on your arena profile.
-                    Recommended size: 400x400px, Max size: 5MB
-                </p>
-
-                {arena.logo_preview ? (
-                    <div className="flex items-center space-x-4">
-                        <div className="relative">
-                            <img
-                                src={arena.logo_preview}
-                                alt="Logo preview"
-                                className="w-32 h-32 object-cover rounded-lg border-2 border-gray-300"
-                            />
-                            <button
-                                type="button"
-                                onClick={() => handleRemoveLogo(arenaIndex)}
-                                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 shadow-lg"
-                            >
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                            </button>
-                        </div>
-                        <div>
-                            <p className="text-sm font-medium text-gray-700">{arena.logo?.name}</p>
-                            <p className="text-xs text-gray-500">
-                                {(arena.logo?.size / 1024).toFixed(2)} KB
-                            </p>
-                        </div>
-                    </div>
-                ) : (
-                    <div className="flex justify-center px-6 pt-5 pb-6">
-                        <div className="space-y-1 text-center">
-                            <svg
-                                className="mx-auto h-12 w-12 text-gray-400"
-                                stroke="currentColor"
-                                fill="none"
-                                viewBox="0 0 48 48"
-                                aria-hidden="true"
-                            >
-                                <path
-                                    d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                />
-                            </svg>
-                            <div className="flex text-sm text-gray-600">
-                                <label
-                                    htmlFor={`logo-upload-${arenaIndex}`}
-                                    className="relative cursor-pointer bg-white rounded-md font-medium text-blue-600 hover:text-blue-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-blue-500"
-                                >
-                                    <span>Upload a logo</span>
-                                    <input
-                                        id={`logo-upload-${arenaIndex}`}
-                                        name={`logo-upload-${arenaIndex}`}
-                                        type="file"
-                                        className="sr-only"
-                                        accept="image/*"
-                                        onChange={(e) => {
-                                            const file = e.target.files[0];
-                                            if (file) handleLogoUpload(arenaIndex, file);
-                                        }}
-                                    />
-                                </label>
-                                <p className="pl-1">or drag and drop</p>
-                            </div>
-                            <p className="text-xs text-gray-500">PNG, JPG, GIF up to 5MB</p>
-                        </div>
-                    </div>
-                )}
-            </div>
-        );
-    };
-
-    // Render form based on current step
     const renderStep = () => {
         switch (step) {
             case 1:
@@ -808,7 +813,6 @@ const OwnerRegistration = () => {
                             </div>
                         </div>
 
-                        {/* NEW: Logo Upload Component */}
                         <LogoUploader arenaIndex={currentArenaIndex} />
                     </div>
                 );
@@ -893,7 +897,6 @@ const OwnerRegistration = () => {
                             Sports & Operating Hours {formData.arenas.length > 1 && `- Arena ${currentArenaIndex + 1}`}
                         </h2>
 
-                        {/* Sports Selection */}
                         <div>
                             <h3 className="font-medium text-gray-900 mb-3">Select Sports *</h3>
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -914,7 +917,6 @@ const OwnerRegistration = () => {
                             </div>
                         </div>
 
-                        {/* Operating Hours */}
                         <div className="mt-8">
                             <h3 className="font-medium text-gray-900 mb-3">Operating Hours</h3>
 
@@ -1095,7 +1097,7 @@ const OwnerRegistration = () => {
                                     <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
                                 </svg>
                                 <p className="text-sm text-blue-700">
-                                    <strong>Note:</strong> You have registered {formData.arenas.length} arena(s). You can upload photos for each arena after registration from your Settings.
+                                    <strong>Note:</strong> You have registered {formData.arenas.length} arena(s).
                                 </p>
                             </div>
                         </div>
@@ -1110,13 +1112,11 @@ const OwnerRegistration = () => {
     return (
         <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8 px-4">
             <div className="max-w-4xl mx-auto">
-                {/* Header */}
                 <div className="text-center mb-8">
                     <h1 className="text-3xl font-bold text-gray-900">Register Your Sports Arena(s)</h1>
                     <p className="text-gray-600 mt-2">Complete all steps to start your arena business</p>
                 </div>
 
-                {/* Progress Bar */}
                 <div className="mb-8">
                     <div className="flex items-center justify-between mb-2">
                         {stepTitles.map((title, index) => (
@@ -1138,7 +1138,6 @@ const OwnerRegistration = () => {
                     </div>
                 </div>
 
-                {/* Arena Progress Indicator for steps 3-5 */}
                 {step >= 3 && step <= 5 && formData.arenas.length > 1 && (
                     <div className="mb-4 flex items-center justify-between bg-blue-50 p-3 rounded-lg">
                         <span className="text-sm font-medium text-blue-700">
@@ -1155,7 +1154,6 @@ const OwnerRegistration = () => {
                     </div>
                 )}
 
-                {/* Error Message */}
                 {error && (
                     <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
                         <div className="flex items-center">
@@ -1167,11 +1165,9 @@ const OwnerRegistration = () => {
                     </div>
                 )}
 
-                {/* Form Content */}
                 <div className="bg-white rounded-xl shadow-lg p-6">
                     {renderStep()}
 
-                    {/* Navigation Buttons */}
                     <div className="mt-8 flex justify-between">
                         {step > 1 ? (
                             <button
@@ -1223,13 +1219,11 @@ const OwnerRegistration = () => {
                     </div>
                 </div>
 
-                {/* Step Indicator */}
                 <div className="mt-6 text-center text-sm text-gray-500">
                     Step {step} of 6 • {stepTitles[step - 1]}
                     {step >= 3 && step <= 5 && formData.arenas.length > 1 && ` • Arena ${currentArenaIndex + 1} of ${formData.arenas.length}`}
                 </div>
 
-                {/* Login Link */}
                 <div className="mt-8 text-center">
                     <p className="text-gray-600">
                         Already have an account?{' '}

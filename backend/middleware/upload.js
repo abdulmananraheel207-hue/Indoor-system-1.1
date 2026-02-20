@@ -13,9 +13,9 @@ cloudinary.config({
 
 console.log("✓ Cloudinary configured:", process.env.CLOUDINARY_CLOUD_NAME);
 
-// Get folder name based on upload type
+
+
 const getFolderName = (req, file) => {
-  // Extract from URL path since params might not be set yet
   const url = req.originalUrl;
 
   if (file.fieldname === "profile_picture") {
@@ -26,7 +26,7 @@ const getFolderName = (req, file) => {
     // Extract arena_id from URL: /owners/arenas/:arena_id/photos
     const arenaMatch = url.match(/\/arenas\/(\d+)\/photos/);
     const arenaId = arenaMatch ? arenaMatch[1] : "unknown";
-    return `sports-arena/arenas/${arenaId}`;
+    return `sports-arena/arenas/${arenaId}/gallery`;
   }
   else if (file.fieldname === "court_images") {
     // Extract court_id from URL: /owners/courts/:court_id/photos
@@ -35,16 +35,17 @@ const getFolderName = (req, file) => {
     console.log("📍 Court Image Upload - Extracted court_id from URL:", courtId);
     return `sports-arena/courts/${courtId}`;
   }
-  // NEW: Arena logo upload
+  // Arena logo upload
   else if (file.fieldname === "arena_logo") {
-    // For registration, we don't have arena_id yet, so use a temporary folder
-    // The arena_id will be added after arena creation
-    return `sports-arena/arena-logos/temp`;
+    // For arena logo uploads, we have the arena_id in the URL
+    const arenaMatch = url.match(/\/arenas\/(\d+)\/logo/);
+    const arenaId = arenaMatch ? arenaMatch[1] : "unknown";
+    console.log("📍 Arena Logo Upload - Extracted arena_id from URL:", arenaId);
+    return `sports-arena/arenas/${arenaId}/logo`;
   }
 
   return "sports-arena/others";
 };
-
 // Get public ID (filename in Cloudinary)
 const getPublicId = (req, file) => {
   const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
@@ -66,7 +67,6 @@ const storage = new CloudinaryStorage({
       fieldname: file.fieldname,
     });
 
-    // Different transformations for different types
     let transformations = [];
 
     if (file.fieldname === "profile_picture") {
@@ -75,7 +75,6 @@ const storage = new CloudinaryStorage({
         { quality: "auto:good" },
       ];
     } else if (file.fieldname === "arena_logo") {
-      // Special transformation for logos
       transformations = [
         { width: 400, height: 400, crop: "fill" },
         { quality: "auto:good" },

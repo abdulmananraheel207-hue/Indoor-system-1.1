@@ -239,51 +239,7 @@ export const uploadService = {
      * Test upload connection (for debugging)
      * @returns {Promise} Test response
      */
-    testUpload: async () => {
-        console.log('🧪 Testing upload service...');
 
-        // Create a simple test image
-        const canvas = document.createElement('canvas');
-        canvas.width = 100;
-        canvas.height = 100;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#3498db';
-        ctx.fillRect(0, 0, 100, 100);
-        ctx.fillStyle = 'white';
-        ctx.font = 'bold 16px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText('TEST', 50, 50);
-
-        return new Promise((resolve, reject) => {
-            canvas.toBlob(async (blob) => {
-                try {
-                    const file = new File([blob], 'test-upload.jpg', {
-                        type: 'image/jpeg',
-                        lastModified: Date.now(),
-                    });
-
-                    const formData = new FormData();
-                    formData.append('court_images', file);
-
-                    const response = await axiosInstance.post(
-                        '/owners/debug/upload-test',
-                        formData,
-                        {
-                            headers: {
-                                'Content-Type': 'multipart/form-data',
-                            },
-                        }
-                    );
-
-                    console.log('✅ Test upload successful!');
-                    resolve(response.data);
-                } catch (error) {
-                    console.error('❌ Test upload failed:', error);
-                    reject(error);
-                }
-            }, 'image/jpeg');
-        });
-    },
 
     /**
      * Delete court photo

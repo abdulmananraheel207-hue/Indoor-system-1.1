@@ -80,7 +80,7 @@ router.post("/login", async (req, res) => {
         // Parse permissions safely
         let permissions = {};
         let arenaPermissions = {};
-        let initialStats = {}; // 🔥 KEEP THIS - CRITICAL FOR DASHBOARD
+        let initialStats = {};
 
         try {
             permissions = typeof manager.permissions === 'string'

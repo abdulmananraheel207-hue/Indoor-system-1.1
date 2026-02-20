@@ -1,15 +1,12 @@
-// File: OwnerArenaSettings.jsx - UPDATED (removed duplicate arena selector)
 import React, { useState, useEffect } from "react";
 import { ownerAPI } from "../../services/api";
 
-// In OwnerArenaSettings.jsx - Add arena-specific permission checks
-
 const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {}, selectedArena = null }) => {
   const [arenas, setArenas] = useState([]);
-  // 🔥 Use selectedArena from props directly
   const [courts, setCourts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [uploadingPhotos, setUploadingPhotos] = useState({});
+  const [uploadingLogo, setUploadingLogo] = useState(false);
   const [editCourt, setEditCourt] = useState(null);
   const [showAddCourt, setShowAddCourt] = useState(false);
   const [courtForm, setCourtForm] = useState({
@@ -27,6 +24,10 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {}, selected
     sports: [],
   });
 
+  const [arenaLogo, setArenaLogo] = useState(null);
+  const [arenaImages, setArenaImages] = useState([]);
+  const [logoError, setLogoError] = useState(null);
+
   // Get arena-specific permissions from localStorage
   const [arenaPermissions, setArenaPermissions] = useState({});
 
@@ -41,6 +42,180 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {}, selected
     }
   }, []);
 
+  useEffect(() => {
+    if (selectedArena?.arena_id) {
+      fetchArenaImages();
+    }
+  }, [selectedArena]);
+
+  // Fetch arena images to get logo
+  const fetchArenaImages = async () => {
+    if (!selectedArena) return;
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(
+        `http://localhost:5000/api/owners/arenas/${selectedArena.arena_id}/images`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        setArenaImages(data.images || []);
+        const logo = (data.images || []).find(img => img.is_primary);
+        setArenaLogo(logo);
+      }
+    } catch (error) {
+      console.error('Error fetching arena images:', error);
+    }
+  };
+
+  // Handle logo upload - similar to court photos upload
+  const handleLogoUpload = async () => {
+    if (!canManageArena) {
+      alert("❌ You don't have permission to upload logo");
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem("token");
+
+      if (!token) {
+        alert("❌ No authentication token found. Please login first.");
+        return;
+      }
+
+      // Create file input element
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/jpeg,image/jpg,image/png,image/gif,image/webp';
+      input.multiple = false; // Only one file for logo
+
+      input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        // Validate file
+        const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+        if (!validTypes.includes(file.type)) {
+          alert('Please select a valid image file (JPEG, PNG, GIF, WEBP)');
+          return;
+        }
+
+        if (file.size > 10 * 1024 * 1024) {
+          alert('File size must be less than 10MB');
+          return;
+        }
+
+        const formData = new FormData();
+        formData.append('arena_logo', file);
+
+        setUploadingLogo(true);
+        setLogoError(null);
+
+        try {
+          console.log(`📤 Uploading logo for arena ${selectedArena.arena_id}...`);
+
+          const response = await fetch(
+            `http://localhost:5000/api/owners/arenas/${selectedArena.arena_id}/logo`,
+            {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+              },
+              body: formData,
+            }
+          );
+
+          const result = await response.json();
+
+          if (response.ok) {
+            alert(`✅ Logo uploaded successfully!`);
+
+            // Update logo in state
+            if (result.logo) {
+              setArenaLogo(result.logo);
+
+              // Update arenaImages to include the new logo
+              setArenaImages(prev => {
+                const filtered = prev.filter(img => !img.is_primary);
+                return [result.logo, ...filtered];
+              });
+            }
+
+            // Refresh images to ensure we have latest
+            setTimeout(() => {
+              fetchArenaImages();
+            }, 500);
+          } else {
+            alert(`❌ Upload failed: ${result.message}`);
+            setLogoError(result.message);
+          }
+        } catch (error) {
+          console.error("💥 Logo upload error:", error);
+          alert(`❌ Error: ${error.message}`);
+          setLogoError(error.message);
+        } finally {
+          setUploadingLogo(false);
+        }
+      };
+
+      input.click();
+    } catch (error) {
+      console.error("Error in logo upload:", error);
+      alert(`❌ Error: ${error.message}`);
+      setUploadingLogo(false);
+    }
+  };
+
+  // Handle delete logo
+  const handleDeleteLogo = async () => {
+    if (!canManageArena) {
+      alert("❌ You don't have permission to delete logo");
+      return;
+    }
+
+    if (!arenaLogo) return;
+
+    if (!window.confirm("Are you sure you want to delete the arena logo?")) return;
+
+    try {
+      const token = localStorage.getItem("token");
+
+      const response = await fetch(
+        `http://localhost:5000/api/owners/arenas/${selectedArena.arena_id}/images/${arenaLogo.image_id}`,
+        {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      const result = await response.json();
+
+      if (response.ok) {
+        alert("✅ Logo deleted successfully");
+        setArenaLogo(null);
+        fetchArenaImages(); // Refresh images
+      } else {
+        alert(`❌ Failed to delete logo: ${result.message}`);
+      }
+    } catch (error) {
+      console.error("Error deleting logo:", error);
+      alert("Failed to delete logo");
+    }
+  };
+
+  const getCurrentLogo = () => {
+    return arenaLogo || arenaImages.find(img => img.is_primary) || null;
+  };
+
   const hasPermissionForSelectedArena = (permissionName) => {
     if (isOwner) return true;
     if (!selectedArena) return false;
@@ -53,7 +228,6 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {}, selected
   const canViewArena = isOwner || hasPermissionForSelectedArena('manage_arena');
   const canManageArena = isOwner || hasPermissionForSelectedArena('manage_arena');
   const canUploadPhotos = isOwner || hasPermissionForSelectedArena('manage_arena');
-
 
   const availableSports = [
     { id: 1, name: "Badminton", icon: "🏸" },
@@ -482,6 +656,8 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {}, selected
     );
   }
 
+  const currentLogo = getCurrentLogo();
+
   return (
     <div className="max-w-6xl mx-auto">
       <div className="flex justify-between items-center mb-4">
@@ -504,12 +680,99 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {}, selected
         </div>
         {canManageArena && (
           <button
+            type="button"
             onClick={() => setShowAddCourt(true)}
             className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700"
           >
             + Add Court
           </button>
         )}
+      </div>
+
+      {/* Logo Section - Using same pattern as court photos */}
+      <div className="bg-white rounded-xl shadow p-6 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">Arena Logo</h2>
+          {canManageArena && (
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleLogoUpload}
+                disabled={uploadingLogo}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm disabled:bg-blue-300 flex items-center"
+              >
+                {uploadingLogo ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Uploading...
+                  </>
+                ) : (
+                  currentLogo ? 'Change Logo' : 'Upload Logo'
+                )}
+              </button>
+              {currentLogo && canManageArena && (
+                <button
+                  type="button"
+                  onClick={handleDeleteLogo}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+                >
+                  Delete Logo
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {logoError && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-sm text-red-600">{logoError}</p>
+          </div>
+        )}
+
+        <div className="flex items-center space-x-4">
+          {currentLogo ? (
+            <>
+              <img
+                src={currentLogo.image_url}
+                alt="Arena Logo"
+                className="w-24 h-24 object-cover rounded-lg border-2 border-gray-300"
+                onError={(e) => {
+                  e.target.src = "https://via.placeholder.com/96x96?text=Logo+Error";
+                }}
+              />
+              <div>
+                <p className="text-sm text-gray-600">Current logo</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  This logo will appear on your arena profile
+                </p>
+                {uploadingLogo && (
+                  <p className="text-xs text-blue-600 mt-2">Uploading new logo...</p>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="text-center py-8 w-full border-2 border-dashed border-gray-300 rounded-lg">
+              <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              <p className="mt-2 text-sm text-gray-500">No logo uploaded</p>
+              <p className="text-xs text-gray-400">Upload a logo to brand your arena</p>
+            </div>
+          )}
+        </div>
+
+        {/* Guidelines */}
+        <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+          <h4 className="text-xs font-bold text-blue-800 uppercase mb-1">Logo Guidelines:</h4>
+          <ul className="text-xs text-blue-700 space-y-1">
+            <li>• Square image works best (400x400px or larger)</li>
+            <li>• Max file size: 10MB</li>
+            <li>• Formats: JPG, PNG, GIF, WEBP</li>
+          </ul>
+        </div>
       </div>
 
       {/* Courts Summary */}
@@ -553,6 +816,7 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {}, selected
               <p className="text-gray-600">No courts found for this arena.</p>
               {canManageArena && (
                 <button
+                  type="button"
                   onClick={() => setShowAddCourt(true)}
                   className="mt-4 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                 >
@@ -604,6 +868,7 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {}, selected
                       {canManageArena && (
                         <div className="flex gap-2 mt-4 md:mt-0">
                           <button
+                            type="button"
                             onClick={() => handleCourtEdit(court)}
                             className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
                           >
@@ -622,6 +887,7 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {}, selected
 
                         {canUploadPhotos && (
                           <button
+                            type="button"
                             onClick={() => handlePhotoUpload(court.court_id)}
                             disabled={uploadingPhotos[court.court_id] || courtPhotos.length >= 3}
                             className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:bg-blue-300"
@@ -663,6 +929,7 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {}, selected
 
                                 {canUploadPhotos && (
                                   <button
+                                    type="button"
                                     onClick={() => handleDeletePhoto(court.court_id, photo)}
                                     className="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
                                   >
@@ -684,6 +951,7 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {}, selected
                           </p>
                           {canUploadPhotos && (
                             <button
+                              type="button"
                               onClick={() => handlePhotoUpload(court.court_id)}
                               className="px-4 py-2 bg-blue-100 text-blue-700 text-sm rounded-lg hover:bg-blue-200"
                             >
@@ -710,6 +978,7 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {}, selected
                 Update Court Details
               </h3>
               <button
+                type="button"
                 onClick={() => setEditCourt(null)}
                 className="text-gray-400 hover:text-gray-600 text-2xl"
               >
@@ -827,6 +1096,7 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {}, selected
 
               <div className="flex justify-end space-x-3 pt-6 border-t">
                 <button
+                  type="button"
                   onClick={() => setEditCourt(null)}
                   className="px-6 py-2.5 text-sm font-bold text-gray-500 hover:text-gray-700"
                 >
@@ -853,6 +1123,7 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {}, selected
             <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
               <h3 className="text-lg font-bold text-gray-900">Add New Court</h3>
               <button
+                type="button"
                 onClick={() => setShowAddCourt(false)}
                 className="text-gray-400 hover:text-gray-600 text-2xl"
               >
@@ -983,12 +1254,14 @@ const OwnerArenaSettings = ({ dashboardData, isOwner, permissions = {}, selected
 
               <div className="flex justify-end space-x-3 pt-6 border-t">
                 <button
+                  type="button"
                   onClick={() => setShowAddCourt(false)}
                   className="px-6 py-2.5 text-sm font-bold text-gray-500 hover:text-gray-700"
                 >
                   Cancel
                 </button>
                 <button
+                  type="button"
                   onClick={handleAddCourt}
                   disabled={
                     loading ||

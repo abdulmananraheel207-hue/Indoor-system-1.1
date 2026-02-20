@@ -683,9 +683,114 @@ const ownerController = {
     }
   },
 
-  // In ownerController.js - Add this new method
 
-  // Upload arena logo (called after arena creation)
+  deleteArenaImage: async (req, res) => {
+    try {
+      const { arena_id, image_id } = req.params;
+
+      console.log("=".repeat(50));
+      console.log("🗑️ DELETE ARENA IMAGE");
+      console.log("Arena ID:", arena_id);
+      console.log("Image ID:", image_id);
+      console.log("User ID:", req.user.id);
+
+      // Verify owner owns this arena
+      const [arenaCheck] = await pool.execute(
+        "SELECT arena_id FROM arenas WHERE arena_id = ? AND owner_id = ?",
+        [arena_id, req.user.id]
+      );
+
+      if (arenaCheck.length === 0) {
+        console.log("❌ Arena not found or access denied");
+        return res.status(404).json({
+          success: false,
+          message: "Arena not found or access denied",
+        });
+      }
+
+      // Get image details before deletion
+      const [imageDetails] = await pool.execute(
+        "SELECT image_url, cloudinary_id, is_primary FROM arena_images WHERE image_id = ? AND arena_id = ?",
+        [image_id, arena_id]
+      );
+
+      if (imageDetails.length === 0) {
+        console.log("❌ Image not found");
+        return res.status(404).json({
+          success: false,
+          message: "Image not found",
+        });
+      }
+
+      const image = imageDetails[0];
+      console.log("📸 Image details:", image);
+
+      // Start transaction
+      const connection = await pool.getConnection();
+      await connection.beginTransaction();
+
+      try {
+        // Delete from database
+        await connection.execute(
+          "DELETE FROM arena_images WHERE image_id = ? AND arena_id = ?",
+          [image_id, arena_id]
+        );
+
+        console.log("✅ Image deleted from database");
+
+        // If we deleted the primary image, set a new primary if available
+        if (image.is_primary) {
+          const [remainingImages] = await connection.execute(
+            "SELECT image_id FROM arena_images WHERE arena_id = ? ORDER BY uploaded_at LIMIT 1",
+            [arena_id]
+          );
+
+          if (remainingImages.length > 0) {
+            await connection.execute(
+              "UPDATE arena_images SET is_primary = TRUE WHERE image_id = ?",
+              [remainingImages[0].image_id]
+            );
+            console.log("✅ New primary image set:", remainingImages[0].image_id);
+          }
+        }
+
+        await connection.commit();
+
+        // Delete from Cloudinary if we have cloudinary_id
+        if (image.cloudinary_id && process.env.CLOUDINARY_CLOUD_NAME) {
+          try {
+            const cloudinary = require("cloudinary").v2;
+            const result = await cloudinary.uploader.destroy(image.cloudinary_id);
+            console.log("✅ Deleted from Cloudinary:", result);
+          } catch (cloudinaryError) {
+            console.warn("⚠️ Could not delete from Cloudinary:", cloudinaryError.message);
+            // Don't fail the request if Cloudinary delete fails
+          }
+        }
+
+        res.json({
+          success: true,
+          message: "Image deleted successfully",
+          deleted_image: image,
+        });
+
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      } finally {
+        connection.release();
+      }
+
+    } catch (error) {
+      console.error("❌ Error deleting arena image:", error);
+      res.status(500).json({
+        success: false,
+        message: "Server error while deleting image",
+        error: error.message,
+      });
+    }
+  },
+
   uploadArenaLogo: async (req, res) => {
     try {
       const { arena_id } = req.params;
@@ -715,25 +820,25 @@ const ownerController = {
         });
       }
 
-      // Check if arena already has a logo
-      const [existingLogo] = await pool.execute(
-        "SELECT image_id FROM arena_images WHERE arena_id = ? AND is_primary = TRUE",
-        [arena_id]
-      );
-
+      // Start transaction
       const connection = await pool.getConnection();
       await connection.beginTransaction();
 
       try {
-        // If there's an existing logo, you might want to delete it from Cloudinary
-        if (existingLogo.length > 0) {
-          // Optional: Delete old logo from Cloudinary
-          // You can implement this if needed
-        }
+        // First, unset any existing primary images for this arena
+        // (since logo should be the primary image)
+        await connection.execute(
+          "UPDATE arena_images SET is_primary = FALSE WHERE arena_id = ?",
+          [arena_id]
+        );
+
+        // Delete any existing logo (optional - you might want to keep history)
+        // This depends on your business logic
 
         // Save logo to database in arena_images table with is_primary = TRUE
         const [result] = await connection.execute(
-          `INSERT INTO arena_images (arena_id, image_url, cloudinary_id, is_primary, uploaded_at)
+          `INSERT INTO arena_images 
+         (arena_id, image_url, cloudinary_id, is_primary, uploaded_at)
          VALUES (?, ?, ?, TRUE, NOW())`,
           [arena_id, file.path, file.filename]
         );
@@ -749,7 +854,8 @@ const ownerController = {
             image_id: result.insertId,
             image_url: file.path,
             cloudinary_id: file.filename,
-            arena_id: parseInt(arena_id)
+            arena_id: parseInt(arena_id),
+            is_primary: true
           }
         });
 
@@ -904,6 +1010,7 @@ const ownerController = {
             total_arenas: 0,
             pending_requests_count: 0,
             upcoming_bookings_count: 0,
+            total_slots_booked_today: 0, // NEW: Count individual slots
           },
           pending_requests: [],
           upcoming_bookings: [],
@@ -915,141 +1022,194 @@ const ownerController = {
       const arenaIds = arenas.map(a => a.arena_id);
       const placeholders = arenaIds.map(() => '?').join(',');
 
-      // TODAY'S BOOKINGS COUNT (all arenas)
+      // TODAY'S BOOKINGS COUNT (count bookings, not slots)
       const [todayBookings] = await pool.execute(
         `SELECT COUNT(*) as count 
-             FROM bookings b
-             JOIN time_slots ts ON b.slot_id = ts.slot_id
-             WHERE b.arena_id IN (${placeholders}) AND DATE(ts.date) = ?`,
+       FROM bookings b
+       JOIN time_slots ts ON b.slot_id = ts.slot_id
+       WHERE b.arena_id IN (${placeholders}) AND DATE(ts.date) = ?`,
+        [...arenaIds, today]
+      );
+
+      // TODAY'S TOTAL SLOTS BOOKED (count individual slots including multi-slot)
+      const [todaySlotsBooked] = await pool.execute(
+        `SELECT SUM(
+         CASE 
+           WHEN b.is_multi_slot = 1 AND b.slot_ids IS NOT NULL 
+           THEN JSON_LENGTH(b.slot_ids)
+           ELSE 1 
+         END
+       ) as total_slots
+       FROM bookings b
+       JOIN time_slots ts ON b.slot_id = ts.slot_id
+       WHERE b.arena_id IN (${placeholders}) 
+         AND DATE(ts.date) = ? 
+         AND b.status IN ('pending', 'accepted', 'completed')`,
         [...arenaIds, today]
       );
 
       // TODAY'S REVENUE (completed bookings only)
       const [todayRevenue] = await pool.execute(
         `SELECT COALESCE(SUM(b.total_amount), 0) as revenue
-             FROM bookings b
-             JOIN time_slots ts ON b.slot_id = ts.slot_id
-             WHERE b.arena_id IN (${placeholders}) 
-               AND DATE(ts.date) = ? 
-               AND b.status = 'completed'`,
+       FROM bookings b
+       JOIN time_slots ts ON b.slot_id = ts.slot_id
+       WHERE b.arena_id IN (${placeholders}) 
+         AND DATE(ts.date) = ? 
+         AND b.status = 'completed'`,
         [...arenaIds, today]
       );
 
       // MONTHLY REVENUE
       const [monthlyRevenue] = await pool.execute(
         `SELECT COALESCE(SUM(b.total_amount), 0) as revenue
-             FROM bookings b
-             JOIN time_slots ts ON b.slot_id = ts.slot_id
-             WHERE b.arena_id IN (${placeholders}) 
-               AND MONTH(ts.date) = MONTH(CURRENT_DATE())
-               AND YEAR(ts.date) = YEAR(CURRENT_DATE())
-               AND b.status = 'completed'`,
+       FROM bookings b
+       JOIN time_slots ts ON b.slot_id = ts.slot_id
+       WHERE b.arena_id IN (${placeholders}) 
+         AND MONTH(ts.date) = MONTH(CURRENT_DATE())
+         AND YEAR(ts.date) = YEAR(CURRENT_DATE())
+         AND b.status = 'completed'`,
         arenaIds
       );
 
       // PENDING REQUESTS COUNT
       const [pendingCount] = await pool.execute(
         `SELECT COUNT(*) as count 
-             FROM bookings b
-             WHERE b.arena_id IN (${placeholders}) AND b.status = 'pending'`,
+       FROM bookings b
+       WHERE b.arena_id IN (${placeholders}) AND b.status = 'pending'`,
         arenaIds
       );
 
       // UPCOMING BOOKINGS COUNT (accepted but not completed, future dates)
       const [upcomingCount] = await pool.execute(
         `SELECT COUNT(*) as count 
-             FROM bookings b
-             JOIN time_slots ts ON b.slot_id = ts.slot_id
-             WHERE b.arena_id IN (${placeholders}) 
-               AND b.status = 'accepted' 
-               AND ts.date >= CURDATE()`,
+       FROM bookings b
+       JOIN time_slots ts ON b.slot_id = ts.slot_id
+       WHERE b.arena_id IN (${placeholders}) 
+         AND b.status = 'accepted' 
+         AND ts.date >= CURDATE()`,
         arenaIds
       );
 
-      // PENDING REQUESTS DETAILS
+      // PENDING REQUESTS DETAILS with multi-slot info
       const [pendingRequests] = await pool.execute(
         `SELECT b.*, u.name as user_name, u.phone_number as user_phone,
-                    st.name as sport_name, a.name as arena_name,
-                    ts.date, ts.start_time, ts.end_time,
-                    a.arena_id
-             FROM bookings b
-             JOIN arenas a ON b.arena_id = a.arena_id
-             JOIN users u ON b.user_id = u.user_id
-             JOIN sports_types st ON b.sport_id = st.sport_id
-             JOIN time_slots ts ON b.slot_id = ts.slot_id
-             WHERE a.arena_id IN (${placeholders}) AND b.status = 'pending'
-             ORDER BY ts.date ASC, ts.start_time ASC
-             LIMIT 10`,
+              st.name as sport_name, a.name as arena_name,
+              ts.date, ts.start_time, ts.end_time,
+              a.arena_id,
+              CASE 
+                WHEN b.is_multi_slot = 1 AND b.slot_ids IS NOT NULL 
+                THEN JSON_LENGTH(b.slot_ids)
+                ELSE 1 
+              END as slot_count
+       FROM bookings b
+       JOIN arenas a ON b.arena_id = a.arena_id
+       JOIN users u ON b.user_id = u.user_id
+       JOIN sports_types st ON b.sport_id = st.sport_id
+       JOIN time_slots ts ON b.slot_id = ts.slot_id
+       WHERE a.arena_id IN (${placeholders}) AND b.status = 'pending'
+       ORDER BY ts.date ASC, ts.start_time ASC
+       LIMIT 10`,
         arenaIds
       );
 
-      // UPCOMING BOOKINGS DETAILS
+      // UPCOMING BOOKINGS DETAILS with multi-slot info
       const [upcomingBookings] = await pool.execute(
         `SELECT b.*, u.name as user_name, u.phone_number as user_phone,
-                    st.name as sport_name, a.name as arena_name,
-                    ts.date, ts.start_time, ts.end_time,
-                    DATEDIFF(ts.date, CURDATE()) as days_until,
-                    a.arena_id
-             FROM bookings b
-             JOIN arenas a ON b.arena_id = a.arena_id
-             JOIN users u ON b.user_id = u.user_id
-             JOIN sports_types st ON b.sport_id = st.sport_id
-             JOIN time_slots ts ON b.slot_id = ts.slot_id
-             WHERE a.arena_id IN (${placeholders}) 
-               AND b.status = 'accepted' 
-               AND ts.date >= CURDATE()
-             ORDER BY ts.date ASC, ts.start_time ASC
-             LIMIT 10`,
+              st.name as sport_name, a.name as arena_name,
+              ts.date, ts.start_time, ts.end_time,
+              DATEDIFF(ts.date, CURDATE()) as days_until,
+              a.arena_id,
+              CASE 
+                WHEN b.is_multi_slot = 1 AND b.slot_ids IS NOT NULL 
+                THEN JSON_LENGTH(b.slot_ids)
+                ELSE 1 
+              END as slot_count
+       FROM bookings b
+       JOIN arenas a ON b.arena_id = a.arena_id
+       JOIN users u ON b.user_id = u.user_id
+       JOIN sports_types st ON b.sport_id = st.sport_id
+       JOIN time_slots ts ON b.slot_id = ts.slot_id
+       WHERE a.arena_id IN (${placeholders}) 
+         AND b.status = 'accepted' 
+         AND ts.date >= CURDATE()
+       ORDER BY ts.date ASC, ts.start_time ASC
+       LIMIT 10`,
         arenaIds
       );
 
-      // PER-ARENA STATISTICS
+      // PER-ARENA STATISTICS with multi-slot support
       const arenaStats = [];
 
       for (const arena of arenas) {
-        // Today's bookings for this arena
+        // Today's bookings for this arena (count of booking records)
         const [arenaTodayBookings] = await pool.execute(
           `SELECT COUNT(*) as count 
-                 FROM bookings b
-                 JOIN time_slots ts ON b.slot_id = ts.slot_id
-                 WHERE b.arena_id = ? AND DATE(ts.date) = ?`,
+         FROM bookings b
+         JOIN time_slots ts ON b.slot_id = ts.slot_id
+         WHERE b.arena_id = ? AND DATE(ts.date) = ?`,
+          [arena.arena_id, today]
+        );
+
+        // Today's total slots booked for this arena (count of individual slots)
+        const [arenaTodaySlots] = await pool.execute(
+          `SELECT SUM(
+           CASE 
+             WHEN b.is_multi_slot = 1 AND b.slot_ids IS NOT NULL 
+             THEN JSON_LENGTH(b.slot_ids)
+             ELSE 1 
+           END
+         ) as total_slots
+         FROM bookings b
+         JOIN time_slots ts ON b.slot_id = ts.slot_id
+         WHERE b.arena_id = ? AND DATE(ts.date) = ? 
+           AND b.status IN ('pending', 'accepted', 'completed')`,
           [arena.arena_id, today]
         );
 
         // Pending requests for this arena
         const [arenaPending] = await pool.execute(
           `SELECT COUNT(*) as count 
-                 FROM bookings b
-                 WHERE b.arena_id = ? AND b.status = 'pending'`,
+         FROM bookings b
+         WHERE b.arena_id = ? AND b.status = 'pending'`,
           [arena.arena_id]
         );
 
         // Today's revenue for this arena
         const [arenaTodayRevenue] = await pool.execute(
           `SELECT COALESCE(SUM(b.total_amount), 0) as revenue
-                 FROM bookings b
-                 JOIN time_slots ts ON b.slot_id = ts.slot_id
-                 WHERE b.arena_id = ? AND DATE(ts.date) = ? AND b.status = 'completed'`,
+         FROM bookings b
+         JOIN time_slots ts ON b.slot_id = ts.slot_id
+         WHERE b.arena_id = ? AND DATE(ts.date) = ? AND b.status = 'completed'`,
           [arena.arena_id, today]
         );
 
         // Monthly revenue for this arena
         const [arenaMonthlyRevenue] = await pool.execute(
           `SELECT COALESCE(SUM(b.total_amount), 0) as revenue
-                 FROM bookings b
-                 JOIN time_slots ts ON b.slot_id = ts.slot_id
-                 WHERE b.arena_id = ? 
-                   AND MONTH(ts.date) = MONTH(CURRENT_DATE())
-                   AND YEAR(ts.date) = YEAR(CURRENT_DATE())
-                   AND b.status = 'completed'`,
+         FROM bookings b
+         JOIN time_slots ts ON b.slot_id = ts.slot_id
+         WHERE b.arena_id = ? 
+           AND MONTH(ts.date) = MONTH(CURRENT_DATE())
+           AND YEAR(ts.date) = YEAR(CURRENT_DATE())
+           AND b.status = 'completed'`,
           [arena.arena_id]
         );
 
         // Total completed bookings for this arena
         const [arenaCompleted] = await pool.execute(
           `SELECT COUNT(*) as count 
-                 FROM bookings b
-                 WHERE b.arena_id = ? AND b.status = 'completed'`,
+         FROM bookings b
+         WHERE b.arena_id = ? AND b.status = 'completed'`,
+          [arena.arena_id]
+        );
+
+        // Get multi-slot stats for this arena
+        const [multiSlotStats] = await pool.execute(
+          `SELECT 
+           COUNT(*) as multi_slot_count,
+           SUM(CASE WHEN b.is_multi_slot = 1 THEN 1 ELSE 0 END) as total_multi_slot_bookings
+         FROM bookings b
+         WHERE b.arena_id = ? AND b.status = 'completed'`,
           [arena.arena_id]
         );
 
@@ -1057,23 +1217,26 @@ const ownerController = {
           arena_id: arena.arena_id,
           arena_name: arena.name,
           today_bookings: arenaTodayBookings[0].count || 0,
+          today_slots_booked: arenaTodaySlots[0].total_slots || 0, // NEW
           pending_bookings: arenaPending[0].count || 0,
           today_revenue: arenaTodayRevenue[0].revenue || 0,
           monthly_revenue: arenaMonthlyRevenue[0].revenue || 0,
           completed_bookings: arenaCompleted[0].count || 0,
-          total_revenue: arenaMonthlyRevenue[0].revenue || 0 // Will be overwritten if needed
+          multi_slot_bookings: multiSlotStats[0].total_multi_slot_bookings || 0, // NEW
+          total_revenue: arenaMonthlyRevenue[0].revenue || 0
         });
       }
 
       // Get lost revenue
       const [lostRevenue] = await pool.execute(
         `SELECT COALESCE(SUM(lost_revenue), 0) as total_lost
-             FROM arena_owners WHERE owner_id = ?`,
+       FROM arena_owners WHERE owner_id = ?`,
         [owner_id]
       );
 
       const dashboard = {
         today_bookings: todayBookings[0].count || 0,
+        today_slots_booked: todaySlotsBooked[0].total_slots || 0, // NEW
         today_revenue: todayRevenue[0].revenue || 0,
         monthly_revenue: monthlyRevenue[0].revenue || 0,
         total_lost_revenue: lostRevenue[0].total_lost || 0,
@@ -1183,13 +1346,14 @@ const ownerController = {
 
       await connection.beginTransaction();
 
-      // Verify owner owns this booking
+      // Verify owner owns this booking and get multi-slot info
       const [bookingCheck] = await connection.execute(
-        `SELECT b.*, ts.slot_id, ts.date, ts.start_time, ts.end_time
-         FROM bookings b
-         JOIN arenas a ON b.arena_id = a.arena_id
-         JOIN time_slots ts ON b.slot_id = ts.slot_id
-         WHERE b.booking_id = ? AND a.owner_id = ? AND b.status = 'pending'`,
+        `SELECT b.*, ts.slot_id, ts.date, ts.start_time, ts.end_time,
+              b.is_multi_slot, b.slot_ids
+       FROM bookings b
+       JOIN arenas a ON b.arena_id = a.arena_id
+       JOIN time_slots ts ON b.slot_id = ts.slot_id
+       WHERE b.booking_id = ? AND a.owner_id = ? AND b.status = 'pending'`,
         [booking_id, ownerId]
       );
 
@@ -1205,30 +1369,60 @@ const ownerController = {
       // Update booking status
       await connection.execute(
         `UPDATE bookings 
-         SET status = 'accepted',
-             booking_date = NOW()
-         WHERE booking_id = ?`,
+       SET status = 'accepted',
+           booking_date = NOW()
+       WHERE booking_id = ?`,
         [booking_id]
       );
 
-      // Mark time slot as unavailable
-      await connection.execute(
-        `UPDATE time_slots 
+      // If multi-slot booking, mark all slots as unavailable
+      if (booking.is_multi_slot && booking.slot_ids) {
+        let slotIds = [];
+        try {
+          slotIds = JSON.parse(booking.slot_ids);
+        } catch (e) {
+          slotIds = [booking.slot_id];
+        }
+
+        if (slotIds.length > 0) {
+          const placeholders = slotIds.map(() => '?').join(',');
+          await connection.execute(
+            `UPDATE time_slots 
+           SET is_available = FALSE,
+               locked_until = NULL,
+               locked_by_user_id = NULL
+           WHERE slot_id IN (${placeholders})`,
+            slotIds
+          );
+        }
+      } else {
+        // Single slot booking
+        await connection.execute(
+          `UPDATE time_slots 
          SET is_available = FALSE,
              locked_until = NULL,
              locked_by_user_id = NULL
          WHERE slot_id = ?`,
-        [booking.slot_id]
-      );
+          [booking.slot_id]
+        );
+      }
 
       await connection.commit();
 
-      // Send notification to user
+      // Send notification to user with slot count info
       try {
+        const slotCount = booking.is_multi_slot && booking.slot_ids
+          ? JSON.parse(booking.slot_ids).length
+          : 1;
+
+        const timeDisplay = slotCount > 1
+          ? `${booking.start_time}-${booking.end_time} (${slotCount} slots)`
+          : `${booking.start_time}-${booking.end_time}`;
+
         await pool.execute(
           `INSERT INTO notifications (user_id, notification_type, title, message)
-           VALUES (?, 'booking.accepted', 'Booking Accepted', 
-                   'Your booking for ${booking.date} ${booking.start_time}-${booking.end_time} has been accepted.')`,
+         VALUES (?, 'booking.accepted', 'Booking Accepted', 
+                 'Your booking for ${booking.date} ${timeDisplay} has been accepted.')`,
           [booking.user_id]
         );
       } catch (notifError) {
@@ -1239,6 +1433,8 @@ const ownerController = {
         message: "Booking accepted successfully",
         booking_id: booking_id,
         status: "accepted",
+        is_multi_slot: booking.is_multi_slot,
+        slot_count: booking.is_multi_slot && booking.slot_ids ? JSON.parse(booking.slot_ids).length : 1
       });
     } catch (error) {
       await connection.rollback();
@@ -1258,13 +1454,14 @@ const ownerController = {
 
       await connection.beginTransaction();
 
-      // Verify owner owns this booking
+      // Verify owner owns this booking and get multi-slot info
       const [bookingCheck] = await connection.execute(
-        `SELECT b.*, ts.slot_id, ts.date, ts.start_time, ts.end_time
-         FROM bookings b
-         JOIN arenas a ON b.arena_id = a.arena_id
-         JOIN time_slots ts ON b.slot_id = ts.slot_id
-         WHERE b.booking_id = ? AND a.owner_id = ? AND b.status = 'pending'`,
+        `SELECT b.*, ts.slot_id, ts.date, ts.start_time, ts.end_time,
+              b.is_multi_slot, b.slot_ids
+       FROM bookings b
+       JOIN arenas a ON b.arena_id = a.arena_id
+       JOIN time_slots ts ON b.slot_id = ts.slot_id
+       WHERE b.booking_id = ? AND a.owner_id = ? AND b.status = 'pending'`,
         [booking_id, ownerId]
       );
 
@@ -1280,31 +1477,61 @@ const ownerController = {
       // Update booking status
       await connection.execute(
         `UPDATE bookings 
-         SET status = 'rejected',
-             cancelled_by = 'owner',
-             cancellation_time = NOW()
-         WHERE booking_id = ?`,
+       SET status = 'rejected',
+           cancelled_by = 'owner',
+           cancellation_time = NOW()
+       WHERE booking_id = ?`,
         [booking_id]
       );
 
-      // Make time slot available again
-      await connection.execute(
-        `UPDATE time_slots 
+      // If multi-slot booking, make all slots available again
+      if (booking.is_multi_slot && booking.slot_ids) {
+        let slotIds = [];
+        try {
+          slotIds = JSON.parse(booking.slot_ids);
+        } catch (e) {
+          slotIds = [booking.slot_id];
+        }
+
+        if (slotIds.length > 0) {
+          const placeholders = slotIds.map(() => '?').join(',');
+          await connection.execute(
+            `UPDATE time_slots 
+           SET is_available = TRUE,
+               locked_until = NULL,
+               locked_by_user_id = NULL
+           WHERE slot_id IN (${placeholders})`,
+            slotIds
+          );
+        }
+      } else {
+        // Single slot booking
+        await connection.execute(
+          `UPDATE time_slots 
          SET is_available = TRUE,
              locked_until = NULL,
              locked_by_user_id = NULL
          WHERE slot_id = ?`,
-        [booking.slot_id]
-      );
+          [booking.slot_id]
+        );
+      }
 
       await connection.commit();
 
       // Send notification to user
       try {
+        const slotCount = booking.is_multi_slot && booking.slot_ids
+          ? JSON.parse(booking.slot_ids).length
+          : 1;
+
+        const timeDisplay = slotCount > 1
+          ? `${booking.start_time}-${booking.end_time} (${slotCount} slots)`
+          : `${booking.start_time}-${booking.end_time}`;
+
         await pool.execute(
           `INSERT INTO notifications (user_id, notification_type, title, message)
-           VALUES (?, 'booking.rejected', 'Booking Rejected', 
-                   'Your booking for ${booking.date} ${booking.start_time}-${booking.end_time} has been rejected.')`,
+         VALUES (?, 'booking.rejected', 'Booking Rejected', 
+                 'Your booking for ${booking.date} ${timeDisplay} has been rejected.')`,
           [booking.user_id]
         );
       } catch (notifError) {
@@ -1315,6 +1542,8 @@ const ownerController = {
         message: "Booking rejected successfully",
         booking_id: booking_id,
         status: "rejected",
+        is_multi_slot: booking.is_multi_slot,
+        slot_count: booking.is_multi_slot && booking.slot_ids ? JSON.parse(booking.slot_ids).length : 1
       });
     } catch (error) {
       await connection.rollback();
@@ -1353,9 +1582,11 @@ const ownerController = {
 
       // Only owners/managers can mark booking as completed
       const [bookingCheck] = await pool.execute(
-        `SELECT b.* FROM bookings b
-         JOIN arenas a ON b.arena_id = a.arena_id
-         WHERE b.booking_id = ? AND a.owner_id = ? AND b.status = 'accepted'`,
+        `SELECT b.*, a.owner_id, a.arena_id,
+              b.is_multi_slot, b.slot_ids
+       FROM bookings b
+       JOIN arenas a ON b.arena_id = a.arena_id
+       WHERE b.booking_id = ? AND a.owner_id = ? AND b.status = 'accepted'`,
         [booking_id, req.user.id]
       );
 
@@ -1375,15 +1606,27 @@ const ownerController = {
       // Update arena owner revenue
       await pool.execute(
         `UPDATE arena_owners 
-         SET total_revenue = total_revenue + ?
-         WHERE owner_id = (SELECT owner_id FROM arenas WHERE arena_id = ?)`,
-        [booking.total_amount, booking.arena_id]
+       SET total_revenue = total_revenue + ?
+       WHERE owner_id = ?`,
+        [booking.total_amount, booking.owner_id]
       );
+
+      // Calculate slot count for response
+      let slotCount = 1;
+      if (booking.is_multi_slot && booking.slot_ids) {
+        try {
+          slotCount = JSON.parse(booking.slot_ids).length;
+        } catch (e) {
+          slotCount = 1;
+        }
+      }
 
       res.json({
         message: "Booking marked as completed",
         booking_id: booking_id,
         status: "completed",
+        is_multi_slot: booking.is_multi_slot,
+        slot_count: slotCount
       });
     } catch (error) {
       console.error(error);
@@ -2085,71 +2328,98 @@ const ownerController = {
             "MONTH(ts.date) = MONTH(CURDATE()) AND YEAR(ts.date) = YEAR(CURRENT_DATE())";
       }
 
-      // Get comprehensive stats
+      // Get comprehensive stats with multi-slot info
       const [stats] = await pool.execute(
         `SELECT 
-           COUNT(*) as total_bookings,
-           SUM(CASE WHEN b.status = 'completed' THEN 1 ELSE 0 END) as completed_bookings,
-           SUM(CASE WHEN b.status = 'pending' THEN 1 ELSE 0 END) as pending_bookings,
-           SUM(CASE WHEN b.status = 'accepted' THEN 1 ELSE 0 END) as accepted_bookings,
-           SUM(CASE WHEN b.status = 'rejected' THEN 1 ELSE 0 END) as rejected_bookings,
-           SUM(CASE WHEN b.status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_bookings,
-           COALESCE(SUM(CASE WHEN b.status = 'completed' THEN b.total_amount ELSE 0 END), 0) as total_revenue,
-           COALESCE(SUM(CASE WHEN b.status = 'completed' THEN b.commission_amount ELSE 0 END), 0) as total_commission,
-           COALESCE(SUM(CASE WHEN b.status = 'cancelled' AND b.cancelled_by = 'user' THEN b.cancellation_fee ELSE 0 END), 0) as lost_revenue
-         FROM bookings b
-         JOIN arenas a ON b.arena_id = a.arena_id
-         JOIN time_slots ts ON b.slot_id = ts.slot_id
-         WHERE a.owner_id = ? AND ${dateFilter}`,
+         COUNT(*) as total_bookings,
+         SUM(CASE WHEN b.status = 'completed' THEN 1 ELSE 0 END) as completed_bookings,
+         SUM(CASE WHEN b.status = 'pending' THEN 1 ELSE 0 END) as pending_bookings,
+         SUM(CASE WHEN b.status = 'accepted' THEN 1 ELSE 0 END) as accepted_bookings,
+         SUM(CASE WHEN b.status = 'rejected' THEN 1 ELSE 0 END) as rejected_bookings,
+         SUM(CASE WHEN b.status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_bookings,
+         COALESCE(SUM(CASE WHEN b.status = 'completed' THEN b.total_amount ELSE 0 END), 0) as total_revenue,
+         COALESCE(SUM(CASE WHEN b.status = 'completed' THEN b.commission_amount ELSE 0 END), 0) as total_commission,
+         COALESCE(SUM(CASE WHEN b.status = 'cancelled' AND b.cancelled_by = 'user' THEN b.cancellation_fee ELSE 0 END), 0) as lost_revenue,
+         SUM(CASE WHEN b.is_multi_slot = 1 THEN 1 ELSE 0 END) as multi_slot_bookings, -- NEW
+         SUM(CASE 
+           WHEN b.is_multi_slot = 1 AND b.slot_ids IS NOT NULL 
+           THEN JSON_LENGTH(b.slot_ids)
+           ELSE 1 
+         END) as total_slots_booked -- NEW
+       FROM bookings b
+       JOIN arenas a ON b.arena_id = a.arena_id
+       JOIN time_slots ts ON b.slot_id = ts.slot_id
+       WHERE a.owner_id = ? AND ${dateFilter}`,
         [owner_id]
       );
 
-      // Get daily revenue for last 7 days
+      // Get daily revenue for last 7 days with slot counts
       const [revenueTrend] = await pool.execute(
         `SELECT 
-           DATE(ts.date) as date,
-           COUNT(b.booking_id) as bookings_count,
-           COALESCE(SUM(CASE WHEN b.status = 'completed' THEN b.total_amount ELSE 0 END), 0) as daily_revenue
-         FROM bookings b
-         JOIN arenas a ON b.arena_id = a.arena_id
-         JOIN time_slots ts ON b.slot_id = ts.slot_id
-         WHERE a.owner_id = ? AND ts.date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-         GROUP BY DATE(ts.date)
-         ORDER BY date ASC`,
+         DATE(ts.date) as date,
+         COUNT(b.booking_id) as bookings_count,
+         SUM(CASE 
+           WHEN b.is_multi_slot = 1 AND b.slot_ids IS NOT NULL 
+           THEN JSON_LENGTH(b.slot_ids)
+           ELSE 1 
+         END) as slots_count, -- NEW
+         COALESCE(SUM(CASE WHEN b.status = 'completed' THEN b.total_amount ELSE 0 END), 0) as daily_revenue
+       FROM bookings b
+       JOIN arenas a ON b.arena_id = a.arena_id
+       JOIN time_slots ts ON b.slot_id = ts.slot_id
+       WHERE a.owner_id = ? AND ts.date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+       GROUP BY DATE(ts.date)
+       ORDER BY date ASC`,
         [owner_id]
       );
 
-      // Get arena-wise breakdown - FIXED THIS QUERY
+      // Get arena-wise breakdown with multi-slot info
       const [arenaStats] = await pool.execute(
         `SELECT a.name as arena_name, a.arena_id,
-                COUNT(b.booking_id) as booking_count,
-                COALESCE(SUM(CASE WHEN b.status = 'completed' THEN b.total_amount ELSE 0 END), 0) as revenue,
-                COALESCE(SUM(CASE WHEN b.status = 'pending' THEN 1 ELSE 0 END), 0) as pending_count
-         FROM arenas a
-         LEFT JOIN bookings b ON a.arena_id = b.arena_id
-         LEFT JOIN time_slots ts ON b.slot_id = ts.slot_id AND ${dateFilter}
-         WHERE a.owner_id = ?
-         GROUP BY a.arena_id, a.name
-         ORDER BY revenue DESC`,
+              COUNT(b.booking_id) as booking_count,
+              SUM(CASE 
+                WHEN b.is_multi_slot = 1 AND b.slot_ids IS NOT NULL 
+                THEN JSON_LENGTH(b.slot_ids)
+                ELSE 1 
+              END) as slots_count, -- NEW
+              SUM(CASE WHEN b.is_multi_slot = 1 THEN 1 ELSE 0 END) as multi_slot_count, -- NEW
+              COALESCE(SUM(CASE WHEN b.status = 'completed' THEN b.total_amount ELSE 0 END), 0) as revenue,
+              COALESCE(SUM(CASE WHEN b.status = 'pending' THEN 1 ELSE 0 END), 0) as pending_count
+       FROM arenas a
+       LEFT JOIN bookings b ON a.arena_id = b.arena_id
+       LEFT JOIN time_slots ts ON b.slot_id = ts.slot_id AND ${dateFilter}
+       WHERE a.owner_id = ?
+       GROUP BY a.arena_id, a.name
+       ORDER BY revenue DESC`,
         [owner_id]
       );
 
-      // Get status distribution
+      // Get status distribution with slot counts
       const [statusDistribution] = await pool.execute(
         `SELECT 
-           b.status,
-           COUNT(*) as count,
-           COALESCE(SUM(b.total_amount), 0) as total_amount
-         FROM bookings b
-         JOIN arenas a ON b.arena_id = a.arena_id
-         JOIN time_slots ts ON b.slot_id = ts.slot_id
-         WHERE a.owner_id = ? AND ${dateFilter}
-         GROUP BY b.status`,
+         b.status,
+         COUNT(*) as count,
+         SUM(CASE 
+           WHEN b.is_multi_slot = 1 AND b.slot_ids IS NOT NULL 
+           THEN JSON_LENGTH(b.slot_ids)
+           ELSE 1 
+         END) as slots_count, -- NEW
+         COALESCE(SUM(b.total_amount), 0) as total_amount
+       FROM bookings b
+       JOIN arenas a ON b.arena_id = a.arena_id
+       JOIN time_slots ts ON b.slot_id = ts.slot_id
+       WHERE a.owner_id = ? AND ${dateFilter}
+       GROUP BY b.status`,
         [owner_id]
       );
 
       res.json({
-        period_stats: stats[0],
+        period_stats: {
+          ...stats[0],
+          average_slots_per_booking: stats[0].total_bookings > 0
+            ? (stats[0].total_slots_booked / stats[0].total_bookings).toFixed(2)
+            : 0
+        },
         revenue_trend: revenueTrend,
         arena_stats: arenaStats,
         status_distribution: statusDistribution,

@@ -44,6 +44,14 @@ router.post(
   ownerController.uploadArenaLogo
 );
 
+// Delete arena image (including logo)
+router.delete(
+  "/arenas/:arena_id/images/:image_id",
+  auth.verifyToken,
+  auth.isOwnerOrManager,
+  ownerController.deleteArenaImage
+);
+
 // All routes below require owner authentication
 router.use(auth.verifyToken, auth.isOwnerOrManager);
 

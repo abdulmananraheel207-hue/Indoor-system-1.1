@@ -1,4 +1,3 @@
-import React from 'react';
 
 const ArenaSelector = ({ arenas, selectedArena, onArenaChange }) => {
     if (!arenas || arenas.length <= 1) return null;
