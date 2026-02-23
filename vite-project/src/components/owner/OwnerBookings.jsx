@@ -53,7 +53,6 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
     }
   }, [statusFilter, dateFrom, dateTo, activeTab, selectedArena, refreshCounter]);
 
-  // 🔥 Auto-refresh every 10 seconds for pending bookings
   useEffect(() => {
     if (!canViewBookings) return;
 

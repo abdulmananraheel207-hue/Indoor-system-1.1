@@ -326,7 +326,7 @@ export const integrationService = {
 
       const requestData = {
         action: 'mark_paid',
-        amount_paid: amountPaid, // Now it's a number, not a string
+        amount_paid: amountPaid,
         notes: paymentData.notes || `Monthly commission payment`,
         notify_owner: true
       };
