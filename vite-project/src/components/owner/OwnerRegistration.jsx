@@ -64,7 +64,13 @@ const OwnerRegistration = () => {
                 friday: true,
                 saturday: true,
                 sunday: false,
-            }
+            },
+
+            // NEW: Advance payment fields
+            require_advance: false,
+            advance_type: 'percentage',
+            advance_percentage: 20,
+            advance_fixed_amount: 500
         }]
     });
 
@@ -378,6 +384,7 @@ const OwnerRegistration = () => {
                 if (formData.number_of_arenas < 1) return "Number of arenas must be at least 1";
                 return null;
 
+            // Add this inside the validateStep function for step 3
             case 3:
                 const currentArena = formData.arenas[currentArenaIndex];
                 if (!currentArena.arena_name?.trim()) return "Arena name is required";
@@ -386,6 +393,19 @@ const OwnerRegistration = () => {
                 if (!currentArena.google_maps_location?.trim()) return "Google Maps location is required";
                 if (!currentArena.description?.trim()) return "Arena description is required";
                 if (currentArena.number_of_courts < 1) return "Number of courts must be at least 1";
+
+                // NEW: Validate advance payment fields
+                if (currentArena.require_advance) {
+                    if (currentArena.advance_type === 'percentage') {
+                        if (!currentArena.advance_percentage || currentArena.advance_percentage < 1 || currentArena.advance_percentage > 100) {
+                            return "Advance percentage must be between 1 and 100";
+                        }
+                    } else if (currentArena.advance_type === 'fixed') {
+                        if (!currentArena.advance_fixed_amount || currentArena.advance_fixed_amount < 100) {
+                            return "Fixed advance amount must be at least Rs 100";
+                        }
+                    }
+                }
                 return null;
 
             case 4:
@@ -531,6 +551,8 @@ const OwnerRegistration = () => {
                 phone_number: formData.arenas[0]?.phone_number,
                 agreed_to_terms: formData.agreed_to_terms ? 1 : 0,
 
+                // In handleSubmit function, inside the arena mapping:
+
                 arenas: await Promise.all(formData.arenas.map(async (arena) => {
                     let logoBase64 = null;
                     if (arena.logo) {
@@ -546,6 +568,12 @@ const OwnerRegistration = () => {
                         number_of_courts: parseInt(arena.number_of_courts) || 1,
 
                         logo: logoBase64,
+
+                        // NEW: Advance payment fields
+                        require_advance: arena.require_advance,
+                        advance_type: arena.require_advance ? arena.advance_type : null,
+                        advance_percentage: arena.require_advance && arena.advance_type === 'percentage' ? arena.advance_percentage : null,
+                        advance_fixed_amount: arena.require_advance && arena.advance_type === 'fixed' ? arena.advance_fixed_amount : null,
 
                         courts: (arena.courts || []).map(court => ({
                             court_number: court.court_number,
@@ -813,6 +841,151 @@ const OwnerRegistration = () => {
                             </div>
                         </div>
 
+                        {/* NEW: Advance Payment Configuration */}
+                        <div className="mt-6 p-4 border border-gray-200 rounded-lg bg-gray-50">
+                            <h3 className="font-medium text-gray-900 mb-3 flex items-center">
+                                <svg className="w-5 h-5 text-blue-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                Advance Payment Settings
+                            </h3>
+
+                            <p className="text-sm text-gray-600 mb-4">
+                                Configure whether customers need to pay an advance when booking at this arena.
+                            </p>
+
+                            <div className="space-y-4">
+                                {/* Require advance toggle */}
+                                <div className="flex items-start">
+                                    <div className="flex items-center h-5">
+                                        <input
+                                            type="checkbox"
+                                            id={`require_advance_${currentArenaIndex}`}
+                                            checked={formData.arenas[currentArenaIndex].require_advance}
+                                            onChange={(e) => handleArenaChange(currentArenaIndex, 'require_advance', e.target.checked)}
+                                            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                                        />
+                                    </div>
+                                    <div className="ml-3">
+                                        <label htmlFor={`require_advance_${currentArenaIndex}`} className="text-sm font-medium text-gray-700">
+                                            Require advance payment for bookings
+                                        </label>
+                                        <p className="text-xs text-gray-500">
+                                            If enabled, customers must pay an advance when booking. The remaining amount can be paid at the venue.
+                                        </p>
+                                    </div>
+                                </div>
+
+                                {/* Advance payment options - shown only if require_advance is true */}
+                                {formData.arenas[currentArenaIndex].require_advance && (
+                                    <div className="mt-4 pl-7 space-y-4">
+                                        {/* Advance type selector */}
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                Advance Calculation Type
+                                            </label>
+                                            <div className="flex space-x-4">
+                                                <label className="flex items-center">
+                                                    <input
+                                                        type="radio"
+                                                        name={`advance_type_${currentArenaIndex}`}
+                                                        value="percentage"
+                                                        checked={formData.arenas[currentArenaIndex].advance_type === 'percentage'}
+                                                        onChange={(e) => handleArenaChange(currentArenaIndex, 'advance_type', e.target.value)}
+                                                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300"
+                                                    />
+                                                    <span className="ml-2 text-sm text-gray-700">Percentage of total</span>
+                                                </label>
+                                                <label className="flex items-center">
+                                                    <input
+                                                        type="radio"
+                                                        name={`advance_type_${currentArenaIndex}`}
+                                                        value="fixed"
+                                                        checked={formData.arenas[currentArenaIndex].advance_type === 'fixed'}
+                                                        onChange={(e) => handleArenaChange(currentArenaIndex, 'advance_type', e.target.value)}
+                                                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300"
+                                                    />
+                                                    <span className="ml-2 text-sm text-gray-700">Fixed amount</span>
+                                                </label>
+                                            </div>
+                                        </div>
+
+                                        {/* Percentage input */}
+                                        {formData.arenas[currentArenaIndex].advance_type === 'percentage' && (
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                    Advance Percentage (%)
+                                                </label>
+                                                <div className="relative">
+                                                    <input
+                                                        type="number"
+                                                        min="1"
+                                                        max="100"
+                                                        step="1"
+                                                        value={formData.arenas[currentArenaIndex].advance_percentage}
+                                                        onChange={(e) => handleArenaChange(currentArenaIndex, 'advance_percentage', parseInt(e.target.value))}
+                                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                        placeholder="e.g., 20"
+                                                    />
+                                                    <span className="absolute right-3 top-2 text-gray-500">%</span>
+                                                </div>
+                                                <p className="mt-1 text-xs text-gray-500">
+                                                    Customer pays this percentage of the total booking amount as advance.
+                                                </p>
+                                                <div className="mt-2 p-2 bg-blue-50 rounded text-xs">
+                                                    <span className="font-medium">Example:</span> For a Rs 1,000 booking,
+                                                    customer pays Rs {formData.arenas[currentArenaIndex].advance_percentage * 10} advance.
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Fixed amount input */}
+                                        {formData.arenas[currentArenaIndex].advance_type === 'fixed' && (
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                    Fixed Advance Amount (Rs)
+                                                </label>
+                                                <input
+                                                    type="number"
+                                                    min="100"
+                                                    step="100"
+                                                    value={formData.arenas[currentArenaIndex].advance_fixed_amount}
+                                                    onChange={(e) => handleArenaChange(currentArenaIndex, 'advance_fixed_amount', parseInt(e.target.value))}
+                                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                    placeholder="e.g., 500"
+                                                />
+                                                <p className="mt-1 text-xs text-gray-500">
+                                                    Customer pays this fixed amount as advance regardless of total booking value.
+                                                </p>
+                                                <div className="mt-2 p-2 bg-blue-50 rounded text-xs">
+                                                    <span className="font-medium">Note:</span> If booking total is less than advance amount,
+                                                    customer pays the full booking amount.
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Info box about advance payment */}
+                                        <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                                            <div className="flex">
+                                                <svg className="h-5 w-5 text-yellow-400 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                                                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                                </svg>
+                                                <div className="text-xs text-yellow-700">
+                                                    <p className="font-medium mb-1">How advance payment works:</p>
+                                                    <ul className="list-disc pl-4 space-y-1">
+                                                        <li>Customer pays the advance amount immediately when booking</li>
+                                                        <li>Remaining amount can be paid at the venue</li>
+                                                        <li>If customer cancels, refund rules apply based on your policy</li>
+                                                        <li>You can modify these settings later in arena settings</li>
+                                                    </ul>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
                         <LogoUploader arenaIndex={currentArenaIndex} />
                     </div>
                 );
@@ -1068,7 +1241,15 @@ const OwnerRegistration = () => {
                                             ))}
                                         </div>
                                     </div>
-
+                                    {arena.require_advance && (
+                                        <div className="mt-2 p-2 bg-blue-50 rounded text-xs">
+                                            <span className="font-medium text-blue-700">Advance Payment Required:</span>{' '}
+                                            {arena.advance_type === 'percentage'
+                                                ? `${arena.advance_percentage}% of total`
+                                                : `Rs ${arena.advance_fixed_amount} fixed amount`
+                                            }
+                                        </div>
+                                    )}
                                     <div className="mt-2">
                                         <span className="text-gray-500 text-sm">Sports:</span>
                                         <div className="flex flex-wrap gap-1 mt-1">
