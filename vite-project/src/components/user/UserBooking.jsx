@@ -33,13 +33,43 @@ const UserBooking = () => {
           const slotIds = typeof booking.slot_ids === 'string'
             ? JSON.parse(booking.slot_ids)
             : booking.slot_ids;
-          return slotIds.length;
+          return Array.isArray(slotIds) ? slotIds.length : 1;
         } catch (e) {
           return 1;
         }
       }
     }
     return 1;
+  };
+
+  // Format multi-slot time display
+  const formatMultiSlotTime = (booking) => {
+    const slotCount = getSlotCount(booking);
+    if (slotCount > 1) {
+      return `${booking.start_time} - ${booking.end_time} (${slotCount} hours)`;
+    }
+    return `${booking.start_time} - ${booking.end_time}`;
+  };
+
+  // Format date for display
+  const formatDate = (dateString) => {
+    if (!dateString) return "";
+    return new Date(dateString).toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  };
+
+  // Format time for display
+  const formatTime = (timeString) => {
+    if (!timeString) return "";
+    return new Date(`2000-01-01T${timeString}`).toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
   };
 
   // Check guest access
@@ -71,7 +101,17 @@ const UserBooking = () => {
       const data = await integrationService.getUserBookings({ status });
       const list = data.bookings || [];
 
-      list.forEach((booking) => {
+      // Process bookings to add slot details
+      const processedList = list.map(booking => {
+        const slotCount = getSlotCount(booking);
+        return {
+          ...booking,
+          slot_count: slotCount,
+          display_time: formatMultiSlotTime(booking)
+        };
+      });
+
+      processedList.forEach((booking) => {
         const prev = previousStatuses.current[booking.booking_id];
         if (prev && prev !== booking.status) {
           alert(
@@ -82,7 +122,7 @@ const UserBooking = () => {
         previousStatuses.current[booking.booking_id] = booking.status;
       });
 
-      setBookings(list);
+      setBookings(processedList);
     } catch (error) {
       console.error("Error fetching bookings:", error);
       setError(error.response?.data?.message || "Failed to load bookings");
@@ -108,14 +148,23 @@ const UserBooking = () => {
     }
   };
 
+  const getStatusText = (status) => {
+    switch (status) {
+      case "pending": return "Pending Approval";
+      case "accepted": return "Confirmed";
+      case "completed": return "Completed";
+      case "cancelled": return "Cancelled";
+      case "rejected": return "Rejected";
+      default: return status;
+    }
+  };
+
   const handleCancelBooking = async (bookingId) => {
     const canProceed = await requireAuth(async () => {
       if (window.confirm("Are you sure you want to cancel this booking?")) {
         try {
-          const reason = prompt("Please enter reason for cancellation:");
-          if (!reason) return;
-
-          await integrationService.cancelBooking(bookingId, reason);
+          const reason = prompt("Please enter reason for cancellation (optional):");
+          await integrationService.cancelBooking(bookingId, reason || "");
           alert("Booking cancelled successfully");
           fetchBookings();
         } catch (error) {
@@ -197,25 +246,6 @@ const UserBooking = () => {
     setSelectedBooking(null);
   };
 
-  // Format date for display
-  const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    });
-  };
-
-  // Format time for display
-  const formatTime = (timeString) => {
-    return new Date(`2000-01-01T${timeString}`).toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true
-    });
-  };
-
   return (
     <>
       <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-8">
@@ -249,27 +279,7 @@ const UserBooking = () => {
             </nav>
           </div>
 
-          {/* Stats Section */}
-          {bookings.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-                <p className="text-sm text-gray-600">Total Bookings</p>
-                <p className="text-2xl font-bold text-gray-900">{bookings.length}</p>
-              </div>
-              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-                <p className="text-sm text-gray-600">Total Time Slots</p>
-                <p className="text-2xl font-bold text-purple-600">
-                  {bookings.reduce((sum, b) => sum + getSlotCount(b), 0)}
-                </p>
-              </div>
-              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-                <p className="text-sm text-gray-600">Multi-Slot Bookings</p>
-                <p className="text-2xl font-bold text-blue-600">
-                  {bookings.filter(b => b.is_multi_slot).length}
-                </p>
-              </div>
-            </div>
-          )}
+
 
           {/* Bookings List */}
           <div className="space-y-6">
@@ -329,7 +339,7 @@ const UserBooking = () => {
               bookings.map((booking) => (
                 <div
                   key={booking.booking_id}
-                  className="bg-white rounded-xl shadow-sm border border-gray-200 p-6"
+                  className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
                 >
                   <div className="flex flex-col md:flex-row md:items-center justify-between mb-4">
                     <div>
@@ -343,12 +353,12 @@ const UserBooking = () => {
                           </span>
                           {booking.is_multi_slot && (
                             <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
-                              {getSlotCount(booking)} slots
+                              {getSlotCount(booking)} hours
                             </span>
                           )}
                         </div>
                         <span className="text-sm text-gray-600">
-                          Court {booking.court_number || 'N/A'}
+                          {booking.court_name || `Court ${booking.court_number || 'N/A'}`}
                         </span>
                       </div>
                     </div>
@@ -358,8 +368,7 @@ const UserBooking = () => {
                           booking.status
                         )}`}
                       >
-                        {booking.status.charAt(0).toUpperCase() +
-                          booking.status.slice(1)}
+                        {getStatusText(booking.status)}
                       </span>
                     </div>
                   </div>
@@ -382,7 +391,11 @@ const UserBooking = () => {
                       <div>
                         <p className="text-sm text-gray-600">Date</p>
                         <p className="font-medium">
-                          {new Date(booking.date).toLocaleDateString()}
+                          {new Date(booking.date).toLocaleDateString('en-US', {
+                            weekday: 'short',
+                            month: 'short',
+                            day: 'numeric'
+                          })}
                         </p>
                       </div>
                     </div>
@@ -402,9 +415,16 @@ const UserBooking = () => {
                       </svg>
                       <div>
                         <p className="text-sm text-gray-600">Time</p>
-                        <p className="font-medium">
-                          {booking.start_time} - {booking.end_time}
-                        </p>
+                        <div>
+                          <p className="font-medium">
+                            {formatTime(booking.start_time)} - {formatTime(booking.end_time)}
+                          </p>
+                          {booking.is_multi_slot && (
+                            <p className="text-xs text-purple-600 mt-1">
+                              ⏱️ {getSlotCount(booking)} consecutive hours
+                            </p>
+                          )}
+                        </div>
                       </div>
                     </div>
                     <div className="flex items-center">
@@ -424,6 +444,11 @@ const UserBooking = () => {
                       <div>
                         <p className="text-sm text-gray-600">Amount</p>
                         <p className="font-medium">Rs {booking.total_amount}</p>
+                        {booking.is_multi_slot && (
+                          <p className="text-xs text-gray-500">
+                            (Rs {booking.total_amount / getSlotCount(booking)} per hour)
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -510,7 +535,7 @@ const UserBooking = () => {
               {/* Status Badge */}
               <div className="flex justify-end mb-6">
                 <span className={`px-4 py-2 text-sm font-semibold rounded-full ${getStatusColor(selectedBooking.status)}`}>
-                  {selectedBooking.status.charAt(0).toUpperCase() + selectedBooking.status.slice(1)}
+                  {getStatusText(selectedBooking.status)}
                 </span>
               </div>
 
@@ -531,9 +556,17 @@ const UserBooking = () => {
                     <p className="text-sm text-gray-600">Sport</p>
                     <p className="font-medium text-gray-900">{selectedBooking.sport_name}</p>
                   </div>
+                  <div>
+                    <p className="text-sm text-gray-600">Court</p>
+                    <p className="font-medium text-gray-900">
+                      {selectedBooking.court_name || `Court ${selectedBooking.court_number || 'N/A'}`}
+                    </p>
+                  </div>
                   <div className="md:col-span-2">
                     <p className="text-sm text-gray-600">Address</p>
-                    <p className="font-medium text-gray-900">{selectedBooking.arena_address || selectedBooking.address || 'Address not available'}</p>
+                    <p className="font-medium text-gray-900">
+                      {selectedBooking.arena_address || selectedBooking.address || 'Address not available'}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -544,55 +577,55 @@ const UserBooking = () => {
                   <svg className="w-5 h-5 mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                  Court & Time Details
+                  Time Details
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm text-gray-600">Court</p>
-                    <p className="font-medium text-gray-900">Court {selectedBooking.court_number || 'N/A'} - {selectedBooking.court_name || `Court ${selectedBooking.court_number}`}</p>
-                  </div>
                   <div>
                     <p className="text-sm text-gray-600">Date</p>
                     <p className="font-medium text-gray-900">{formatDate(selectedBooking.date)}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-gray-600">Start Time</p>
-                    <p className="font-medium text-gray-900">{formatTime(selectedBooking.start_time)}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-600">End Time</p>
-                    <p className="font-medium text-gray-900">{formatTime(selectedBooking.end_time)}</p>
+                    <p className="text-sm text-gray-600">Time Range</p>
+                    <p className="font-medium text-gray-900">
+                      {formatTime(selectedBooking.start_time)} - {formatTime(selectedBooking.end_time)}
+                    </p>
                   </div>
 
-                  {/* Multi-slot information */}
+                  {/* Multi-slot details */}
                   {selectedBooking?.is_multi_slot && getSlotCount(selectedBooking) > 1 && (
-                    <div className="md:col-span-2 mt-2 pt-3 border-t border-gray-200">
-                      <div className="bg-purple-50 p-4 rounded-lg">
-                        <h4 className="text-sm font-semibold text-purple-900 mb-2 flex items-center">
-                          <svg className="w-4 h-4 mr-1 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div className="md:col-span-2 mt-4">
+                      <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                        <h4 className="text-sm font-semibold text-purple-900 mb-3 flex items-center">
+                          <svg className="w-4 h-4 mr-2 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                           </svg>
-                          Multi-Slot Booking
+                          Multi-Slot Booking Details
                         </h4>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          <div>
-                            <p className="text-xs text-purple-700">Total Slots</p>
-                            <p className="font-bold text-purple-900">{getSlotCount(selectedBooking)} slots</p>
-                          </div>
-                          <div>
-                            <p className="text-xs text-purple-700">Duration</p>
-                            <p className="font-medium text-purple-900">
-                              {selectedBooking.start_time} - {selectedBooking.end_time}
-                            </p>
-                          </div>
-                          <div className="md:col-span-2">
-                            <p className="text-xs text-purple-700 mb-1">Slot Information</p>
-                            <p className="text-sm text-purple-800 bg-white bg-opacity-50 p-2 rounded">
-                              {getSlotCount(selectedBooking)} consecutive hour slots from{' '}
-                              {formatTime(selectedBooking.start_time)} to {formatTime(selectedBooking.end_time)}
-                            </p>
-                          </div>
+                        <p className="text-sm text-purple-800 mb-3">
+                          You have booked {getSlotCount(selectedBooking)} consecutive hours:
+                        </p>
+                        <div className="space-y-2">
+                          {[...Array(getSlotCount(selectedBooking))].map((_, idx) => {
+                            const slotStart = new Date(`2000-01-01T${selectedBooking.start_time}`);
+                            const slotEnd = new Date(`2000-01-01T${selectedBooking.end_time}`);
+                            const hourPerSlot = (slotEnd - slotStart) / (1000 * 60 * 60) / getSlotCount(selectedBooking);
+
+                            const currentSlotStart = new Date(slotStart.getTime() + (idx * hourPerSlot * 60 * 60 * 1000));
+                            const currentSlotEnd = new Date(currentSlotStart.getTime() + (hourPerSlot * 60 * 60 * 1000));
+
+                            return (
+                              <div key={idx} className="flex justify-between text-sm bg-white bg-opacity-50 p-2 rounded">
+                                <span className="text-purple-700">Hour {idx + 1}:</span>
+                                <span className="font-medium text-purple-900">
+                                  {currentSlotStart.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })} - {currentSlotEnd.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                                </span>
+                              </div>
+                            );
+                          })}
                         </div>
+                        <p className="text-xs text-purple-600 mt-3">
+                          Total amount: Rs {selectedBooking.total_amount} (Rs {selectedBooking.total_amount / getSlotCount(selectedBooking)} per hour)
+                        </p>
                       </div>
                     </div>
                   )}
@@ -614,7 +647,9 @@ const UserBooking = () => {
                   </div>
                   <div>
                     <p className="text-sm text-gray-600">Payment Method</p>
-                    <p className="font-medium text-gray-900 capitalize">{selectedBooking.payment_method?.replace('_', ' ') || 'Not specified'}</p>
+                    <p className="font-medium text-gray-900 capitalize">
+                      {selectedBooking.payment_method?.replace('_', ' ') || 'Not specified'}
+                    </p>
                   </div>
                   <div>
                     <p className="text-sm text-gray-600">Payment Status</p>
@@ -642,7 +677,7 @@ const UserBooking = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <p className="text-sm text-red-700">Cancelled By</p>
-                      <p className="font-medium text-red-900 capitalize">{selectedBooking.cancelled_by}</p>
+                      <p className="font-medium text-red-900 capitalize">{selectedBooking.cancelled_by || 'You'}</p>
                     </div>
                     <div>
                       <p className="text-sm text-red-700">Cancellation Time</p>
@@ -749,18 +784,14 @@ const UserBooking = () => {
                     {selectedBookingForReview.arena_name}
                   </h3>
                   <p className="text-gray-600 text-sm mt-1">
-                    Court {selectedBookingForReview.court_number} • {selectedBookingForReview.court_name || `Court ${selectedBookingForReview.court_number}`}
+                    {selectedBookingForReview.court_name || `Court ${selectedBookingForReview.court_number}`}
                   </p>
                   <p className="text-gray-500 text-xs mt-1">
-                    Played on {new Date(selectedBookingForReview.date).toLocaleDateString('en-US', {
-                      year: 'numeric',
-                      month: 'long',
-                      day: 'numeric'
-                    })}
+                    Played on {formatDate(selectedBookingForReview.date)}
                   </p>
                   {selectedBookingForReview.is_multi_slot && (
                     <p className="text-xs text-purple-600 mt-1">
-                      ⏱️ {getSlotCount(selectedBookingForReview)} slots • {selectedBookingForReview.start_time} - {selectedBookingForReview.end_time}
+                      ⏱️ {getSlotCount(selectedBookingForReview)} hours • {selectedBookingForReview.start_time} - {selectedBookingForReview.end_time}
                     </p>
                   )}
                 </div>

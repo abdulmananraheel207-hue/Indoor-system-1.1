@@ -920,6 +920,7 @@ export const integrationService = {
       throw error;
     }
   },
+
   getUserBookings: async (filters = {}) => {
     try {
       const queryParams = new URLSearchParams();
@@ -937,19 +938,54 @@ export const integrationService = {
       if (!response.ok) throw new Error("Failed to fetch bookings");
 
       const data = await response.json();
+      const bookings = data.bookings || [];
 
-      // Process bookings to add multi-slot info
-      if (data.bookings) {
-        data.bookings = data.bookings.map(booking => ({
+      // For multi-slot bookings, fetch all slot details
+      const enhancedBookings = await Promise.all(bookings.map(async (booking) => {
+        if (booking.is_multi_slot && booking.slot_ids) {
+          try {
+            const slotIds = typeof booking.slot_ids === 'string'
+              ? JSON.parse(booking.slot_ids)
+              : booking.slot_ids;
+
+            const slotCount = Array.isArray(slotIds) ? slotIds.length : 1;
+
+            // Fetch details for all slots
+            if (slotIds.length > 0) {
+              const slotDetails = await Promise.all(
+                slotIds.map(async (slotId) => {
+
+                  return { slot_id: slotId };
+                })
+              );
+
+              return {
+                ...booking,
+                slot_count: slotCount,
+                all_slots: slotDetails,
+                display_time: `${booking.start_time} - ${booking.end_time} (${slotCount} slots)`
+              };
+            }
+          } catch (e) {
+            console.error("Error processing multi-slot booking:", e);
+          }
+        }
+
+        return {
           ...booking,
-          slot_count: booking.is_multi_slot && booking.slot_ids
-            ? (Array.isArray(booking.slot_ids) ? booking.slot_ids.length :
-              (typeof booking.slot_ids === 'string' ? JSON.parse(booking.slot_ids).length : 1))
-            : 1
-        }));
-      }
+          slot_count: 1,
+          all_slots: [{
+            slot_id: booking.slot_id,
+            start_time: booking.start_time,
+            end_time: booking.end_time
+          }]
+        };
+      }));
 
-      return data;
+      return {
+        ...data,
+        bookings: enhancedBookings
+      };
     } catch (error) {
       console.error("Error fetching user bookings:", error);
       throw error;
