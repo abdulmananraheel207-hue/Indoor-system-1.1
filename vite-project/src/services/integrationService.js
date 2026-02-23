@@ -853,49 +853,42 @@ export const integrationService = {
     }
   },
 
-  // Update the createBooking method in integrationService.js
-  // In integrationService.js - Update createBooking method
+  // Replace the entire createBooking method in integrationService.js
   createBooking: async (bookingData) => {
     try {
-      // Check if we have multiple slots
-      const slotIds = bookingData.slot_ids || bookingData.slotIds || [];
+      // Normalize parameter names
+      const arenaId = bookingData.arena_id || bookingData.arenaId;
+      const courtId = bookingData.court_id || bookingData.courtId;
+      const sportId = bookingData.sport_id || bookingData.sportId;
 
-      // Determine if this is a multi-slot booking
-      const isMultiSlot = slotIds.length > 1;
-
-      // FIX: Ensure total_amount is a proper number
-      let totalAmount = bookingData.totalPrice || bookingData.total_amount;
-
-      // Convert to number and fix to 2 decimal places
-      if (totalAmount) {
-        totalAmount = Number(parseFloat(totalAmount).toFixed(2));
+      // Handle slot IDs - ensure it's an array
+      let slotIds = [];
+      if (bookingData.slot_ids && Array.isArray(bookingData.slot_ids)) {
+        slotIds = bookingData.slot_ids;
+      } else if (bookingData.slot_id) {
+        slotIds = [bookingData.slot_id];
+      } else if (bookingData.slotIds && Array.isArray(bookingData.slotIds)) {
+        slotIds = bookingData.slotIds;
       }
 
-      // Get the first and last slot info for display
-      let startTime = bookingData.startTime;
-      let endTime = bookingData.endTime;
+      // Validate required fields
+      if (!arenaId) throw new Error("Arena ID is required");
+      if (!courtId) throw new Error("Court ID is required");
+      if (!sportId) throw new Error("Sport ID is required");
+      if (slotIds.length === 0) throw new Error("At least one slot ID is required");
 
-      // If we have slots but no start/end times, we'll let backend handle it
+      // Ensure total_amount is a number
+      const totalAmount = bookingData.total_amount || bookingData.totalPrice;
+      if (!totalAmount) throw new Error("Total amount is required");
+
       const payload = {
-        arena_id: bookingData.arenaId,
-        court_id: bookingData.courtId,
-        total_amount: totalAmount, // Use the fixed amount
-        sport_id: bookingData.sportId || bookingData.sport_id || undefined,
-        notes: bookingData.notes || "",
-        is_multi_slot: isMultiSlot,
+        arena_id: Number(arenaId),
+        court_id: Number(courtId),
+        sport_id: Number(sportId),
+        total_amount: Number(parseFloat(totalAmount).toFixed(2)),
+        slot_ids: slotIds.map(id => Number(id)),
+        notes: bookingData.notes || ""
       };
-
-      // Handle different slot formats
-      if (bookingData.slot_id) payload.slot_id = bookingData.slot_id;
-      if (bookingData.slotId) payload.slot_id = bookingData.slotId;
-      if (slotIds.length > 0) {
-        payload.slot_ids = slotIds;
-      }
-
-      // For date+time format
-      if (bookingData.date) payload.date = bookingData.date;
-      if (bookingData.startTime) payload.start_time = bookingData.startTime;
-      if (bookingData.endTime) payload.end_time = bookingData.endTime;
 
       console.log("📤 Creating booking with payload:", payload);
 

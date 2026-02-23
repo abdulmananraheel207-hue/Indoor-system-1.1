@@ -24,6 +24,24 @@ const UserBooking = () => {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState(null);
 
+  // Helper function to get slot count for multi-slot bookings
+  const getSlotCount = (booking) => {
+    if (booking.is_multi_slot) {
+      if (booking.slot_count) return booking.slot_count;
+      if (booking.slot_ids) {
+        try {
+          const slotIds = typeof booking.slot_ids === 'string'
+            ? JSON.parse(booking.slot_ids)
+            : booking.slot_ids;
+          return slotIds.length;
+        } catch (e) {
+          return 1;
+        }
+      }
+    }
+    return 1;
+  };
+
   // Check guest access
   useEffect(() => {
     const isGuest = localStorage.getItem("isGuest") === "true";
@@ -231,6 +249,28 @@ const UserBooking = () => {
             </nav>
           </div>
 
+          {/* Stats Section */}
+          {bookings.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                <p className="text-sm text-gray-600">Total Bookings</p>
+                <p className="text-2xl font-bold text-gray-900">{bookings.length}</p>
+              </div>
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                <p className="text-sm text-gray-600">Total Time Slots</p>
+                <p className="text-2xl font-bold text-purple-600">
+                  {bookings.reduce((sum, b) => sum + getSlotCount(b), 0)}
+                </p>
+              </div>
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                <p className="text-sm text-gray-600">Multi-Slot Bookings</p>
+                <p className="text-2xl font-bold text-blue-600">
+                  {bookings.filter(b => b.is_multi_slot).length}
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Bookings List */}
           <div className="space-y-6">
             {error && (
@@ -297,9 +337,16 @@ const UserBooking = () => {
                         {booking.arena_name}
                       </h3>
                       <div className="flex items-center mt-2 space-x-3">
-                        <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded">
-                          {booking.sport_name}
-                        </span>
+                        <div className="flex items-center flex-wrap gap-2">
+                          <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded">
+                            {booking.sport_name}
+                          </span>
+                          {booking.is_multi_slot && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                              {getSlotCount(booking)} slots
+                            </span>
+                          )}
+                        </div>
                         <span className="text-sm text-gray-600">
                           Court {booking.court_number || 'N/A'}
                         </span>
@@ -405,7 +452,7 @@ const UserBooking = () => {
                     {booking.status === "completed" && (
                       <button
                         onClick={() => handleWriteReview(booking)}
-                        className="px-4 py-2 bg-purple-600 text-black rounded-lg hover:bg-purple-700 transition-colors flex items-center"
+                        className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center"
                       >
                         <span className="mr-2">⭐</span>
                         Write a Review
@@ -516,6 +563,39 @@ const UserBooking = () => {
                     <p className="text-sm text-gray-600">End Time</p>
                     <p className="font-medium text-gray-900">{formatTime(selectedBooking.end_time)}</p>
                   </div>
+
+                  {/* Multi-slot information */}
+                  {selectedBooking?.is_multi_slot && getSlotCount(selectedBooking) > 1 && (
+                    <div className="md:col-span-2 mt-2 pt-3 border-t border-gray-200">
+                      <div className="bg-purple-50 p-4 rounded-lg">
+                        <h4 className="text-sm font-semibold text-purple-900 mb-2 flex items-center">
+                          <svg className="w-4 h-4 mr-1 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          Multi-Slot Booking
+                        </h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div>
+                            <p className="text-xs text-purple-700">Total Slots</p>
+                            <p className="font-bold text-purple-900">{getSlotCount(selectedBooking)} slots</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-purple-700">Duration</p>
+                            <p className="font-medium text-purple-900">
+                              {selectedBooking.start_time} - {selectedBooking.end_time}
+                            </p>
+                          </div>
+                          <div className="md:col-span-2">
+                            <p className="text-xs text-purple-700 mb-1">Slot Information</p>
+                            <p className="text-sm text-purple-800 bg-white bg-opacity-50 p-2 rounded">
+                              {getSlotCount(selectedBooking)} consecutive hour slots from{' '}
+                              {formatTime(selectedBooking.start_time)} to {formatTime(selectedBooking.end_time)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -547,11 +627,8 @@ const UserBooking = () => {
                       {selectedBooking.payment_status?.charAt(0).toUpperCase() + selectedBooking.payment_status?.slice(1) || 'Pending'}
                     </p>
                   </div>
-
                 </div>
               </div>
-
-
 
               {/* Cancellation Information (if cancelled) */}
               {selectedBooking.status === 'cancelled' && selectedBooking.cancellation_time && (
@@ -681,6 +758,11 @@ const UserBooking = () => {
                       day: 'numeric'
                     })}
                   </p>
+                  {selectedBookingForReview.is_multi_slot && (
+                    <p className="text-xs text-purple-600 mt-1">
+                      ⏱️ {getSlotCount(selectedBookingForReview)} slots • {selectedBookingForReview.start_time} - {selectedBookingForReview.end_time}
+                    </p>
+                  )}
                 </div>
               </div>
 

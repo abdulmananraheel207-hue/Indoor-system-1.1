@@ -176,7 +176,8 @@ const UserArenaDetails = () => {
     }
   };
 
-  const handleSlotSelect = (slot) => {
+  // Replace the handleSlotSelect function with this enhanced version
+  const handleSlotSelect = async (slot) => {
     const isSlotAvailable = slot.actually_available ?? slot.is_available;
     if (!isSlotAvailable || slot.is_blocked) return;
 
@@ -190,30 +191,49 @@ const UserArenaDetails = () => {
       return;
     }
 
+    // Check if slot is already selected
     const exists = selectedSlots.some((s) => s.slot_id === slot.slot_id);
-    const toggleSelection = async () => {
-      try {
-        if (exists) {
-          setSelectedSlots((prev) =>
-            prev.filter((s) => s.slot_id !== slot.slot_id)
-          );
-          await integrationService.releaseSlot(slot.slot_id);
-          return;
+
+    try {
+      if (exists) {
+        // Release the slot
+        setSelectedSlots((prev) => prev.filter((s) => s.slot_id !== slot.slot_id));
+        await integrationService.releaseSlot(slot.slot_id);
+        return;
+      }
+
+      // For multi-slot, check if slots are consecutive
+      if (selectedSlots.length > 0) {
+        const sorted = [...selectedSlots, slot].sort((a, b) =>
+          a.start_time.localeCompare(b.start_time)
+        );
+
+        // Check if slots are consecutive
+        let isValid = true;
+        for (let i = 0; i < sorted.length - 1; i++) {
+          if (sorted[i].end_time !== sorted[i + 1].start_time) {
+            isValid = false;
+            break;
+          }
         }
 
-        await integrationService.lockSlot(slot.slot_id);
-        const nextExpiry = new Date(Date.now() + 10 * 60 * 1000);
-        setLockExpiry(nextExpiry);
-        setTimeLeft("10:00");
-        setSelectedSlots((prev) => [...prev, slot]);
-      } catch (error) {
-        console.error("Error locking slot", error);
-        alert(error.response?.data?.message || "Slot is no longer available.");
-        fetchAvailableSlots();
+        if (!isValid) {
+          alert("Please select consecutive time slots only");
+          return;
+        }
       }
-    };
 
-    toggleSelection();
+      // Lock the slot
+      await integrationService.lockSlot(slot.slot_id);
+      const nextExpiry = new Date(Date.now() + 10 * 60 * 1000);
+      setLockExpiry(nextExpiry);
+      setTimeLeft("10:00");
+      setSelectedSlots((prev) => [...prev, slot]);
+    } catch (error) {
+      console.error("Error handling slot selection:", error);
+      alert(error.response?.data?.message || "Slot is no longer available.");
+      fetchAvailableSlots();
+    }
   };
   const getConsolidatedBookingInfo = () => {
     if (!selectedSlots || selectedSlots.length === 0) return null;
