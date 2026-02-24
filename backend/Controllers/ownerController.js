@@ -120,15 +120,20 @@ const ownerController = {
           // Create arena
           const [arenaResult] = await connection.execute(
             `INSERT INTO arenas 
-           (owner_id, name, description, location_lat, location_lng,
-            address, base_price_per_hour, rating, total_reviews, is_active, is_blocked, total_commission_due)
-           VALUES (?, ?, ?, 0, 0, ?, ?, 0, 0, TRUE, FALSE, 0.00)`,
+   (owner_id, name, description, location_lat, location_lng,
+    address, base_price_per_hour, rating, total_reviews, is_active, is_blocked, 
+    total_commission_due, require_advance, advance_type, advance_percentage, advance_fixed_amount)
+   VALUES (?, ?, ?, 0, 0, ?, ?, 0, 0, TRUE, FALSE, 0.00, ?, ?, ?, ?)`,
             [
               owner_id,
               arenaData.arena_name,
               arenaData.description || "",
               arenaData.business_address,
               parseFloat(arenaData.base_price_per_hour) || 500,
+              arenaData.require_advance ? 1 : 0,
+              arenaData.advance_type || 'percentage',
+              arenaData.advance_percentage || null,
+              arenaData.advance_fixed_amount || null,
             ]
           );
 
