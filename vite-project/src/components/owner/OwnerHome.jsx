@@ -576,9 +576,7 @@ const OwnerHome = ({
                                 <div className="font-medium text-gray-900">
                                   {booking.user_name}
                                 </div>
-                                <div className="text-sm text-gray-500">
-                                  {booking.user_phone}
-                                </div>
+
                                 <div className="text-xs text-gray-400">
                                   {booking.user_email}
                                 </div>

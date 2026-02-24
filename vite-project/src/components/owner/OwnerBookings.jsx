@@ -53,7 +53,6 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
     }
   }, [statusFilter, dateFrom, dateTo, activeTab, selectedArena, refreshCounter]);
 
-  // 🔥 Auto-refresh every 10 seconds for pending bookings
   useEffect(() => {
     if (!canViewBookings) return;
 
@@ -711,34 +710,50 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
                               )}
                             </div>
                           </td>
+
                           <td className="px-4 py-3">
                             <div className="text-sm text-gray-900">
                               {formatDate(booking.date)}
                             </div>
                             <div className="text-xs text-gray-500">
-                              {isMultiSlot ? (
+                              {booking.is_multi_slot ? (
                                 <div>
-                                  <div>{formatTime(booking.start_time)} - {formatTime(booking.end_time)}</div>
-                                  <div className="text-purple-600 font-medium">
-                                    {slotCount} consecutive slots
+                                  <div className="font-medium text-purple-700">
+                                    {formatTime(booking.start_time)} - {formatTime(booking.end_time)}
                                   </div>
+                                  <div className="text-purple-600 font-semibold mt-1">
+                                    ⏱️ {booking.slot_count} consecutive slots
+                                  </div>
+                                  {/* Show individual slots in a dropdown/tooltip */}
+                                  {booking.all_slots && booking.all_slots.length > 0 && (
+                                    <details className="mt-2">
+                                      <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">
+                                        View all slots
+                                      </summary>
+                                      <div className="mt-2 space-y-1 bg-gray-50 p-2 rounded">
+                                        {booking.all_slots.map((slot, idx) => (
+                                          <div key={idx} className="text-xs flex justify-between">
+                                            <span>Slot {idx + 1}:</span>
+                                            <span className="font-mono">
+                                              {formatTime(slot.start_time)} - {formatTime(slot.end_time)}
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </details>
+                                  )}
                                 </div>
                               ) : (
-                                <div>
-                                  {formatTime(booking.start_time)} - {formatTime(booking.end_time)}
-                                </div>
-                              )}
-                              {activeTab === "upcoming" && timePassed && (
-                                <span className="ml-2 text-red-500">(Time Passed)</span>
+                                <span>{formatTime(booking.start_time)} - {formatTime(booking.end_time)}</span>
                               )}
                             </div>
-                            {daysUntil !== null && !timePassed && activeTab === "upcoming" && (
-                              <div className={`text-xs mt-1 ${daysUntil === 0 ? 'text-yellow-600' :
-                                daysUntil === 1 ? 'text-orange-600' : 'text-green-600'
+                            {booking.days_until !== null && (
+                              <div className={`text-xs mt-1 ${booking.days_until === 0 ? 'text-yellow-600' :
+                                booking.days_until === 1 ? 'text-orange-600' : 'text-green-600'
                                 }`}>
-                                {daysUntil === 0 ? 'Today' :
-                                  daysUntil === 1 ? 'Tomorrow' :
-                                    `In ${daysUntil} days`}
+                                {booking.days_until === 0 ? 'Today' :
+                                  booking.days_until === 1 ? 'Tomorrow' :
+                                    `In ${booking.days_until} days`}
                               </div>
                             )}
                           </td>

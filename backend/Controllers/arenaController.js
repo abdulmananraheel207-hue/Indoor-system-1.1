@@ -13,8 +13,6 @@ const arenaController = {
     }
   },
 
-  // Get available time slots for an arena - FIXED VERSION with multi-slot support
-  // File: arenaController.js - UPDATED getAvailableSlots function
   getAvailableSlots: async (req, res) => {
     try {
       const arena_id = parseInt(req.params.arena_id);

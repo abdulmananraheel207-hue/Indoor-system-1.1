@@ -1095,25 +1095,33 @@ const ownerController = {
         arenaIds
       );
 
-      // PENDING REQUESTS DETAILS with multi-slot info
       const [pendingRequests] = await pool.execute(
-        `SELECT b.*, u.name as user_name, u.phone_number as user_phone,
-              st.name as sport_name, a.name as arena_name,
-              ts.date, ts.start_time, ts.end_time,
-              a.arena_id,
-              CASE 
-                WHEN b.is_multi_slot = 1 AND b.slot_ids IS NOT NULL 
-                THEN JSON_LENGTH(b.slot_ids)
-                ELSE 1 
-              END as slot_count
-       FROM bookings b
-       JOIN arenas a ON b.arena_id = a.arena_id
-       JOIN users u ON b.user_id = u.user_id
-       JOIN sports_types st ON b.sport_id = st.sport_id
-       JOIN time_slots ts ON b.slot_id = ts.slot_id
-       WHERE a.arena_id IN (${placeholders}) AND b.status = 'pending'
-       ORDER BY ts.date ASC, ts.start_time ASC
-       LIMIT 10`,
+        `SELECT 
+    b.booking_id,
+    b.status,
+    b.total_amount,
+    b.date,
+    b.start_time,
+    b.end_time,
+    b.is_multi_slot,
+    b.slot_ids,
+    u.name as user_name,
+    u.phone_number as user_phone,
+    st.name as sport_name,
+    a.name as arena_name,
+    a.arena_id,
+    CASE 
+      WHEN b.is_multi_slot = 1 AND b.slot_ids IS NOT NULL 
+      THEN JSON_LENGTH(b.slot_ids)
+      ELSE 1 
+    END as slot_count
+   FROM bookings b
+   JOIN arenas a ON b.arena_id = a.arena_id
+   JOIN users u ON b.user_id = u.user_id
+   JOIN sports_types st ON b.sport_id = st.sport_id
+   WHERE a.arena_id IN (${placeholders}) AND b.status = 'pending'
+   ORDER BY b.date ASC, b.start_time ASC
+   LIMIT 10`,
         arenaIds
       );
 
@@ -1266,11 +1274,14 @@ const ownerController = {
     }
   },
   // Get all booking requests for owner
+  // In ownerController.js - REPLACE the entire getOwnerBookings function
+
   getOwnerBookings: async (req, res) => {
     try {
       const { status, date_from, date_to, type = "all", arena_id } = req.query;
       const ownerId = req.user.id;
 
+      // Build the query - IMPORTANT: Don't join with time_slots!
       let query = `
       SELECT 
         b.booking_id,
@@ -1279,28 +1290,31 @@ const ownerController = {
         b.commission_amount,
         b.booking_date,
         b.payment_status,
+        b.is_multi_slot,
+        b.slot_ids,
+        b.date,
+        b.start_time,
+        b.end_time,
+        b.court_id,
         u.name as user_name,
         u.email as user_email,
         u.phone_number as user_phone,
         st.name as sport_name,
         a.name as arena_name,
         a.arena_id,
-        ts.date,
-        ts.start_time,
-        ts.end_time,
-        DATEDIFF(ts.date, CURDATE()) as days_until,
-        TIMESTAMP(ts.date, ts.end_time) as slot_end_datetime
+        cd.court_name,
+        cd.court_number,
+        DATEDIFF(b.date, CURDATE()) as days_until
       FROM bookings b
       JOIN users u ON b.user_id = u.user_id
       JOIN sports_types st ON b.sport_id = st.sport_id
-      JOIN time_slots ts ON b.slot_id = ts.slot_id
       JOIN arenas a ON b.arena_id = a.arena_id
+      LEFT JOIN court_details cd ON b.court_id = cd.court_id
       WHERE a.owner_id = ?
     `;
 
       const params = [ownerId];
 
-      // Add arena_id filter if provided
       if (arena_id) {
         query += " AND a.arena_id = ?";
         params.push(arena_id);
@@ -1311,38 +1325,91 @@ const ownerController = {
         params.push(status);
       }
 
-      // Filter by booking type
       if (type === "upcoming") {
-        query += " AND b.status IN ('accepted', 'pending')";
-      } else if (type === "history") {
-        query += " AND b.status IN ('completed', 'cancelled', 'rejected')";
+        query += " AND b.status IN ('accepted', 'pending') AND b.date >= CURDATE()";
       } else if (type === "history") {
         query += " AND b.status IN ('completed', 'cancelled', 'rejected')";
       }
 
       if (date_from) {
-        query += " AND ts.date >= ?";
+        query += " AND b.date >= ?";
         params.push(date_from);
       }
 
       if (date_to) {
-        query += " AND ts.date <= ?";
+        query += " AND b.date <= ?";
         params.push(date_to);
       }
 
-      query += " ORDER BY ts.date ASC, ts.start_time ASC";
+      query += " ORDER BY b.date ASC, b.start_time ASC";
 
-      console.log("Executing query with params:", params);
+      console.log("Executing owner bookings query");
       const [bookings] = await pool.execute(query, params);
 
-      console.log(`Found ${bookings.length} bookings`);
-      res.json(bookings);
+      // Process each booking to get ALL slot details
+      const processedBookings = await Promise.all(bookings.map(async (booking) => {
+        // Get all slot IDs for this booking
+        let slotIds = [];
+
+        if (booking.is_multi_slot && booking.slot_ids) {
+          try {
+            slotIds = typeof booking.slot_ids === 'string'
+              ? JSON.parse(booking.slot_ids)
+              : booking.slot_ids;
+          } catch (e) {
+            console.error("Error parsing slot_ids:", e);
+            slotIds = [];
+          }
+        } else {
+          // Single slot - need to fetch from time_slots using old method
+          const [singleSlot] = await pool.execute(
+            `SELECT ts.* FROM bookings b
+           JOIN time_slots ts ON b.slot_id = ts.slot_id
+           WHERE b.booking_id = ?`,
+            [booking.booking_id]
+          );
+
+          return {
+            ...booking,
+            slot_count: 1,
+            all_slots: singleSlot,
+            display_time: `${booking.start_time} - ${booking.end_time}`
+          };
+        }
+
+        // For multi-slot bookings, fetch all slot details
+        if (slotIds.length > 0) {
+          const placeholders = slotIds.map(() => '?').join(',');
+          const [slotDetails] = await pool.execute(
+            `SELECT * FROM time_slots WHERE slot_id IN (${placeholders}) ORDER BY start_time`,
+            slotIds
+          );
+
+          return {
+            ...booking,
+            slot_count: slotIds.length,
+            all_slots: slotDetails,
+            display_time: `${booking.start_time} - ${booking.end_time} (${slotIds.length} slots)`
+          };
+        }
+
+        return {
+          ...booking,
+          slot_count: 1,
+          all_slots: [],
+          display_time: `${booking.start_time} - ${booking.end_time}`
+        };
+      }));
+
+      console.log(`Found ${processedBookings.length} bookings`);
+      res.json(processedBookings);
     } catch (error) {
       console.error("Error in getOwnerBookings:", error);
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
-  // Accept a booking request
+
+
   acceptBooking: async (req, res) => {
     const connection = await pool.getConnection();
     try {
@@ -1351,13 +1418,11 @@ const ownerController = {
 
       await connection.beginTransaction();
 
-      // Verify owner owns this booking and get multi-slot info
+      // Get booking details with multi-slot info
       const [bookingCheck] = await connection.execute(
-        `SELECT b.*, ts.slot_id, ts.date, ts.start_time, ts.end_time,
-              b.is_multi_slot, b.slot_ids
+        `SELECT b.*, a.owner_id, b.is_multi_slot, b.slot_ids, b.slot_id
        FROM bookings b
        JOIN arenas a ON b.arena_id = a.arena_id
-       JOIN time_slots ts ON b.slot_id = ts.slot_id
        WHERE b.booking_id = ? AND a.owner_id = ? AND b.status = 'pending'`,
         [booking_id, ownerId]
       );
@@ -1374,19 +1439,22 @@ const ownerController = {
       // Update booking status
       await connection.execute(
         `UPDATE bookings 
-       SET status = 'accepted',
-           booking_date = NOW()
+       SET status = 'accepted'
        WHERE booking_id = ?`,
         [booking_id]
       );
 
-      // If multi-slot booking, mark all slots as unavailable
+      // Handle slot availability based on booking type
       if (booking.is_multi_slot && booking.slot_ids) {
+        // Multi-slot booking - mark ALL slots as unavailable
         let slotIds = [];
         try {
-          slotIds = JSON.parse(booking.slot_ids);
+          slotIds = typeof booking.slot_ids === 'string'
+            ? JSON.parse(booking.slot_ids)
+            : booking.slot_ids;
         } catch (e) {
-          slotIds = [booking.slot_id];
+          console.error("Error parsing slot_ids:", e);
+          slotIds = [booking.slot_id]; // Fallback to single slot
         }
 
         if (slotIds.length > 0) {
@@ -1399,6 +1467,7 @@ const ownerController = {
            WHERE slot_id IN (${placeholders})`,
             slotIds
           );
+          console.log(`Marked ${slotIds.length} slots as unavailable for booking ${booking_id}`);
         }
       } else {
         // Single slot booking
@@ -1410,24 +1479,23 @@ const ownerController = {
          WHERE slot_id = ?`,
           [booking.slot_id]
         );
+        console.log(`Marked single slot ${booking.slot_id} as unavailable`);
       }
 
       await connection.commit();
 
-      // Send notification to user with slot count info
+      // Send notification to user
       try {
         const slotCount = booking.is_multi_slot && booking.slot_ids
-          ? JSON.parse(booking.slot_ids).length
+          ? (typeof booking.slot_ids === 'string'
+            ? JSON.parse(booking.slot_ids).length
+            : booking.slot_ids.length)
           : 1;
-
-        const timeDisplay = slotCount > 1
-          ? `${booking.start_time}-${booking.end_time} (${slotCount} slots)`
-          : `${booking.start_time}-${booking.end_time}`;
 
         await pool.execute(
           `INSERT INTO notifications (user_id, notification_type, title, message)
          VALUES (?, 'booking.accepted', 'Booking Accepted', 
-                 'Your booking for ${booking.date} ${timeDisplay} has been accepted.')`,
+                 'Your booking for ${booking.date} ${booking.start_time}-${booking.end_time} (${slotCount} slots) has been accepted.')`,
           [booking.user_id]
         );
       } catch (notifError) {
@@ -1439,18 +1507,28 @@ const ownerController = {
         booking_id: booking_id,
         status: "accepted",
         is_multi_slot: booking.is_multi_slot,
-        slot_count: booking.is_multi_slot && booking.slot_ids ? JSON.parse(booking.slot_ids).length : 1
+        slot_count: booking.is_multi_slot && booking.slot_ids
+          ? (typeof booking.slot_ids === 'string'
+            ? JSON.parse(booking.slot_ids).length
+            : booking.slot_ids.length)
+          : 1
       });
+
     } catch (error) {
       await connection.rollback();
-      console.error(error);
-      res.status(500).json({ message: "Server error", error: error.message });
+      console.error("Error accepting booking:", error);
+      res.status(500).json({
+        message: "Server error",
+        error: error.message,
+        stack: process.env.NODE_ENV === "development" ? error.stack : undefined
+      });
     } finally {
       connection.release();
     }
   },
 
-  // Reject a booking request
+
+
   rejectBooking: async (req, res) => {
     const connection = await pool.getConnection();
     try {
@@ -1459,13 +1537,11 @@ const ownerController = {
 
       await connection.beginTransaction();
 
-      // Verify owner owns this booking and get multi-slot info
+      // Get booking details with multi-slot info
       const [bookingCheck] = await connection.execute(
-        `SELECT b.*, ts.slot_id, ts.date, ts.start_time, ts.end_time,
-              b.is_multi_slot, b.slot_ids
+        `SELECT b.*, a.owner_id, b.is_multi_slot, b.slot_ids, b.slot_id
        FROM bookings b
        JOIN arenas a ON b.arena_id = a.arena_id
-       JOIN time_slots ts ON b.slot_id = ts.slot_id
        WHERE b.booking_id = ? AND a.owner_id = ? AND b.status = 'pending'`,
         [booking_id, ownerId]
       );
@@ -1489,11 +1565,13 @@ const ownerController = {
         [booking_id]
       );
 
-      // If multi-slot booking, make all slots available again
+      // Make slots available again
       if (booking.is_multi_slot && booking.slot_ids) {
         let slotIds = [];
         try {
-          slotIds = JSON.parse(booking.slot_ids);
+          slotIds = typeof booking.slot_ids === 'string'
+            ? JSON.parse(booking.slot_ids)
+            : booking.slot_ids;
         } catch (e) {
           slotIds = [booking.slot_id];
         }
@@ -1510,7 +1588,6 @@ const ownerController = {
           );
         }
       } else {
-        // Single slot booking
         await connection.execute(
           `UPDATE time_slots 
          SET is_available = TRUE,
@@ -1523,20 +1600,18 @@ const ownerController = {
 
       await connection.commit();
 
-      // Send notification to user
+      // Send notification
       try {
         const slotCount = booking.is_multi_slot && booking.slot_ids
-          ? JSON.parse(booking.slot_ids).length
+          ? (typeof booking.slot_ids === 'string'
+            ? JSON.parse(booking.slot_ids).length
+            : booking.slot_ids.length)
           : 1;
-
-        const timeDisplay = slotCount > 1
-          ? `${booking.start_time}-${booking.end_time} (${slotCount} slots)`
-          : `${booking.start_time}-${booking.end_time}`;
 
         await pool.execute(
           `INSERT INTO notifications (user_id, notification_type, title, message)
          VALUES (?, 'booking.rejected', 'Booking Rejected', 
-                 'Your booking for ${booking.date} ${timeDisplay} has been rejected.')`,
+                 'Your booking for ${booking.date} ${booking.start_time}-${booking.end_time} (${slotCount} slots) has been rejected.')`,
           [booking.user_id]
         );
       } catch (notifError) {
@@ -1548,11 +1623,16 @@ const ownerController = {
         booking_id: booking_id,
         status: "rejected",
         is_multi_slot: booking.is_multi_slot,
-        slot_count: booking.is_multi_slot && booking.slot_ids ? JSON.parse(booking.slot_ids).length : 1
+        slot_count: booking.is_multi_slot && booking.slot_ids
+          ? (typeof booking.slot_ids === 'string'
+            ? JSON.parse(booking.slot_ids).length
+            : booking.slot_ids.length)
+          : 1
       });
+
     } catch (error) {
       await connection.rollback();
-      console.error(error);
+      console.error("Error rejecting booking:", error);
       res.status(500).json({ message: "Server error", error: error.message });
     } finally {
       connection.release();
