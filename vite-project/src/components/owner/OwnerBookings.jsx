@@ -1,7 +1,7 @@
-// File: OwnerBookings.jsx - COMPLETE FIXED VERSION with multi-slot support
+// File: OwnerBookings.jsx - COMPLETE FIXED VERSION with multi-slot and payment verification support
 import React, { useState, useEffect } from "react";
 import integrationService from "../../services/integrationService";
-
+import PaymentVerificationModal from "../shared/PaymentVerificationModal";
 const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
   const [bookings, setBookings] = useState([]);
   const [filteredBookings, setFilteredBookings] = useState([]);
@@ -19,6 +19,10 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
 
   // Get arena-specific permissions from localStorage
   const [arenaPermissions, setArenaPermissions] = useState({});
+
+  // Payment verification states
+  const [showPaymentVerificationModal, setShowPaymentVerificationModal] = useState(false);
+  const [selectedBookingForVerification, setSelectedBookingForVerification] = useState(null);
 
   useEffect(() => {
     const storedArenaPerms = localStorage.getItem('arenaPermissions');
@@ -175,7 +179,9 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
       // Apply tab filter
       if (activeTab === "upcoming") {
         const upcoming = arenaFiltered.filter(b =>
-          b.status === 'pending' || b.status === 'accepted'
+          b.status === 'pending' || b.status === 'pending_advance' ||
+          b.status === 'awaiting_payment' || b.status === 'payment_verification' ||
+          b.status === 'accepted'
         );
         console.log(`📅 Upcoming bookings: ${upcoming.length}`);
         setFilteredBookings(upcoming);
@@ -364,20 +370,120 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
     return bookingDateTime < now;
   };
 
+  // Payment verification functions
+  const handleVerifyPayment = (booking) => {
+    setSelectedBookingForVerification(booking);
+    setShowPaymentVerificationModal(true);
+  };
+
+  const handleConfirmPayment = async (bookingId) => {
+    try {
+      const token = localStorage.getItem("token");
+      const userRole = localStorage.getItem("userRole");
+
+      const endpoint = userRole === "owner"
+        ? `http://localhost:5000/api/owners/bookings/${bookingId}/confirm-payment`
+        : `http://localhost:5000/api/managers/bookings/${bookingId}/confirm-payment`;
+
+      const response = await fetch(endpoint, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (response.ok) {
+        alert("✅ Payment confirmed! Booking accepted.");
+        setRefreshCounter(prev => prev + 1);
+        fetchStats();
+        setShowPaymentVerificationModal(false);
+        setSelectedBookingForVerification(null);
+      } else {
+        const data = await response.json();
+        alert(data.message || "Failed to confirm payment");
+      }
+    } catch (error) {
+      console.error("Error confirming payment:", error);
+      alert("An error occurred");
+    }
+  };
+
+  const handleRejectPayment = async (bookingId, reason) => {
+    try {
+      const token = localStorage.getItem("token");
+      const userRole = localStorage.getItem("userRole");
+
+      const endpoint = userRole === "owner"
+        ? `http://localhost:5000/api/owners/bookings/${bookingId}/reject-payment`
+        : `http://localhost:5000/api/managers/bookings/${bookingId}/reject-payment`;
+
+      const response = await fetch(endpoint, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ reason }),
+      });
+
+      if (response.ok) {
+        alert("✅ Payment rejected. Booking cancelled.");
+        setRefreshCounter(prev => prev + 1);
+        fetchStats();
+        setShowPaymentVerificationModal(false);
+        setSelectedBookingForVerification(null);
+      } else {
+        const data = await response.json();
+        alert(data.message || "Failed to reject payment");
+      }
+    } catch (error) {
+      console.error("Error rejecting payment:", error);
+      alert("An error occurred");
+    }
+  };
+
   const getStatusColor = (status) => {
     switch (status) {
       case "pending":
+      case "pending_advance":
         return "bg-yellow-100 text-yellow-800";
-      case "accepted":
+      case "awaiting_payment":
+        return "bg-purple-100 text-purple-800";
+      case "payment_verification":
         return "bg-blue-100 text-blue-800";
+      case "accepted":
+        return "bg-green-100 text-green-800";
       case "completed":
         return "bg-green-100 text-green-800";
       case "rejected":
-        return "bg-red-100 text-red-800";
       case "cancelled":
-        return "bg-gray-100 text-gray-800";
+        return "bg-red-100 text-red-800";
       default:
         return "bg-gray-100 text-gray-800";
+    }
+  };
+
+  const getStatusText = (status) => {
+    switch (status) {
+      case "pending":
+        return "Pending";
+      case "pending_advance":
+        return "Advance Request";
+      case "awaiting_payment":
+        return "Awaiting Payment";
+      case "payment_verification":
+        return "Payment Review";
+      case "accepted":
+        return "In Process";
+      case "completed":
+        return "Completed";
+      case "rejected":
+        return "Rejected";
+      case "cancelled":
+        return "Cancelled";
+      default:
+        return status;
     }
   };
 
@@ -398,23 +504,6 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
       day: "numeric",
       year: "numeric",
     });
-  };
-
-  const getStatusText = (status) => {
-    switch (status) {
-      case "pending":
-        return "Pending";
-      case "accepted":
-        return "In Process";
-      case "completed":
-        return "Completed";
-      case "rejected":
-        return "Rejected";
-      case "cancelled":
-        return "Cancelled";
-      default:
-        return status;
-    }
   };
 
   const formatTime = (timeStr) => {
@@ -572,6 +661,9 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
               >
                 <option value="all">All Status</option>
                 <option value="pending">Pending</option>
+                <option value="pending_advance">Advance Request</option>
+                <option value="awaiting_payment">Awaiting Payment</option>
+                <option value="payment_verification">Payment Review</option>
                 <option value="accepted">Accepted</option>
                 <option value="completed">Completed</option>
                 <option value="cancelled">Cancelled</option>
@@ -682,12 +774,19 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
                       return (
                         <tr key={booking.booking_id} className="hover:bg-gray-50">
                           <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
-                            #{booking.booking_id}
-                            {isMultiSlot && (
-                              <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
-                                {slotCount} slots
-                              </span>
-                            )}
+                            <div className="flex items-center">
+                              #{booking.booking_id}
+                              {booking.requires_advance && (
+                                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800">
+                                  Advance
+                                </span>
+                              )}
+                              {isMultiSlot && (
+                                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                                  {slotCount} slots
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="px-4 py-3">
                             <div>
@@ -779,6 +878,42 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
                           <td className="px-4 py-3 whitespace-nowrap text-sm font-medium">
                             {activeTab === "upcoming" ? (
                               <div className="flex flex-col space-y-1">
+                                {booking.status === "payment_verification" && canManageBookings && (
+                                  <button
+                                    onClick={() => handleVerifyPayment(booking)}
+                                    className="text-purple-600 hover:text-purple-900 text-sm text-left"
+                                  >
+                                    Verify Payment
+                                  </button>
+                                )}
+
+                                {booking.status === "awaiting_payment" && (
+                                  <button
+                                    disabled
+                                    className="text-purple-400 cursor-not-allowed text-sm text-left"
+                                    title="Waiting for user to upload payment"
+                                  >
+                                    ⏳ Awaiting Payment
+                                  </button>
+                                )}
+
+                                {booking.status === "pending_advance" && canManageBookings && (
+                                  <div className="flex flex-col space-y-1">
+                                    <button
+                                      onClick={() => handleAcceptBooking(booking.booking_id)}
+                                      className="text-green-600 hover:text-green-900 text-sm text-left"
+                                    >
+                                      Accept (Requires Advance)
+                                    </button>
+                                    <button
+                                      onClick={() => handleRejectBooking(booking.booking_id)}
+                                      className="text-red-600 hover:text-red-900 text-sm text-left"
+                                    >
+                                      Reject
+                                    </button>
+                                  </div>
+                                )}
+
                                 {booking.status === "pending" && canManageBookings && (
                                   <>
                                     <button
@@ -841,12 +976,19 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
                       <div className="flex justify-between items-start mb-3">
                         <div>
                           <div className="font-medium text-gray-900">
-                            #{booking.booking_id}
-                            {isMultiSlot && (
-                              <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
-                                {slotCount} slots
-                              </span>
-                            )}
+                            <div className="flex items-center">
+                              #{booking.booking_id}
+                              {booking.requires_advance && (
+                                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800">
+                                  Advance
+                                </span>
+                              )}
+                              {isMultiSlot && (
+                                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                                  {slotCount} slots
+                                </span>
+                              )}
+                            </div>
                           </div>
                           <div className="text-sm text-gray-500">
                             {booking.user_name}
@@ -926,6 +1068,42 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
                       {activeTab === "upcoming" && (
                         <div className="mt-4 pt-3 border-t">
                           <div className="flex flex-wrap gap-2">
+                            {booking.status === "payment_verification" && canManageBookings && (
+                              <button
+                                onClick={() => handleVerifyPayment(booking)}
+                                className="flex-1 px-3 py-1.5 bg-purple-100 text-purple-700 text-sm rounded hover:bg-purple-200"
+                              >
+                                Verify Payment
+                              </button>
+                            )}
+
+                            {booking.status === "awaiting_payment" && (
+                              <button
+                                disabled
+                                className="flex-1 px-3 py-1.5 bg-purple-100 text-purple-400 cursor-not-allowed text-sm rounded"
+                                title="Waiting for user to upload payment"
+                              >
+                                ⏳ Awaiting Payment
+                              </button>
+                            )}
+
+                            {booking.status === "pending_advance" && canManageBookings && (
+                              <>
+                                <button
+                                  onClick={() => handleAcceptBooking(booking.booking_id)}
+                                  className="flex-1 px-3 py-1.5 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200"
+                                >
+                                  Accept
+                                </button>
+                                <button
+                                  onClick={() => handleRejectBooking(booking.booking_id)}
+                                  className="flex-1 px-3 py-1.5 bg-red-100 text-red-700 text-sm rounded hover:bg-red-200"
+                                >
+                                  Reject
+                                </button>
+                              </>
+                            )}
+
                             {booking.status === "pending" && canManageBookings && (
                               <>
                                 <button
@@ -985,6 +1163,11 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-base font-medium text-gray-900 md:text-lg">
                 Booking Details {selectedBooking.is_multi_slot && `(${selectedBooking.slot_count} slots)`}
+                {selectedBooking.requires_advance && (
+                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800">
+                    Advance Payment
+                  </span>
+                )}
               </h3>
               <button
                 onClick={() => setSelectedBooking(null)}
@@ -1153,6 +1336,20 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
           </div>
         </div>
       )}
+
+      {/* Payment Verification Modal */}
+      <PaymentVerificationModal
+        isOpen={showPaymentVerificationModal}
+        onClose={() => {
+          setShowPaymentVerificationModal(false);
+          setSelectedBookingForVerification(null);
+        }}
+        onConfirm={handleConfirmPayment}
+        onReject={handleRejectPayment}
+        booking={selectedBookingForVerification}
+        isOwner={isOwner}
+        permissions={permissions}
+      />
     </div>
   );
 };

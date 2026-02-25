@@ -27,7 +27,8 @@ const UserArenaDetails = () => {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [lastBookingId, setLastBookingId] = useState(null);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
-
+  const [successMessage, setSuccessMessage] = useState('Your booking request has been sent to the arena owner. They will review and respond soon.');
+  const [bookingResponse, setBookingResponse] = useState(null);
   useEffect(() => {
     fetchArenaDetails();
     fetchArenaReviews();
@@ -346,12 +347,26 @@ const UserArenaDetails = () => {
           notes: "",
         });
       }
+      // Store bookingResponse in state
+      setBookingResponse(bookingResponse);
 
       setLastBookingId(
         bookingResponse?.bookings?.[0]?.booking_id ||
         bookingResponse?.booking?.booking_id
       );
-      setShowSuccessModal(true);
+
+      // Add this new logic for advance payment handling
+      if (bookingResponse?.bookings?.[0]?.requires_advance) {
+        setShowSuccessModal(true);
+        setSuccessMessage(
+          bookingResponse.bookings[0].advance_amount
+            ? `Advance payment of Rs ${bookingResponse.bookings[0].advance_amount} required. You'll be notified when owner approves.`
+            : "This arena requires advance payment. You'll be notified when owner approves."
+        );
+      } else {
+        setShowSuccessModal(true);
+        setSuccessMessage('Your booking request has been sent to the arena owner. They will review and respond soon.');
+      }
 
       setSelectedSlots([]);
       setLockExpiry(null);
@@ -1158,9 +1173,22 @@ const UserArenaDetails = () => {
                 Booking Request Sent!
               </h3>
               <p className="text-sm text-gray-500 mb-6">
-                Your booking request has been sent to the arena owner. They will
-                review and respond soon.
+                {successMessage}
               </p>
+
+              {/* Add advance payment info section */}
+              {bookingResponse?.bookings?.[0]?.requires_advance && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+                  <div className="flex items-center">
+                    <svg className="w-5 h-5 text-yellow-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p className="text-sm text-yellow-700">
+                      <span className="font-semibold">Advance Payment Required:</span> Once owner approves, you'll have 10 minutes to upload payment proof.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               <div className="bg-gray-50 p-4 rounded-lg mb-6">
                 <p className="text-sm font-medium text-gray-900">

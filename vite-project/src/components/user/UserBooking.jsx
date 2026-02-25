@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import integrationService from "../../services/integrationService";
 import { useNavigate } from "react-router-dom";
 import useRequireAuth from "../../hooks/useRequireAuth";
+import PaymentScreenshotModal from "../shared/PaymentScreenshotModal";
 
 const UserBooking = () => {
   const navigate = useNavigate();
@@ -23,6 +24,9 @@ const UserBooking = () => {
   // State for booking details modal
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState(null);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [selectedBookingForPayment, setSelectedBookingForPayment] = useState(null);
+  const [paymentTimeRemaining, setPaymentTimeRemaining] = useState(null);
 
   // Helper function to get slot count for multi-slot bookings
   const getSlotCount = (booking) => {
@@ -71,6 +75,29 @@ const UserBooking = () => {
       hour12: true
     });
   };
+  // Add this useEffect for payment timer
+  useEffect(() => {
+    let interval;
+    if (selectedBookingForPayment?.status === 'awaiting_payment' && selectedBookingForPayment?.lock_expires_at) {
+      const updateTimer = () => {
+        const expiry = new Date(selectedBookingForPayment.lock_expires_at);
+        const now = new Date();
+        const remaining = Math.max(0, Math.floor((expiry - now) / 1000));
+        setPaymentTimeRemaining(remaining);
+
+        if (remaining === 0) {
+          clearInterval(interval);
+          fetchBookings(); // Refresh to update status
+        }
+      };
+
+      updateTimer();
+      interval = setInterval(updateTimer, 1000);
+    }
+
+    return () => clearInterval(interval);
+  }, [selectedBookingForPayment]);
+
 
   // Check guest access
   useEffect(() => {
@@ -130,17 +157,40 @@ const UserBooking = () => {
       setLoading(false);
     }
   };
+  // Add these new functions
+  const handleUploadPayment = (booking) => {
+    setSelectedBookingForPayment(booking);
+    setShowPaymentModal(true);
+  };
 
+  const handleSubmitPaymentScreenshot = async (paymentData) => {
+    try {
+      await integrationService.uploadAdvancePaymentScreenshot(
+        selectedBookingForPayment.booking_id,
+        paymentData
+      );
+      setShowPaymentModal(false);
+      setSelectedBookingForPayment(null);
+      alert('Payment screenshot uploaded successfully! Waiting for owner verification.');
+      fetchBookings();
+    } catch (error) {
+      throw error; // Let the modal handle error display
+    }
+  };
   const getStatusColor = (status) => {
     switch (status) {
       case "pending":
+      case "pending_advance":
         return "bg-yellow-100 text-yellow-800";
+      case "awaiting_payment":
+        return "bg-purple-100 text-purple-800";
+      case "payment_verification":
+        return "bg-blue-100 text-blue-800";
       case "accepted":
         return "bg-green-100 text-green-800";
       case "completed":
         return "bg-blue-100 text-blue-800";
       case "cancelled":
-        return "bg-red-100 text-red-800";
       case "rejected":
         return "bg-red-100 text-red-800";
       default:
@@ -151,6 +201,9 @@ const UserBooking = () => {
   const getStatusText = (status) => {
     switch (status) {
       case "pending": return "Pending Approval";
+      case "pending_advance": return "Awaiting Owner Review";
+      case "awaiting_payment": return "Awaiting Your Payment";
+      case "payment_verification": return "Payment Under Review";
       case "accepted": return "Confirmed";
       case "completed": return "Completed";
       case "cancelled": return "Cancelled";
@@ -278,8 +331,6 @@ const UserBooking = () => {
               </button>
             </nav>
           </div>
-
-
 
           {/* Bookings List */}
           <div className="space-y-6">
@@ -472,6 +523,42 @@ const UserBooking = () => {
                           Make Payment
                         </button>
                       )}
+
+                    {/* Add this in the booking card actions section (after the existing buttons) */}
+                    {booking.status === "awaiting_payment" && (
+                      <button
+                        onClick={() => handleUploadPayment(booking)}
+                        className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center"
+                      >
+                        <span className="mr-2">💰</span>
+                        Upload Payment Proof
+                        {paymentTimeRemaining > 0 && (
+                          <span className="ml-2 text-xs bg-purple-700 px-2 py-1 rounded">
+                            {Math.floor(paymentTimeRemaining / 60)}:{(paymentTimeRemaining % 60).toString().padStart(2, '0')}
+                          </span>
+                        )}
+                      </button>
+                    )}
+
+                    {booking.status === "payment_verification" && (
+                      <button
+                        disabled
+                        className="px-4 py-2 bg-blue-100 text-blue-800 rounded-lg cursor-not-allowed flex items-center"
+                      >
+                        <span className="mr-2">⏳</span>
+                        Payment Under Review
+                      </button>
+                    )}
+
+                    {booking.status === "pending_advance" && (
+                      <button
+                        disabled
+                        className="px-4 py-2 bg-yellow-100 text-yellow-800 rounded-lg cursor-not-allowed flex items-center"
+                      >
+                        <span className="mr-2">⏳</span>
+                        Awaiting Owner Approval
+                      </button>
+                    )}
 
                     {/* Write Review Button - Only for completed bookings */}
                     {booking.status === "completed" && (
@@ -901,6 +988,19 @@ const UserBooking = () => {
           </div>
         </div>
       )}
+
+      {/* Add the PaymentScreenshotModal at the end of the component (before the closing fragment) */}
+      <PaymentScreenshotModal
+        isOpen={showPaymentModal}
+        onClose={() => {
+          setShowPaymentModal(false);
+          setSelectedBookingForPayment(null);
+          setPaymentTimeRemaining(null);
+        }}
+        onSubmit={handleSubmitPaymentScreenshot}
+        booking={selectedBookingForPayment}
+        timeRemaining={paymentTimeRemaining}
+      />
 
       <Modal />
     </>

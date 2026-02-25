@@ -1921,6 +1921,64 @@ export const integrationService = {
       throw error;
     }
   },
+  uploadAdvancePaymentScreenshot: async (bookingId, paymentData) => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        `http://localhost:5000/api/users/bookings/${bookingId}/payment-screenshot`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(paymentData),
+        }
+      );
+
+      const responseText = await response.text();
+      let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch (e) {
+        result = { message: responseText };
+      }
+
+      if (!response.ok) {
+        throw new Error(result.message || "Failed to upload payment screenshot");
+      }
+
+      return result;
+    } catch (error) {
+      console.error("Error uploading payment screenshot:", error);
+      throw error;
+    }
+  },
+
+  // Check advance payment status
+  checkAdvancePaymentStatus: async (bookingId) => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        `http://localhost:5000/api/users/bookings/${bookingId}/payment-status`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to check payment status");
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error("Error checking payment status:", error);
+      throw error;
+    }
+  },
 
 };
 
