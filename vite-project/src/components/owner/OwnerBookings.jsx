@@ -256,7 +256,9 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
 
       console.log(`📤 Accepting booking at: ${endpoint}`);
 
-      const response = await fetch(endpoint, {
+      // first try PUT, but some deployments still expect POST, so we
+      // automatically retry with POST if the server rejects the PUT
+      let response = await fetch(endpoint, {
         method: "PUT",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -264,18 +266,40 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
         },
       });
 
+      // if the server returned a generic bad request we retry with POST as a
+      // fallback just in case the route is defined with the old verb.
+      if (!response.ok && response.status === 400) {
+        try {
+          const bodyText = await response.text();
+          console.warn("PUT failed, trying POST. previous body:", bodyText);
+        } catch { }
+
+        response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        });
+      }
+
       if (response.ok) {
         alert("✅ Booking accepted successfully!");
-        // Refresh both bookings and stats
-        setRefreshCounter(prev => prev + 1);
-        fetchStats();
       } else {
-        const data = await response.json();
+        const data = await response.json().catch(() => ({}));
+        console.error("acceptBooking response error:", response.status, data);
         alert(`❌ ${data.message || "Failed to accept booking"}`);
       }
+
+      // always refresh list/stats so we don't keep showing the old state
+      setRefreshCounter((prev) => prev + 1);
+      fetchStats();
     } catch (error) {
       console.error("Error accepting booking:", error);
       alert("❌ An error occurred while accepting the booking");
+      // still refresh so stale status is cleared
+      setRefreshCounter((prev) => prev + 1);
+      fetchStats();
     } finally {
       setLoading(false);
     }
@@ -301,7 +325,7 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
 
       console.log(`📤 Rejecting booking at: ${endpoint}`);
 
-      const response = await fetch(endpoint, {
+      let response = await fetch(endpoint, {
         method: "PUT",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -309,17 +333,35 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
         },
       });
 
+      if (!response.ok && response.status === 400) {
+        try {
+          const bodyText = await response.text();
+          console.warn("PUT reject failed, trying POST. previous body:", bodyText);
+        } catch { }
+        response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        });
+      }
+
       if (response.ok) {
         alert("✅ Booking rejected successfully");
-        setRefreshCounter(prev => prev + 1);
-        fetchStats();
       } else {
-        const data = await response.json();
+        const data = await response.json().catch(() => ({}));
+        console.error("rejectBooking response error:", response.status, data);
         alert(`❌ ${data.message || "Failed to reject booking"}`);
       }
+
+      setRefreshCounter(prev => prev + 1);
+      fetchStats();
     } catch (error) {
       console.error("Error rejecting booking:", error);
       alert("❌ An error occurred while rejecting the booking");
+      setRefreshCounter(prev => prev + 1);
+      fetchStats();
     } finally {
       setLoading(false);
     }
@@ -341,7 +383,7 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
         ? `http://localhost:5000/api/owners/bookings/${bookingId}/complete`
         : `http://localhost:5000/api/managers/bookings/${bookingId}/complete`;
 
-      const response = await fetch(endpoint, {
+      let response = await fetch(endpoint, {
         method: "PUT",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -349,17 +391,35 @@ const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
         },
       });
 
+      if (!response.ok && response.status === 400) {
+        try {
+          const bodyText = await response.text();
+          console.warn("PUT complete failed, trying POST. previous body:", bodyText);
+        } catch { }
+        response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        });
+      }
+
       if (response.ok) {
         alert("✅ Booking marked as completed");
-        setRefreshCounter(prev => prev + 1);
-        fetchStats();
       } else {
-        const data = await response.json();
+        const data = await response.json().catch(() => ({}));
+        console.error("completeBooking response error:", response.status, data);
         alert(data.message || "Failed to complete booking");
       }
+
+      setRefreshCounter(prev => prev + 1);
+      fetchStats();
     } catch (error) {
       console.error("Error completing booking:", error);
       alert("An error occurred");
+      setRefreshCounter(prev => prev + 1);
+      fetchStats();
     }
   };
 
