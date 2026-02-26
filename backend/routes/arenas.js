@@ -45,7 +45,6 @@ router.get("/:arena_id/reviews", userController.getReviews);
 router.use(auth.verifyToken);
 
 // Slot locking endpoints
-router.post("/slots/:slot_id/lock", userController.lockTimeSlot);
 router.post("/slots/:slot_id/release", userController.releaseTimeSlot);
 
 // Add review endpoint

@@ -167,4 +167,11 @@ router.post(
   auth.isOwnerOrManager,
   ownerController.rejectAdvancePayment
 );
+
+router.get(
+  "/bookings/:booking_id/payment-screenshot",
+  auth.verifyToken,
+  auth.isOwnerOrManager,
+  ownerController.getPaymentScreenshot
+);
 module.exports = router;

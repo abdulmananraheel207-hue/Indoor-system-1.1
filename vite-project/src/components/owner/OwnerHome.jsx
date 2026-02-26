@@ -580,11 +580,7 @@ const OwnerHome = ({
                             Actions
                           </th>
                         )}
-                        {booking.requires_advance && (
-                          <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800">
-                            Advance
-                          </span>
-                        )}
+
 
                       </tr>
                     </thead>

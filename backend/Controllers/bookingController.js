@@ -122,11 +122,11 @@ function groupConsecutiveSlots(slots) {
 }
 
 const bookingController = {
-  // Create a new booking - FIXED VERSION
+
   createBooking: async (req, res) => {
     const connection = await pool.getConnection();
     try {
-      console.log("createBooking called with body:", req.body); // ADD DEBUG
+      console.log("createBooking called with body:", req.body);
 
       const body = req.body || {};
       const arena_id = body.arena_id || body.arenaId || body.arena || null;
@@ -165,7 +165,7 @@ const bookingController = {
         ? [...new Set(slotIdsRaw.map(Number).filter((id) => Number(id) > 0))]
         : [];
 
-      console.log("Processed slotIds:", slotIds); // ADD DEBUG
+      console.log("Processed slotIds:", slotIds);
 
       // Validate required fields
       if (!arenaIdNum) {
@@ -230,8 +230,8 @@ const bookingController = {
       let advanceAmount = null;
 
       if (slotIds.length > 0) {
-        // MULTIPLE SLOTS BOOKING
-        console.log("Processing multiple slots booking with IDs:", slotIds); // ADD DEBUG
+        // ========== MULTIPLE SLOTS BOOKING ==========
+        console.log("Processing multiple slots booking with IDs:", slotIds);
 
         const placeholders = slotIds.map(() => "?").join(",");
 
@@ -249,7 +249,7 @@ const bookingController = {
           [...slotIds, arenaIdNum, courtIdNum || null]
         );
 
-        console.log("Found slots:", slots.length); // ADD DEBUG
+        console.log("Found slots:", slots.length);
 
         if (slots.length !== slotIds.length) {
           await connection.rollback();
@@ -322,14 +322,13 @@ const bookingController = {
           });
         }
 
-        // Group consecutive slots - CALL THE STANDALONE FUNCTION
-        console.log("Calling groupConsecutiveSlots...");
+        // Group consecutive slots
         const slotGroups = groupConsecutiveSlots(slots);
         console.log("Slot groups created:", slotGroups.length);
 
-        // Create bookings for each group (consecutive slots become ONE booking)
+        // Create bookings for each group
         for (const group of slotGroups) {
-          // Calculate total price for the group - ensure numbers are properly parsed
+          // Calculate total price for the group
           const totalPriceForGroup = group.reduce((sum, slot) => {
             const price = slot.price ? parseFloat(slot.price) : 0;
             return sum + price;
@@ -349,7 +348,7 @@ const bookingController = {
           }
 
           // Determine initial status and payment method
-          let initialStatus = requiresAdvance ? bookingStatus.PENDING_ADVANCE : 'pending';
+          let initialStatus = requiresAdvance ? 'pending_advance' : 'pending';
           let paymentMethod = body.payment_method || (requiresAdvance ? 'advance_payment' : 'pay_after');
 
           // Use the first slot's details for basic info
@@ -401,7 +400,7 @@ const bookingController = {
               commission_percentage,
               commission_amount,
               paymentMethod,
-              initialStatus,  // Use the determined status
+              initialStatus,
               firstSlot.slot_id,
               firstSlot.start_time,
               lastSlot.end_time,
@@ -449,8 +448,8 @@ const bookingController = {
           }
         }
       } else if (slotIdNum) {
-        // SINGLE SLOT BOOKING
-        console.log("Processing single slot booking with ID:", slotIdNum); // ADD DEBUG
+        // ========== SINGLE SLOT BOOKING ==========
+        console.log("Processing single slot booking with ID:", slotIdNum);
 
         const [slots] = await connection.execute(
           `SELECT ts.*, 
@@ -520,9 +519,8 @@ const bookingController = {
           });
         }
 
-        // Calculate price for slot - ensure it's a proper number
+        // Calculate price for slot
         const priceForSlot = slot.price || validTotalAmount || 500;
-        // Make sure priceForSlot is a number with 2 decimal places
         const finalPriceForSlot = Number(parseFloat(priceForSlot).toFixed(2));
         const commission_amount = finalPriceForSlot * (commission_percentage / 100);
 
@@ -536,7 +534,7 @@ const bookingController = {
         }
 
         // Determine initial status and payment method
-        let initialStatus = requiresAdvance ? bookingStatus.PENDING_ADVANCE : 'pending';
+        let initialStatus = requiresAdvance ? 'pending_advance' : 'pending';
         let paymentMethod = body.payment_method || (requiresAdvance ? 'advance_payment' : 'pay_after');
 
         // Validate sport_id

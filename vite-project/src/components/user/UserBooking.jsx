@@ -120,17 +120,26 @@ const UserBooking = () => {
       setError(null);
       let status;
       if (activeTab === "upcoming") {
-        status = "pending,accepted";
+        // ✅ FIX: Include ALL statuses that should appear in upcoming bookings
+        status = "pending,pending_advance,awaiting_payment,payment_verification,accepted";
       } else if (activeTab === "past") {
         status = "completed,cancelled,rejected";
       }
 
+      console.log("🔍 Fetching bookings with status:", status); // Add debug log
+
       const data = await integrationService.getUserBookings({ status });
+      console.log("📥 Received bookings:", data); // Add debug log
+
       const list = data.bookings || [];
 
       // Process bookings to add slot details
       const processedList = list.map(booking => {
         const slotCount = getSlotCount(booking);
+
+        // ✅ DEBUG: Log each booking's status
+        console.log(`Booking ${booking.booking_id}: status=${booking.status}`);
+
         return {
           ...booking,
           slot_count: slotCount,
@@ -163,18 +172,49 @@ const UserBooking = () => {
     setShowPaymentModal(true);
   };
 
+
   const handleSubmitPaymentScreenshot = async (paymentData) => {
     try {
-      await integrationService.uploadAdvancePaymentScreenshot(
+      setSubmitting(true);
+
+      console.log("📤 Uploading payment screenshot for booking:", selectedBookingForPayment?.booking_id);
+
+      const response = await integrationService.uploadAdvancePaymentScreenshot(
         selectedBookingForPayment.booking_id,
-        paymentData
+        {
+          screenshot: paymentData.payment_screenshot_url,
+          bank_details: paymentData.bank_account_details
+        }
       );
-      setShowPaymentModal(false);
-      setSelectedBookingForPayment(null);
-      alert('Payment screenshot uploaded successfully! Waiting for owner verification.');
-      fetchBookings();
+
+      if (response.success) {
+        setShowPaymentModal(false);
+        setSelectedBookingForPayment(null);
+        setPaymentTimeRemaining(null);
+
+        alert('✅ Payment screenshot uploaded successfully! The owner will verify your payment shortly.');
+
+        // Refresh bookings to update status
+        await fetchBookings();
+      } else {
+        throw new Error(response.message || 'Upload failed');
+      }
+
     } catch (error) {
-      throw error; // Let the modal handle error display
+      console.error('Error uploading payment:', error);
+
+      // Check if payment window expired
+      if (error.message?.includes('expired') || error.response?.data?.expired) {
+        alert('⏰ Payment window expired. Please create a new booking.');
+        setShowPaymentModal(false);
+        setSelectedBookingForPayment(null);
+        await fetchBookings();
+      } else {
+        alert(`❌ ${error.message || 'Failed to upload payment screenshot. Please try again.'}`);
+      }
+      throw error;
+    } finally {
+      setSubmitting(false);
     }
   };
   const getStatusColor = (status) => {
@@ -989,7 +1029,6 @@ const UserBooking = () => {
         </div>
       )}
 
-      {/* Add the PaymentScreenshotModal at the end of the component (before the closing fragment) */}
       <PaymentScreenshotModal
         isOpen={showPaymentModal}
         onClose={() => {

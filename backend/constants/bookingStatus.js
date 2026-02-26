@@ -1,4 +1,3 @@
-// constants/bookingStatus.js
 module.exports = {
     // Existing statuses
     PENDING: 'pending',

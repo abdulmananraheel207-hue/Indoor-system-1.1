@@ -1154,58 +1154,7 @@ const userController = {
     }
   },
 
-  // Lock a time slot
-  lockTimeSlot: async (req, res) => {
-    try {
-      const { slot_id } = req.params;
-      const user_id = req.user ? req.user.id : null;
-      const lock_duration = 15 * 60; // 15 minutes in seconds
 
-      console.log("🔒 lockTimeSlot called for slot:", slot_id, "by user:", user_id);
-
-      if (!user_id) {
-        console.log("❌ Authentication required");
-        return res.status(401).json({ message: "Authentication required" });
-      }
-
-      // Check if slot exists and is available
-      const [slots] = await pool.execute(
-        `SELECT * FROM time_slots 
-         WHERE slot_id = ? 
-         AND is_available = TRUE
-         AND (is_blocked_by_owner = FALSE OR is_blocked_by_owner IS NULL)
-         AND (locked_until IS NULL OR locked_until < NOW())`,
-        [slot_id]
-      );
-
-      if (slots.length === 0) {
-        console.log("❌ Slot not available for locking");
-        return res.status(400).json({ message: "Slot not available for locking" });
-      }
-
-      // Lock the slot
-      await pool.execute(
-        `UPDATE time_slots 
-         SET locked_until = DATE_ADD(NOW(), INTERVAL ? SECOND),
-             locked_by_user_id = ?
-         WHERE slot_id = ?`,
-        [lock_duration, user_id, slot_id]
-      );
-
-      console.log("✅ Slot locked successfully");
-
-      res.json({
-        message: "Slot locked successfully",
-        lock_expires_at: new Date(Date.now() + lock_duration * 1000)
-      });
-    } catch (error) {
-      console.error("❌ Error in lockTimeSlot:", error);
-      res.status(500).json({
-        message: "Error locking slot",
-        error: error.message
-      });
-    }
-  },
 
   // Release a time slot
   releaseTimeSlot: async (req, res) => {

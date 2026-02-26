@@ -1410,7 +1410,6 @@ const ownerController = {
   },
 
 
-  // In ownerController.js - REPLACE the acceptBooking function with this fixed version
 
   acceptBooking: async (req, res) => {
     const connection = await pool.getConnection();
@@ -1516,11 +1515,7 @@ const ownerController = {
 
       const placeholders = slotIds.map(() => '?').join(',');
 
-      // CHECK SLOT AVAILABILITY - FIXED LOGIC
-      // First, fetch any existing bookings for these slots **excluding** the
-      // current booking.  We'll only treat rows with a real booking_id as
-      // conflicts; left join is convenient but always returns a row per slot,
-      // so length alone isn't enough.
+
       const [existingBookings] = await connection.execute(
         `SELECT ts.slot_id, b.booking_id, b.status, b.user_id
        FROM time_slots ts
@@ -1553,9 +1548,7 @@ const ownerController = {
           });
         }
 
-        // otherwise the only conflicts are pending-type requests; quietly
-        // cancel them so the owner can accept this booking without manual
-        // intervention
+
         const idsToCancel = [...new Set(conflicts.map(r => r.booking_id))];
         console.log("⚠️ Cancelling pending bookings before accepting:", idsToCancel);
 
@@ -1602,11 +1595,13 @@ const ownerController = {
 
       // Check if slots are locked by ANOTHER user (only check non-expired locks)
       const [lockedSlots] = await connection.execute(
-        `SELECT slot_id, locked_by_user_id, locked_until FROM time_slots 
-       WHERE slot_id IN (${placeholders}) 
-       AND locked_until IS NOT NULL 
-       AND locked_until > NOW()
-       AND locked_by_user_id != ?`,
+        `SELECT slot_id, locked_by_user_id, locked_until 
+   FROM time_slots 
+   WHERE slot_id IN (${placeholders}) 
+   AND locked_until IS NOT NULL 
+   AND locked_until > NOW()
+   AND locked_by_user_id IS NOT NULL
+   AND locked_by_user_id != ?`,  // Only block if different user
         [booking.user_id, ...slotIds]
       );
 
@@ -2104,6 +2099,71 @@ const ownerController = {
       });
     } finally {
       connection.release();
+    }
+  },
+
+
+  getPaymentScreenshot: async (req, res) => {
+    try {
+      const { booking_id } = req.params;
+      const ownerId = req.user.id;
+
+      console.log("📸 Fetching payment screenshot for booking:", booking_id);
+
+      // Get booking details with payment screenshot
+      const [bookings] = await pool.execute(
+        `SELECT b.payment_screenshot_url, b.bank_account_details, 
+              b.booking_id, b.user_id, b.arena_id, b.total_amount, b.advance_amount,
+              u.name as user_name, u.email as user_email,
+              a.name as arena_name
+       FROM bookings b
+       JOIN users u ON b.user_id = u.user_id
+       JOIN arenas a ON b.arena_id = a.arena_id
+       WHERE b.booking_id = ? AND b.status = 'payment_verification'`,
+        [booking_id]
+      );
+
+      if (bookings.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Booking not found or not in payment verification status"
+        });
+      }
+
+      const booking = bookings[0];
+
+      // Verify owner owns this arena
+      const [arenaCheck] = await pool.execute(
+        "SELECT owner_id FROM arenas WHERE arena_id = ?",
+        [booking.arena_id]
+      );
+
+      if (arenaCheck.length === 0 || arenaCheck[0].owner_id !== ownerId) {
+        return res.status(403).json({
+          success: false,
+          message: "Access denied"
+        });
+      }
+
+      res.json({
+        success: true,
+        screenshot_url: booking.payment_screenshot_url,
+        bank_details: booking.bank_account_details,
+        user_name: booking.user_name,
+        user_email: booking.user_email,
+        booking_id: booking.booking_id,
+        total_amount: booking.total_amount,
+        advance_amount: booking.advance_amount,
+        arena_name: booking.arena_name
+      });
+
+    } catch (error) {
+      console.error("❌ Error fetching payment screenshot:", error);
+      res.status(500).json({
+        success: false,
+        message: "Server error",
+        error: error.message
+      });
     }
   },
   // Get owner's arenas

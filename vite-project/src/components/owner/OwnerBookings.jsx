@@ -1,6 +1,4 @@
-// File: OwnerBookings.jsx - COMPLETE FIXED VERSION with multi-slot and payment verification support
 import React, { useState, useEffect } from "react";
-import integrationService from "../../services/integrationService";
 import PaymentVerificationModal from "../shared/PaymentVerificationModal";
 const OwnerBookings = ({ isOwner, permissions = {}, selectedArena = null }) => {
   const [bookings, setBookings] = useState([]);

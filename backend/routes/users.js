@@ -64,7 +64,6 @@ router.get("/sports", arenaController.getSportsCategories);
 
 // Time slots
 router.get("/arenas/:arena_id/slots", arenaController.getAvailableSlots);
-router.post("/slots/:slot_id/lock", arenaController.lockTimeSlot);
 router.delete("/slots/:slot_id/lock", arenaController.releaseTimeSlot);
 
 // Reviews

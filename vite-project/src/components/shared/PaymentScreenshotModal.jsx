@@ -46,6 +46,8 @@ const PaymentScreenshotModal = ({
         setPreview(URL.createObjectURL(file));
     };
 
+    // In PaymentScreenshotModal.jsx - Update the handleSubmit function
+
     const handleSubmit = async () => {
         if (!selectedFile) {
             setError('Please select a payment screenshot');
@@ -56,20 +58,29 @@ const PaymentScreenshotModal = ({
         setError('');
 
         try {
-            // First upload to Cloudinary/get base64
+            // Convert file to base64
             const reader = new FileReader();
-            reader.readAsDataURL(selectedFile);
-            reader.onload = async () => {
+
+            reader.onloadend = async () => {
                 const base64Image = reader.result;
 
+                // Submit to parent component
                 await onSubmit({
                     payment_screenshot_url: base64Image,
-                    bank_account_details: bankDetails
+                    bank_account_details: bankDetails,
+                    notes: bankDetails // Additional notes
                 });
             };
+
+            reader.onerror = () => {
+                setError('Failed to read file');
+                setUploading(false);
+            };
+
+            reader.readAsDataURL(selectedFile);
+
         } catch (err) {
             setError(err.message || 'Failed to upload screenshot');
-        } finally {
             setUploading(false);
         }
     };
@@ -271,8 +282,8 @@ const PaymentScreenshotModal = ({
                                     onClick={handleSubmit}
                                     disabled={uploading || !selectedFile}
                                     className={`w-full py-3 rounded-lg font-semibold flex items-center justify-center ${uploading || !selectedFile
-                                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                            : 'bg-blue-600 text-white hover:bg-blue-700'
+                                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                        : 'bg-blue-600 text-white hover:bg-blue-700'
                                         }`}
                                 >
                                     {uploading ? (

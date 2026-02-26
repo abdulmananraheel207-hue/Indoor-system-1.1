@@ -1932,7 +1932,10 @@ export const integrationService = {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify(paymentData),
+          body: JSON.stringify({
+            payment_screenshot_url: paymentData.screenshot,
+            bank_account_details: paymentData.bank_details
+          }),
         }
       );
 
@@ -1954,7 +1957,41 @@ export const integrationService = {
       throw error;
     }
   },
+  getPaymentScreenshot: async (bookingId) => {
+    try {
+      const token = localStorage.getItem("token");
+      const userRole = localStorage.getItem("userRole");
 
+      // Use different endpoints based on role
+      const baseUrl = userRole === "owner"
+        ? `http://localhost:5000/api/owners/bookings/${bookingId}/payment-screenshot`
+        : `http://localhost:5000/api/managers/bookings/${bookingId}/payment-screenshot`;
+
+      const response = await fetch(baseUrl, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      const responseText = await response.text();
+      let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch (e) {
+        result = { message: responseText };
+      }
+
+      if (!response.ok) {
+        throw new Error(result.message || "Failed to fetch payment screenshot");
+      }
+
+      return result;
+    } catch (error) {
+      console.error("Error fetching payment screenshot:", error);
+      throw error;
+    }
+  },
   // Check advance payment status
   checkAdvancePaymentStatus: async (bookingId) => {
     try {
@@ -1976,6 +2013,46 @@ export const integrationService = {
       return await response.json();
     } catch (error) {
       console.error("Error checking payment status:", error);
+      throw error;
+    }
+  },
+
+  verifyPayment: async (bookingId, action, reason = '') => {
+    try {
+      const token = localStorage.getItem("token");
+      const userRole = localStorage.getItem("userRole");
+
+      const endpoint = userRole === "owner"
+        ? `http://localhost:5000/api/owners/bookings/${bookingId}/verify-payment`
+        : `http://localhost:5000/api/managers/bookings/${bookingId}/verify-payment`;
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action,
+          reason
+        }),
+      });
+
+      const responseText = await response.text();
+      let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch (e) {
+        result = { message: responseText };
+      }
+
+      if (!response.ok) {
+        throw new Error(result.message || "Failed to verify payment");
+      }
+
+      return result;
+    } catch (error) {
+      console.error("Error verifying payment:", error);
       throw error;
     }
   },
