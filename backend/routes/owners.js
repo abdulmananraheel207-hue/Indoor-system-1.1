@@ -115,9 +115,13 @@ router.post("/arenas/:arena_id/fix-missing-slots", ownerController.fixMissingCou
 // Booking management
 router.get("/bookings", ownerController.getOwnerBookings);
 router.get("/bookings/stats", ownerController.getBookingStats);
+// the API originally used POST; later versions switched to PUT. support both
 router.put("/bookings/:booking_id/accept", ownerController.acceptBooking);
+router.post("/bookings/:booking_id/accept", ownerController.acceptBooking);
 router.put("/bookings/:booking_id/reject", ownerController.rejectBooking);
+router.post("/bookings/:booking_id/reject", ownerController.rejectBooking);
 router.put("/bookings/:booking_id/complete", ownerController.completeBooking);
+router.post("/bookings/:booking_id/complete", ownerController.completeBooking);
 
 // Manager/Staff management
 router.get("/managers", ownerController.getManagers);
@@ -137,4 +141,30 @@ router.put("/profile/password", ownerController.updateOwnerPassword);
 // Cleanup
 router.post("/cleanup/expired-locks", ownerController.cleanupExpiredLocks);
 
+// Advance payment confirmation routes
+router.put(
+  "/bookings/:booking_id/confirm-payment",
+  auth.verifyToken,
+  auth.isOwnerOrManager,
+  ownerController.confirmAdvancePayment
+);
+router.post(
+  "/bookings/:booking_id/confirm-payment",
+  auth.verifyToken,
+  auth.isOwnerOrManager,
+  ownerController.confirmAdvancePayment
+);
+
+router.put(
+  "/bookings/:booking_id/reject-payment",
+  auth.verifyToken,
+  auth.isOwnerOrManager,
+  ownerController.rejectAdvancePayment
+);
+router.post(
+  "/bookings/:booking_id/reject-payment",
+  auth.verifyToken,
+  auth.isOwnerOrManager,
+  ownerController.rejectAdvancePayment
+);
 module.exports = router;

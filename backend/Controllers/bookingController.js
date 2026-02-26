@@ -1,5 +1,6 @@
 const pool = require("../db");
 const { sendNotification } = require("../utils/notificationService");
+const bookingStatus = require('../constants/bookingStatus');
 
 // ===== HELPER FUNCTIONS - DEFINED AT THE TOP =====
 
@@ -200,6 +201,16 @@ const bookingController = {
         return res.status(403).json({ message: "Arena is blocked" });
       }
 
+      // Check if arena requires advance payment
+      const [arenaSettings] = await connection.execute(
+        `SELECT require_advance, advance_type, advance_percentage, advance_fixed_amount 
+       FROM arenas WHERE arena_id = ?`,
+        [arenaIdNum]
+      );
+
+      const arena = arenaSettings[0];
+      const requiresAdvance = arena && arena.require_advance === 1;
+
       // Function to check if a slot is in the past
       const isSlotInPast = (slotDate, slotTime) => {
         const dateStr = slotDate instanceof Date
@@ -216,6 +227,7 @@ const bookingController = {
       let bookingIds = [];
       let totalCommission = 0;
       let createdBookings = [];
+      let advanceAmount = null;
 
       if (slotIds.length > 0) {
         // MULTIPLE SLOTS BOOKING
@@ -226,14 +238,14 @@ const bookingController = {
         // Check all slots are available and belong to the same arena and court
         const [slots] = await connection.execute(
           `SELECT ts.*, 
-                  b.booking_id as existing_booking,
-                  b.status as existing_status
-           FROM time_slots ts
-           LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
-             AND b.status IN ('pending', 'accepted', 'completed')
-           WHERE ts.slot_id IN (${placeholders})
-             AND ts.arena_id = ?
-             AND ts.court_id = ?`,
+                b.booking_id as existing_booking,
+                b.status as existing_status
+         FROM time_slots ts
+         LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
+           AND b.status IN ('pending', 'accepted', 'completed')
+         WHERE ts.slot_id IN (${placeholders})
+           AND ts.arena_id = ?
+           AND ts.court_id = ?`,
           [...slotIds, arenaIdNum, courtIdNum || null]
         );
 
@@ -327,6 +339,19 @@ const bookingController = {
           const finalTotalPrice = Number(totalPriceForGroup.toFixed(2));
           const commission_amount = finalTotalPrice * (commission_percentage / 100);
 
+          // Calculate advance amount if required
+          if (requiresAdvance) {
+            if (arena.advance_type === 'percentage') {
+              advanceAmount = (finalTotalPrice * (arena.advance_percentage / 100)).toFixed(2);
+            } else {
+              advanceAmount = arena.advance_fixed_amount;
+            }
+          }
+
+          // Determine initial status and payment method
+          let initialStatus = requiresAdvance ? bookingStatus.PENDING_ADVANCE : 'pending';
+          let paymentMethod = body.payment_method || (requiresAdvance ? 'advance_payment' : 'pay_after');
+
           // Use the first slot's details for basic info
           const firstSlot = group[0];
           const lastSlot = group[group.length - 1];
@@ -362,10 +387,11 @@ const bookingController = {
           // Create ONE booking for the entire group of consecutive slots
           const [bookingResult] = await connection.execute(
             `INSERT INTO bookings 
-             (user_id, arena_id, sport_id, court_id, total_amount, 
-              commission_percentage, commission_amount, payment_method, status, booking_date,
-              slot_id, start_time, end_time, date, is_multi_slot, slot_ids)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', NOW(), ?, ?, ?, ?, ?, ?)`,
+           (user_id, arena_id, sport_id, court_id, total_amount, 
+            commission_percentage, commission_amount, payment_method, status, booking_date,
+            slot_id, start_time, end_time, date, is_multi_slot, slot_ids,
+            requires_advance, advance_amount, payment_status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               req.user.id,
               arenaIdNum,
@@ -374,13 +400,17 @@ const bookingController = {
               finalTotalPrice,
               commission_percentage,
               commission_amount,
-              payment_method || "pay_after",
+              paymentMethod,
+              initialStatus,  // Use the determined status
               firstSlot.slot_id,
               firstSlot.start_time,
               lastSlot.end_time,
               firstSlot.date,
               group.length > 1 ? 1 : 0,
-              JSON.stringify(group.map(s => s.slot_id))
+              JSON.stringify(group.map(s => s.slot_id)),
+              requiresAdvance ? 1 : 0,
+              advanceAmount,
+              requiresAdvance ? 'pending' : 'completed'
             ]
           );
 
@@ -397,19 +427,25 @@ const bookingController = {
             court_id: firstSlot.court_id,
             total_price: finalTotalPrice,
             slot_count: group.length,
-            is_multi_slot: group.length > 1
+            is_multi_slot: group.length > 1,
+            requires_advance: requiresAdvance,
+            advance_amount: advanceAmount,
+            status: initialStatus
           });
 
-          // Mark ALL slots in the group as unavailable and clear locks
-          for (const slot of group) {
-            await connection.execute(
-              `UPDATE time_slots 
+          // IMPORTANT: For advance bookings, DON'T lock slots yet
+          // Only mark slots as unavailable for regular bookings
+          if (!requiresAdvance) {
+            for (const slot of group) {
+              await connection.execute(
+                `UPDATE time_slots 
                SET is_available = FALSE,
                    locked_until = NULL,
                    locked_by_user_id = NULL
                WHERE slot_id = ?`,
-              [slot.slot_id]
-            );
+                [slot.slot_id]
+              );
+            }
           }
         }
       } else if (slotIdNum) {
@@ -418,14 +454,14 @@ const bookingController = {
 
         const [slots] = await connection.execute(
           `SELECT ts.*, 
-                  b.booking_id as existing_booking,
-                  b.status as existing_status
-           FROM time_slots ts
-           LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
-             AND b.status IN ('pending', 'accepted', 'completed')
-           WHERE ts.slot_id = ? 
-             AND ts.arena_id = ?
-             AND ts.court_id = ?`,
+                b.booking_id as existing_booking,
+                b.status as existing_status
+         FROM time_slots ts
+         LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
+           AND b.status IN ('pending', 'accepted', 'completed')
+         WHERE ts.slot_id = ? 
+           AND ts.arena_id = ?
+           AND ts.court_id = ?`,
           [slotIdNum, arenaIdNum, courtIdNum || null]
         );
 
@@ -490,6 +526,19 @@ const bookingController = {
         const finalPriceForSlot = Number(parseFloat(priceForSlot).toFixed(2));
         const commission_amount = finalPriceForSlot * (commission_percentage / 100);
 
+        // Calculate advance amount if required
+        if (requiresAdvance) {
+          if (arena.advance_type === 'percentage') {
+            advanceAmount = (finalPriceForSlot * (arena.advance_percentage / 100)).toFixed(2);
+          } else {
+            advanceAmount = arena.advance_fixed_amount;
+          }
+        }
+
+        // Determine initial status and payment method
+        let initialStatus = requiresAdvance ? bookingStatus.PENDING_ADVANCE : 'pending';
+        let paymentMethod = body.payment_method || (requiresAdvance ? 'advance_payment' : 'pay_after');
+
         // Validate sport_id
         if (!sportIdNum && !slot.sport_id) {
           await connection.rollback();
@@ -519,10 +568,11 @@ const bookingController = {
 
         const [bookingResult] = await connection.execute(
           `INSERT INTO bookings 
-           (user_id, arena_id, slot_id, sport_id, court_id, total_amount, 
-            commission_percentage, commission_amount, payment_method, status, booking_date,
-            start_time, end_time, date, is_multi_slot, slot_ids)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NOW(), ?, ?, ?, 0, ?)`,
+         (user_id, arena_id, slot_id, sport_id, court_id, total_amount, 
+          commission_percentage, commission_amount, payment_method, status, booking_date,
+          start_time, end_time, date, is_multi_slot, slot_ids,
+          requires_advance, advance_amount, payment_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, 0, ?, ?, ?, ?)`,
           [
             req.user.id,
             arenaIdNum,
@@ -532,11 +582,15 @@ const bookingController = {
             finalPriceForSlot,
             commission_percentage,
             commission_amount,
-            payment_method || "pay_after",
+            paymentMethod,
+            initialStatus,
             slot.start_time,
             slot.end_time,
             slot.date,
-            JSON.stringify([slot.slot_id])
+            JSON.stringify([slot.slot_id]),
+            requiresAdvance ? 1 : 0,
+            advanceAmount,
+            requiresAdvance ? 'pending' : 'completed'
           ]
         );
 
@@ -551,18 +605,24 @@ const bookingController = {
           end_time: slot.end_time,
           court_id: slot.court_id,
           price: finalPriceForSlot,
-          is_multi_slot: false
+          is_multi_slot: false,
+          requires_advance: requiresAdvance,
+          advance_amount: advanceAmount,
+          status: initialStatus
         });
 
-        // Mark slot as unavailable and clear locks
-        await connection.execute(
-          `UPDATE time_slots 
+        // IMPORTANT: For advance bookings, DON'T lock slots yet
+        // Only mark slots as unavailable for regular bookings
+        if (!requiresAdvance) {
+          await connection.execute(
+            `UPDATE time_slots 
            SET is_available = FALSE,
                locked_until = NULL,
                locked_by_user_id = NULL
            WHERE slot_id = ?`,
-          [slot.slot_id]
-        );
+            [slot.slot_id]
+          );
+        }
       } else {
         await connection.rollback();
         return res.status(400).json({
@@ -574,8 +634,8 @@ const bookingController = {
       if (totalCommission > 0) {
         await connection.execute(
           `UPDATE arenas 
-           SET total_commission_due = total_commission_due + ?
-           WHERE arena_id = ?`,
+         SET total_commission_due = total_commission_due + ?
+         WHERE arena_id = ?`,
           [totalCommission, arenaIdNum]
         );
       }
@@ -587,38 +647,55 @@ const bookingController = {
         const placeholders = bookingIds.map(() => "?").join(",");
         const [bookings] = await pool.execute(
           `SELECT b.*, a.name as arena_name, st.name as sport_name,
-                  ts.date, ts.start_time, ts.end_time, ts.court_id, 
-                  ao.arena_name as owner_name,
-                  ao.owner_id, ao.email as owner_email, ao.phone_number as owner_phone
-           FROM bookings b
-           JOIN arenas a ON b.arena_id = a.arena_id
-           JOIN arena_owners ao ON a.owner_id = ao.owner_id
-           JOIN sports_types st ON b.sport_id = st.sport_id
-           LEFT JOIN time_slots ts ON b.slot_id = ts.slot_id
-           WHERE b.booking_id IN (${placeholders})`,
+                ts.date, ts.start_time, ts.end_time, ts.court_id, 
+                ao.arena_name as owner_name,
+                ao.owner_id, ao.email as owner_email, ao.phone_number as owner_phone
+         FROM bookings b
+         JOIN arenas a ON b.arena_id = a.arena_id
+         JOIN arena_owners ao ON a.owner_id = ao.owner_id
+         JOIN sports_types st ON b.sport_id = st.sport_id
+         LEFT JOIN time_slots ts ON b.slot_id = ts.slot_id
+         WHERE b.booking_id IN (${placeholders})`,
           bookingIds
         );
 
         // Send notifications to owner
         for (const booking of bookings) {
           try {
-            await sendNotification({
-              ownerId: booking.owner_id,
-              userId: req.user.id,
-              bookingId: booking.booking_id,
-              type: "booking.pending",
-              title: "New booking request",
-              message: `New booking request for Court ${booking.court_id} on ${booking.date} ${booking.start_time}-${booking.end_time}`,
-            });
+            if (requiresAdvance) {
+              // Send notification about advance payment request
+              await sendNotification({
+                ownerId: booking.owner_id,
+                userId: req.user.id,
+                bookingId: booking.booking_id,
+                type: "booking.advance_request",
+                title: "Advance payment booking request",
+                message: `New booking requiring advance payment of Rs. ${advanceAmount}`,
+              });
+            } else {
+              // Regular booking notification
+              await sendNotification({
+                ownerId: booking.owner_id,
+                userId: req.user.id,
+                bookingId: booking.booking_id,
+                type: "booking.pending",
+                title: "New booking request",
+                message: `New booking request for Court ${booking.court_id} on ${booking.date} ${booking.start_time}-${booking.end_time}`,
+              });
+            }
           } catch (notifError) {
             console.warn("Notification error:", notifError.message);
           }
         }
 
         return res.status(201).json({
-          message: "Booking request created successfully. Waiting for owner approval.",
+          message: requiresAdvance
+            ? "Booking request created successfully. Advance payment required to confirm slots."
+            : "Booking request created successfully. Waiting for owner approval.",
           bookings,
-          createdBookings
+          createdBookings,
+          requires_advance: requiresAdvance,
+          advance_amount: advanceAmount
         });
       }
 

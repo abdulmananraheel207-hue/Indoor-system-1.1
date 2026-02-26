@@ -60,8 +60,12 @@ router.get("/bookings", async (req, res) => {
   }
 });
 
-// Accept booking
+// Accept booking (supports POST only, since this file is mostly
+// legacy; owners.js also defines PUT/POST routes for the same path but
+// mounting this router ensures the functionality works even if one of
+// the files is ignored).
 router.post("/bookings/:booking_id/accept", async (req, res) => {
+  console.log("[ownerBookings] accept route hit, params=", req.params, "user=", req.user && req.user.id);
   try {
     const { booking_id } = req.params;
     const result = await acceptBooking({
@@ -87,6 +91,13 @@ router.post("/bookings/:booking_id/reject", async (req, res) => {
         .status(400)
         .json({ message: "Reason is required for rejection" });
     }
+
+    const result = await rejectBooking({
+      bookingId: booking_id,
+      ownerId: req.user.id,
+      actorType: "owner",
+      reason,
+    });
     return res.status(result.status).json({ message: result.message });
   } catch (error) {
     console.error(error);

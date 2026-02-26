@@ -3,7 +3,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { generateTimeSlots } = require("../utils/timeSlotHelper");
 const decisionService = require("../utils/bookingDecisionService");
-
+const bookingStatus = require('../constants/bookingStatus');
 const ownerController = {
 
 
@@ -1410,115 +1410,370 @@ const ownerController = {
   },
 
 
+  // In ownerController.js - REPLACE the acceptBooking function with this fixed version
+
   acceptBooking: async (req, res) => {
     const connection = await pool.getConnection();
     try {
       const { booking_id } = req.params;
       const ownerId = req.user.id;
 
+      console.log("=".repeat(50));
+      console.log("📝 ACCEPT BOOKING REQUEST");
+      console.log("Booking ID:", booking_id);
+      console.log("Owner ID:", ownerId);
+
       await connection.beginTransaction();
 
-      // Get booking details with multi-slot info
-      const [bookingCheck] = await connection.execute(
-        `SELECT b.*, a.owner_id, b.is_multi_slot, b.slot_ids, b.slot_id
+      // FIRST: Clean up any expired locks for these slots
+      await connection.execute(
+        `UPDATE time_slots 
+       SET locked_until = NULL,
+           locked_by_user_id = NULL
+       WHERE locked_until IS NOT NULL 
+         AND locked_until <= NOW()`
+      );
+      console.log("🧹 Cleaned up expired locks");
+
+      // Get booking details with all fields
+      const [bookingDetails] = await connection.execute(
+        `SELECT b.*, a.owner_id, a.arena_id, a.require_advance,
+              a.advance_type, a.advance_percentage, a.advance_fixed_amount
        FROM bookings b
        JOIN arenas a ON b.arena_id = a.arena_id
-       WHERE b.booking_id = ? AND a.owner_id = ? AND b.status = 'pending'`,
-        [booking_id, ownerId]
-      );
-
-      if (bookingCheck.length === 0) {
-        await connection.rollback();
-        return res.status(404).json({
-          message: "Booking not found, already processed, or access denied",
-        });
-      }
-
-      const booking = bookingCheck[0];
-
-      // Update booking status
-      await connection.execute(
-        `UPDATE bookings 
-       SET status = 'accepted'
-       WHERE booking_id = ?`,
+       WHERE b.booking_id = ?`,
         [booking_id]
       );
 
-      // Handle slot availability based on booking type
+      if (bookingDetails.length === 0) {
+        await connection.rollback();
+        console.log("❌ Booking not found");
+        return res.status(404).json({
+          success: false,
+          message: "Booking not found"
+        });
+      }
+
+      const booking = bookingDetails[0];
+      console.log("📊 Found booking:", {
+        booking_id: booking.booking_id,
+        status: booking.status,
+        requires_advance: booking.requires_advance,
+        owner_id: booking.owner_id,
+        slot_id: booking.slot_id,
+        is_multi_slot: booking.is_multi_slot,
+        slot_ids: booking.slot_ids
+      });
+
+      // Check if owner owns this arena
+      if (booking.owner_id !== ownerId) {
+        await connection.rollback();
+        console.log("❌ Access denied - owner doesn't own this arena");
+        return res.status(403).json({
+          success: false,
+          message: "Access denied - you don't own this arena"
+        });
+      }
+
+      // Check if booking can be accepted
+      const acceptableStatuses = ['pending', 'pending_advance'];
+      if (!acceptableStatuses.includes(booking.status)) {
+        await connection.rollback();
+        console.log(`❌ Booking cannot be accepted - current status: ${booking.status}`);
+        return res.status(400).json({
+          success: false,
+          message: `Booking cannot be accepted. Current status: ${booking.status}`,
+          current_status: booking.status,
+          acceptable_statuses: acceptableStatuses
+        });
+      }
+
+      // Get all slot IDs for this booking
+      let slotIds = [];
       if (booking.is_multi_slot && booking.slot_ids) {
-        // Multi-slot booking - mark ALL slots as unavailable
-        let slotIds = [];
         try {
           slotIds = typeof booking.slot_ids === 'string'
             ? JSON.parse(booking.slot_ids)
             : booking.slot_ids;
+          console.log("📋 Multi-slot IDs from JSON:", slotIds);
         } catch (e) {
           console.error("Error parsing slot_ids:", e);
-          slotIds = [booking.slot_id]; // Fallback to single slot
-        }
-
-        if (slotIds.length > 0) {
-          const placeholders = slotIds.map(() => '?').join(',');
-          await connection.execute(
-            `UPDATE time_slots 
-           SET is_available = FALSE,
-               locked_until = NULL,
-               locked_by_user_id = NULL
-           WHERE slot_id IN (${placeholders})`,
-            slotIds
-          );
-          console.log(`Marked ${slotIds.length} slots as unavailable for booking ${booking_id}`);
+          slotIds = booking.slot_id ? [booking.slot_id] : [];
         }
       } else {
-        // Single slot booking
+        slotIds = booking.slot_id ? [booking.slot_id] : [];
+      }
+
+      console.log("🎯 Slot IDs to process:", slotIds);
+
+      if (slotIds.length === 0) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: "No valid slot IDs found for this booking"
+        });
+      }
+
+      const placeholders = slotIds.map(() => '?').join(',');
+
+      // CHECK SLOT AVAILABILITY - FIXED LOGIC
+      // First, fetch any existing bookings for these slots **excluding** the
+      // current booking.  We'll only treat rows with a real booking_id as
+      // conflicts; left join is convenient but always returns a row per slot,
+      // so length alone isn't enough.
+      const [existingBookings] = await connection.execute(
+        `SELECT ts.slot_id, b.booking_id, b.status, b.user_id
+       FROM time_slots ts
+       LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
+         AND b.status IN ('accepted', 'completed', 'pending', 'pending_advance', 'awaiting_payment', 'payment_verification')
+         AND b.booking_id != ?
+       WHERE ts.slot_id IN (${placeholders})`,
+        [booking_id, ...slotIds]
+      );
+
+      // remove any rows where the join produced no booking
+      const conflicts = existingBookings.filter(r => r.booking_id != null);
+
+      if (conflicts.length > 0) {
+        // if even one of the conflicts is already accepted/completed, we
+        // cannot proceed and should return the original error message
+        const serious = conflicts.filter(r => ['accepted', 'completed'].includes(r.status));
+        if (serious.length > 0) {
+          await connection.rollback();
+          console.log("❌ Slots already booked by other bookings:", conflicts);
+          return res.status(400).json({
+            success: false,
+            message: "One or more slots are already booked by another booking",
+            unavailable_slots: conflicts.map(s => ({
+              slot_id: s.slot_id,
+              booking_id: s.booking_id,
+              status: s.status,
+              user_id: s.user_id
+            }))
+          });
+        }
+
+        // otherwise the only conflicts are pending-type requests; quietly
+        // cancel them so the owner can accept this booking without manual
+        // intervention
+        const idsToCancel = [...new Set(conflicts.map(r => r.booking_id))];
+        console.log("⚠️ Cancelling pending bookings before accepting:", idsToCancel);
+
+        if (idsToCancel.length > 0) {
+          const cancelPlaceholders = idsToCancel.map(() => '?').join(',');
+          await connection.execute(
+            `UPDATE bookings 
+               SET status = 'cancelled',
+                   cancelled_by = 'system',
+                   cancellation_time = NOW()
+             WHERE booking_id IN (${cancelPlaceholders})`,
+            idsToCancel
+          );
+
+          // free up the slots that belonged to those bookings
+          await connection.execute(
+            `UPDATE time_slots 
+               SET is_available = TRUE,
+                   locked_until = NULL,
+                   locked_by_user_id = NULL
+             WHERE slot_id IN (${placeholders})`,
+            [...slotIds]
+          );
+        }
+      }
+
+      // Check if slots are blocked by owner or marked as holiday
+      const [blockedSlots] = await connection.execute(
+        `SELECT slot_id FROM time_slots 
+       WHERE slot_id IN (${placeholders}) 
+       AND (is_blocked_by_owner = TRUE OR is_holiday = TRUE)`,
+        slotIds
+      );
+
+      if (blockedSlots.length > 0) {
+        await connection.rollback();
+        console.log("❌ Slots are blocked or holiday:", blockedSlots);
+        return res.status(400).json({
+          success: false,
+          message: "One or more slots are blocked by owner or marked as holiday",
+          unavailable_slots: blockedSlots.map(s => s.slot_id)
+        });
+      }
+
+      // Check if slots are locked by ANOTHER user (only check non-expired locks)
+      const [lockedSlots] = await connection.execute(
+        `SELECT slot_id, locked_by_user_id, locked_until FROM time_slots 
+       WHERE slot_id IN (${placeholders}) 
+       AND locked_until IS NOT NULL 
+       AND locked_until > NOW()
+       AND locked_by_user_id != ?`,
+        [booking.user_id, ...slotIds]
+      );
+
+      if (lockedSlots.length > 0) {
+        await connection.rollback();
+        console.log("❌ Slots locked by other users:", lockedSlots);
+        return res.status(400).json({
+          success: false,
+          message: "One or more slots are locked by another user",
+          unavailable_slots: lockedSlots.map(s => ({
+            slot_id: s.slot_id,
+            locked_by: s.locked_by_user_id,
+            locked_until: s.locked_until
+          }))
+        });
+      }
+
+      // At this point, slots are available - they might have expired locks from the same user
+      // But we need to update the time_slots table to clear any expired locks for these specific slots
+      await connection.execute(
+        `UPDATE time_slots 
+       SET locked_until = NULL,
+           locked_by_user_id = NULL
+       WHERE slot_id IN (${placeholders})
+         AND locked_until <= NOW()`,
+        slotIds
+      );
+      console.log("🧹 Cleaned up expired locks for specific slots");
+
+      // CASE 1: Booking requires advance payment
+      if (booking.requires_advance === 1 || booking.requires_advance === true) {
+        console.log("💰 Booking requires advance payment");
+
+        // Lock duration for advance payment (10 minutes)
+        const lockDuration = 10; // minutes
+        const lockExpiresAt = new Date(Date.now() + lockDuration * 60 * 1000);
+
+        // Update booking status to awaiting_payment
+        await connection.execute(
+          `UPDATE bookings 
+         SET status = ?,
+             lock_expires_at = ?
+         WHERE booking_id = ?`,
+          [bookingStatus.AWAITING_PAYMENT, lockExpiresAt, booking_id]
+        );
+
+        console.log("✅ Booking status updated to awaiting_payment");
+
+        // Lock the slots for this booking (prevent others from booking)
+        await connection.execute(
+          `UPDATE time_slots 
+         SET locked_until = ?,
+             locked_by_user_id = ?,
+             is_available = FALSE
+         WHERE slot_id IN (${placeholders})`,
+          [lockExpiresAt, booking.user_id, ...slotIds]
+        );
+
+        console.log(`🔒 Locked ${slotIds.length} slots for advance payment until ${lockExpiresAt}`);
+
+        await connection.commit();
+
+        // Send notification to user
+        try {
+          await connection.execute(
+            `INSERT INTO notifications (user_id, type, title, message, data, created_at)
+           VALUES (?, 'booking.advance_payment_required', 'Advance Payment Required', 
+                   ?, ?, NOW())`,
+            [
+              booking.user_id,
+              `Your booking has been approved. Please pay advance amount of Rs. ${booking.advance_amount} within ${lockDuration} minutes.`,
+              JSON.stringify({
+                booking_id: booking_id,
+                advance_amount: booking.advance_amount,
+                lock_expires_at: lockExpiresAt,
+                payment_deadline_minutes: lockDuration
+              })
+            ]
+          );
+          console.log("📨 Notification sent to user");
+        } catch (notifError) {
+          console.warn("Could not send notification:", notifError.message);
+        }
+
+        return res.json({
+          success: true,
+          message: "Booking approved. Waiting for advance payment.",
+          booking_id: booking_id,
+          status: bookingStatus.AWAITING_PAYMENT,
+          advance_amount: booking.advance_amount,
+          lock_expires_at: lockExpiresAt,
+          requires_advance: true,
+          slots_locked: slotIds.length
+        });
+      }
+
+      // CASE 2: Regular booking (no advance required)
+      else {
+        console.log("🎯 Regular booking (no advance)");
+
+        // Update booking status to accepted
+        await connection.execute(
+          `UPDATE bookings 
+         SET status = 'accepted'
+         WHERE booking_id = ?`,
+          [booking_id]
+        );
+
+        console.log("✅ Booking status updated to accepted");
+
+        // Mark slots as permanently unavailable
         await connection.execute(
           `UPDATE time_slots 
          SET is_available = FALSE,
              locked_until = NULL,
              locked_by_user_id = NULL
-         WHERE slot_id = ?`,
-          [booking.slot_id]
+         WHERE slot_id IN (${placeholders})`,
+          slotIds
         );
-        console.log(`Marked single slot ${booking.slot_id} as unavailable`);
+
+        console.log(`📅 Marked ${slotIds.length} slots as permanently unavailable`);
+
+        await connection.commit();
+
+        // Calculate slot count for response
+        const slotCount = slotIds.length;
+
+        // Send notification to user
+        try {
+          await connection.execute(
+            `INSERT INTO notifications (user_id, type, title, message, data, created_at)
+           VALUES (?, 'booking.accepted', 'Booking Accepted', 
+                   ?, ?, NOW())`,
+            [
+              booking.user_id,
+              `Your booking for ${booking.date} ${booking.start_time}-${booking.end_time} (${slotCount} slots) has been accepted.`,
+              JSON.stringify({
+                booking_id: booking_id,
+                slot_count: slotCount,
+                date: booking.date,
+                start_time: booking.start_time,
+                end_time: booking.end_time
+              })
+            ]
+          );
+          console.log("📨 Notification sent to user");
+        } catch (notifError) {
+          console.warn("Could not send notification:", notifError.message);
+        }
+
+        return res.json({
+          success: true,
+          message: "Booking accepted successfully",
+          booking_id: booking_id,
+          status: "accepted",
+          is_multi_slot: booking.is_multi_slot,
+          slot_count: slotCount,
+          requires_advance: false
+        });
       }
-
-      await connection.commit();
-
-      // Send notification to user
-      try {
-        const slotCount = booking.is_multi_slot && booking.slot_ids
-          ? (typeof booking.slot_ids === 'string'
-            ? JSON.parse(booking.slot_ids).length
-            : booking.slot_ids.length)
-          : 1;
-
-        await pool.execute(
-          `INSERT INTO notifications (user_id, notification_type, title, message)
-         VALUES (?, 'booking.accepted', 'Booking Accepted', 
-                 'Your booking for ${booking.date} ${booking.start_time}-${booking.end_time} (${slotCount} slots) has been accepted.')`,
-          [booking.user_id]
-        );
-      } catch (notifError) {
-        console.warn("Could not send notification:", notifError.message);
-      }
-
-      res.json({
-        message: "Booking accepted successfully",
-        booking_id: booking_id,
-        status: "accepted",
-        is_multi_slot: booking.is_multi_slot,
-        slot_count: booking.is_multi_slot && booking.slot_ids
-          ? (typeof booking.slot_ids === 'string'
-            ? JSON.parse(booking.slot_ids).length
-            : booking.slot_ids.length)
-          : 1
-      });
 
     } catch (error) {
       await connection.rollback();
-      console.error("Error accepting booking:", error);
+      console.error("❌ Error accepting booking:", error);
       res.status(500).json({
-        message: "Server error",
+        success: false,
+        message: "Server error while accepting booking",
         error: error.message,
         stack: process.env.NODE_ENV === "development" ? error.stack : undefined
       });
@@ -1526,7 +1781,6 @@ const ownerController = {
       connection.release();
     }
   },
-
 
 
   rejectBooking: async (req, res) => {
@@ -1638,7 +1892,220 @@ const ownerController = {
       connection.release();
     }
   },
+  // ownerController.js - Add new function
 
+  // Confirm advance payment after seeing screenshot
+  confirmAdvancePayment: async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+      const { booking_id } = req.params;
+      const ownerId = req.user.id;
+
+      console.log("✅ Confirming advance payment for booking:", booking_id);
+
+      await connection.beginTransaction();
+
+      // Get booking details
+      const [bookings] = await connection.execute(
+        `SELECT b.*, a.owner_id, a.arena_id,
+              b.is_multi_slot, b.slot_ids, b.slot_id
+       FROM bookings b
+       JOIN arenas a ON b.arena_id = a.arena_id
+       WHERE b.booking_id = ? AND a.owner_id = ? AND b.status = 'payment_verification'`,
+        [booking_id, ownerId]
+      );
+
+      if (bookings.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({
+          success: false,
+          message: "Booking not found, already processed, or access denied"
+        });
+      }
+
+      const booking = bookings[0];
+
+      // Update booking status to accepted
+      await connection.execute(
+        `UPDATE bookings 
+       SET status = 'accepted',
+           payment_status = 'completed'
+       WHERE booking_id = ?`,
+        [booking_id]
+      );
+
+      // Slots are already locked/blocked from previous step, so no need to update again
+      // But ensure they are properly marked as unavailable
+      let slotIds = [];
+      if (booking.is_multi_slot && booking.slot_ids) {
+        try {
+          slotIds = typeof booking.slot_ids === 'string'
+            ? JSON.parse(booking.slot_ids)
+            : booking.slot_ids;
+        } catch (e) {
+          slotIds = [booking.slot_id];
+        }
+      } else {
+        slotIds = [booking.slot_id];
+      }
+
+      // Make sure slots are set as unavailable (locked_until can be null now)
+      if (slotIds.length > 0) {
+        const placeholders = slotIds.map(() => '?').join(',');
+        await connection.execute(
+          `UPDATE time_slots 
+         SET is_available = FALSE,
+             locked_until = NULL,
+             locked_by_user_id = NULL
+         WHERE slot_id IN (${placeholders})`,
+          slotIds
+        );
+      }
+
+      // Update arena commission
+      await connection.execute(
+        `UPDATE arenas 
+       SET total_commission_due = total_commission_due + ?
+       WHERE arena_id = ?`,
+        [booking.commission_amount, booking.arena_id]
+      );
+
+      await connection.commit();
+
+      // Send notification to user
+      try {
+        await pool.execute(
+          `INSERT INTO notifications (user_id, notification_type, title, message)
+         VALUES (?, 'booking.payment_confirmed', 'Payment Confirmed', 
+                 'Your advance payment has been confirmed. Booking is now confirmed.')`,
+          [booking.user_id]
+        );
+      } catch (notifError) {
+        console.warn("Could not send notification:", notifError.message);
+      }
+
+      res.json({
+        success: true,
+        message: "Advance payment confirmed. Booking accepted.",
+        booking_id: booking_id,
+        status: "accepted"
+      });
+
+    } catch (error) {
+      await connection.rollback();
+      console.error("❌ Error confirming advance payment:", error);
+      res.status(500).json({
+        success: false,
+        message: "Server error",
+        error: error.message
+      });
+    } finally {
+      connection.release();
+    }
+  },
+
+  // Reject advance payment (if screenshot is invalid)
+  rejectAdvancePayment: async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+      const { booking_id } = req.params;
+      const { reason } = req.body;
+      const ownerId = req.user.id;
+
+      console.log("❌ Rejecting advance payment for booking:", booking_id, "Reason:", reason);
+
+      await connection.beginTransaction();
+
+      // Get booking details
+      const [bookings] = await connection.execute(
+        `SELECT b.*, a.owner_id
+       FROM bookings b
+       JOIN arenas a ON b.arena_id = a.arena_id
+       WHERE b.booking_id = ? AND a.owner_id = ? AND b.status = 'payment_verification'`,
+        [booking_id, ownerId]
+      );
+
+      if (bookings.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({
+          success: false,
+          message: "Booking not found, already processed, or access denied"
+        });
+      }
+
+      const booking = bookings[0];
+
+      // Get all slot IDs for this booking
+      let slotIds = [];
+      if (booking.is_multi_slot && booking.slot_ids) {
+        try {
+          slotIds = typeof booking.slot_ids === 'string'
+            ? JSON.parse(booking.slot_ids)
+            : booking.slot_ids;
+        } catch (e) {
+          slotIds = [booking.slot_id];
+        }
+      } else {
+        slotIds = [booking.slot_id];
+      }
+
+      // Release the slots (make them available again)
+      if (slotIds.length > 0) {
+        const placeholders = slotIds.map(() => '?').join(',');
+        await connection.execute(
+          `UPDATE time_slots 
+         SET is_available = TRUE,
+             locked_until = NULL,
+             locked_by_user_id = NULL
+         WHERE slot_id IN (${placeholders})`,
+          slotIds
+        );
+      }
+
+      // Update booking status to rejected
+      await connection.execute(
+        `UPDATE bookings 
+       SET status = 'rejected',
+           cancelled_by = 'owner',
+           cancellation_time = NOW(),
+           cancellation_reason = ?
+       WHERE booking_id = ?`,
+        [reason || 'Payment verification failed', booking_id]
+      );
+
+      await connection.commit();
+
+      // Send notification to user
+      try {
+        await pool.execute(
+          `INSERT INTO notifications (user_id, notification_type, title, message)
+         VALUES (?, 'booking.payment_rejected', 'Payment Rejected', 
+                 'Your advance payment was rejected. Reason: ' || ?)`,
+          [booking.user_id, reason || 'Invalid payment screenshot']
+        );
+      } catch (notifError) {
+        console.warn("Could not send notification:", notifError.message);
+      }
+
+      res.json({
+        success: true,
+        message: "Advance payment rejected. Booking cancelled.",
+        booking_id: booking_id,
+        status: "rejected"
+      });
+
+    } catch (error) {
+      await connection.rollback();
+      console.error("❌ Error rejecting advance payment:", error);
+      res.status(500).json({
+        success: false,
+        message: "Server error",
+        error: error.message
+      });
+    } finally {
+      connection.release();
+    }
+  },
   // Get owner's arenas
   getArenas: async (req, res) => {
     try {

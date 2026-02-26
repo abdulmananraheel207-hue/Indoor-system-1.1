@@ -135,6 +135,88 @@ const cleanupJobs = {
         } catch (error) {
             console.error("Error in generateFutureTimeSlots:", error);
         }
+    },
+    // Add this to your cleanupJobs object in cleanupJobs.js
+
+    // Clean up expired advance payment bookings (run every minute)
+    cleanupExpiredAdvancePayments: async () => {
+        try {
+            const connection = await pool.getConnection();
+            await connection.beginTransaction();
+
+            // Find expired advance payment bookings
+            const [expiredBookings] = await connection.execute(
+                `SELECT booking_id, user_id, slot_id, is_multi_slot, slot_ids
+             FROM bookings 
+             WHERE status = 'awaiting_payment' 
+               AND lock_expires_at IS NOT NULL 
+               AND lock_expires_at < NOW()`
+            );
+
+            if (expiredBookings.length === 0) {
+                await connection.commit();
+                connection.release();
+                return;
+            }
+
+            console.log(`[${new Date().toISOString()}] Found ${expiredBookings.length} expired advance payment bookings`);
+
+            for (const booking of expiredBookings) {
+                // Get all slot IDs
+                let slotIds = [];
+                if (booking.is_multi_slot && booking.slot_ids) {
+                    try {
+                        slotIds = JSON.parse(booking.slot_ids);
+                    } catch (e) {
+                        slotIds = [booking.slot_id];
+                    }
+                } else {
+                    slotIds = [booking.slot_id];
+                }
+
+                // Release slots
+                if (slotIds.length > 0) {
+                    const placeholders = slotIds.map(() => '?').join(',');
+                    await connection.execute(
+                        `UPDATE time_slots 
+                     SET is_available = TRUE,
+                         locked_until = NULL,
+                         locked_by_user_id = NULL
+                     WHERE slot_id IN (${placeholders})`,
+                        slotIds
+                    );
+                }
+
+                // Update booking to rejected
+                await connection.execute(
+                    `UPDATE bookings 
+                 SET status = 'rejected',
+                     cancelled_by = 'system',
+                     cancellation_time = NOW(),
+                     cancellation_reason = 'Payment timeout'
+                 WHERE booking_id = ?`,
+                    [booking.booking_id]
+                );
+
+                // Notify user
+                await connection.execute(
+                    `INSERT INTO notifications (user_id, notification_type, title, message)
+                 VALUES (?, 'booking.payment_expired', 'Payment Time Expired', 
+                         'Your advance payment window has expired. Please book again.')`,
+                    [booking.user_id]
+                );
+            }
+
+            await connection.commit();
+            connection.release();
+
+            if (expiredBookings.length > 0) {
+                console.log(`[${new Date().toISOString()}] Cleaned up ${expiredBookings.length} expired advance payments`);
+            }
+
+        } catch (error) {
+            console.error("Error in cleanupExpiredAdvancePayments:", error);
+        }
     }
 };
 
@@ -162,7 +244,10 @@ const scheduleCleanupJobs = () => {
         cron.schedule('0 4 * * *', () => {
             cleanupJobs.generateFutureTimeSlots();
         });
-
+        // In scheduleCleanupJobs function, add:
+        cron.schedule('* * * * *', () => {  // Run every minute
+            cleanupJobs.cleanupExpiredAdvancePayments();
+        });
         console.log('✅ Cleanup jobs scheduled');
     } catch (error) {
         console.error('❌ Failed to schedule cleanup jobs:', error);

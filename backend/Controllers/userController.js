@@ -1292,7 +1292,191 @@ const userController = {
       });
     }
   },
+  // userController.js - Add new function
 
+  // Upload payment screenshot for advance payment
+  uploadAdvancePaymentScreenshot: async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+      const { booking_id } = req.params;
+      const { payment_screenshot_url, bank_account_details } = req.body;
+      const userId = req.user.id;
+
+      console.log("💰 Uploading payment screenshot for booking:", booking_id);
+
+      if (!payment_screenshot_url) {
+        return res.status(400).json({
+          success: false,
+          message: "Payment screenshot URL is required"
+        });
+      }
+
+      await connection.beginTransaction();
+
+      // Check if booking exists and is in awaiting_payment status
+      const [bookings] = await connection.execute(
+        `SELECT b.*, a.owner_id 
+       FROM bookings b
+       JOIN arenas a ON b.arena_id = a.arena_id
+       WHERE b.booking_id = ? AND b.user_id = ? AND b.status = 'awaiting_payment'`,
+        [booking_id, userId]
+      );
+
+      if (bookings.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({
+          success: false,
+          message: "Booking not found or not in awaiting payment status"
+        });
+      }
+
+      const booking = bookings[0];
+
+      // Check if lock hasn't expired
+      if (booking.lock_expires_at && new Date(booking.lock_expires_at) < new Date()) {
+        await connection.rollback();
+
+        // Release the slots if lock expired
+        let slotIds = [];
+        if (booking.is_multi_slot && booking.slot_ids) {
+          try {
+            slotIds = JSON.parse(booking.slot_ids);
+          } catch (e) {
+            slotIds = [booking.slot_id];
+          }
+        } else {
+          slotIds = [booking.slot_id];
+        }
+
+        if (slotIds.length > 0) {
+          const placeholders = slotIds.map(() => '?').join(',');
+          await connection.execute(
+            `UPDATE time_slots 
+           SET is_available = TRUE,
+               locked_until = NULL,
+               locked_by_user_id = NULL
+           WHERE slot_id IN (${placeholders})`,
+            slotIds
+          );
+        }
+
+        // Update booking status to rejected (expired)
+        await connection.execute(
+          `UPDATE bookings SET status = 'rejected' WHERE booking_id = ?`,
+          [booking_id]
+        );
+
+        await connection.commit();
+
+        return res.status(400).json({
+          success: false,
+          message: "Payment window expired. Please book again.",
+          expired: true
+        });
+      }
+
+      // Update booking with payment details
+      await connection.execute(
+        `UPDATE bookings 
+       SET payment_screenshot_url = ?,
+           bank_account_details = ?,
+           status = 'payment_verification',
+           payment_status = 'pending'
+       WHERE booking_id = ?`,
+        [payment_screenshot_url, bank_account_details || null, booking_id]
+      );
+
+      await connection.commit();
+
+      // Send notification to owner
+      try {
+        await pool.execute(
+          `INSERT INTO notifications (owner_id, booking_id, notification_type, title, message)
+         VALUES (?, ?, 'booking.payment_uploaded', 'Payment Screenshot Uploaded', 
+                 'User has uploaded payment screenshot for booking #${booking_id}. Please verify.')`,
+          [booking.owner_id, booking_id]
+        );
+      } catch (notifError) {
+        console.warn("Could not send notification:", notifError.message);
+      }
+
+      console.log("✅ Payment screenshot uploaded successfully for booking:", booking_id);
+
+      res.json({
+        success: true,
+        message: "Payment screenshot uploaded successfully. Waiting for owner verification.",
+        booking_id: booking_id,
+        status: 'payment_verification'
+      });
+
+    } catch (error) {
+      await connection.rollback();
+      console.error("❌ Error uploading payment screenshot:", error);
+      res.status(500).json({
+        success: false,
+        message: "Server error",
+        error: error.message
+      });
+    } finally {
+      connection.release();
+    }
+  },
+
+  // Check advance payment status
+  checkAdvancePaymentStatus: async (req, res) => {
+    try {
+      const { booking_id } = req.params;
+      const userId = req.user.id;
+
+      console.log("🔍 Checking advance payment status for booking:", booking_id);
+
+      const [bookings] = await pool.execute(
+        `SELECT booking_id, status, lock_expires_at, requires_advance,
+              payment_status, payment_screenshot_url
+       FROM bookings 
+       WHERE booking_id = ? AND user_id = ?`,
+        [booking_id, userId]
+      );
+
+      if (bookings.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Booking not found"
+        });
+      }
+
+      const booking = bookings[0];
+
+      // Calculate time remaining if lock exists
+      let timeRemaining = null;
+      if (booking.lock_expires_at && booking.status === 'awaiting_payment') {
+        const now = new Date();
+        const expiry = new Date(booking.lock_expires_at);
+        timeRemaining = Math.max(0, Math.floor((expiry - now) / 1000)); // seconds
+      }
+
+      res.json({
+        success: true,
+        booking: {
+          booking_id: booking.booking_id,
+          status: booking.status,
+          requires_advance: booking.requires_advance === 1,
+          payment_status: booking.payment_status,
+          has_uploaded_screenshot: !!booking.payment_screenshot_url,
+          time_remaining: timeRemaining,
+          lock_expired: timeRemaining === 0
+        }
+      });
+
+    } catch (error) {
+      console.error("❌ Error checking advance payment status:", error);
+      res.status(500).json({
+        success: false,
+        message: "Server error",
+        error: error.message
+      });
+    }
+  },
   // Get reviews for an arena
   getReviews: async (req, res) => {
     try {
@@ -1321,6 +1505,7 @@ const userController = {
       });
     }
   }
+
 };
 
 module.exports = userController;

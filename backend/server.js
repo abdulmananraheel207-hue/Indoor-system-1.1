@@ -21,6 +21,7 @@ const adminRoutes = require("./routes/admin");
 const bookingRoutes = require("./routes/bookings");
 const chatRoutes = require("./routes/chats");
 const managerRoutes = require("./routes/managers");
+// separate router that only handles booking-related owner endpoints
 const ownerBookingsRoutes = require("./routes/ownerBookings");
 const superAdminRoutes = require('./routes/superAdmin');
 // Import the new routes
@@ -134,6 +135,10 @@ app.use("/api/super-admin", superAdminRoutes); // All super admin features
 app.use("/api/users", userRoutes);
 app.use("/api/arenas", arenaRoutes);
 app.use("/api/owners", ownerRoutes);
+// also mount the ownerBookings router so that routes defined there
+// (accept/reject, etc.) are active. This was previously required but
+// never wired up, causing 404s for owner booking actions.
+app.use("/api/owners", ownerBookingsRoutes);
 app.use("/api/bookings", bookingRoutes);
 app.use('/api/bookings', bookingSlotsRoutes);
 app.use("/api/chats", chatRoutes);

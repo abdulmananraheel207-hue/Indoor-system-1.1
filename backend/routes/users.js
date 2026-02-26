@@ -80,4 +80,21 @@ router.post("/reviews/skip-all-reminders", arenaController.skipAllReviewReminder
 // Court details
 router.get("/arenas/:arena_id/courts", arenaController.getCourtDetails);
 
+// In users.js - Add these routes
+
+// Advance payment routes
+router.post(
+  "/bookings/:booking_id/payment-screenshot",
+  auth.verifyToken,
+  auth.isUser,
+  userController.uploadAdvancePaymentScreenshot
+);
+
+router.get(
+  "/bookings/:booking_id/payment-status",
+  auth.verifyToken,
+  auth.isUser,
+  userController.checkAdvancePaymentStatus
+);
+
 module.exports = router;
