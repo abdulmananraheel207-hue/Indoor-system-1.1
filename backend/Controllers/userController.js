@@ -1244,6 +1244,8 @@ const userController = {
   // userController.js - Add new function
 
   // Upload payment screenshot for advance payment
+  // In userController.js - REPLACE uploadAdvancePaymentScreenshot function
+
   uploadAdvancePaymentScreenshot: async (req, res) => {
     const connection = await pool.getConnection();
     try {
@@ -1265,9 +1267,9 @@ const userController = {
       // Check if booking exists and is in awaiting_payment status
       const [bookings] = await connection.execute(
         `SELECT b.*, a.owner_id 
-       FROM bookings b
-       JOIN arenas a ON b.arena_id = a.arena_id
-       WHERE b.booking_id = ? AND b.user_id = ? AND b.status = 'awaiting_payment'`,
+             FROM bookings b
+             JOIN arenas a ON b.arena_id = a.arena_id
+             WHERE b.booking_id = ? AND b.user_id = ? AND b.status = 'awaiting_payment'`,
         [booking_id, userId]
       );
 
@@ -1301,10 +1303,10 @@ const userController = {
           const placeholders = slotIds.map(() => '?').join(',');
           await connection.execute(
             `UPDATE time_slots 
-           SET is_available = TRUE,
-               locked_until = NULL,
-               locked_by_user_id = NULL
-           WHERE slot_id IN (${placeholders})`,
+                     SET is_available = TRUE,
+                         locked_until = NULL,
+                         locked_by_user_id = NULL
+                     WHERE slot_id IN (${placeholders})`,
             slotIds
           );
         }
@@ -1324,26 +1326,36 @@ const userController = {
         });
       }
 
-      // Update booking with payment details
+      // Update booking with payment details - status becomes payment_verification
       await connection.execute(
         `UPDATE bookings 
-       SET payment_screenshot_url = ?,
-           bank_account_details = ?,
-           status = 'payment_verification',
-           payment_status = 'pending'
-       WHERE booking_id = ?`,
+             SET payment_screenshot_url = ?,
+                 bank_account_details = ?,
+                 status = 'payment_verification',
+                 payment_status = 'pending'
+             WHERE booking_id = ?`,
         [payment_screenshot_url, bank_account_details || null, booking_id]
       );
+
+      // Note: Slots remain locked during verification
+      // They will be either permanently booked (if confirmed) or released (if rejected)
 
       await connection.commit();
 
       // Send notification to owner
       try {
         await pool.execute(
-          `INSERT INTO notifications (owner_id, booking_id, notification_type, title, message)
-         VALUES (?, ?, 'booking.payment_uploaded', 'Payment Screenshot Uploaded', 
-                 'User has uploaded payment screenshot for booking #${booking_id}. Please verify.')`,
-          [booking.owner_id, booking_id]
+          `INSERT INTO notifications (user_id, type, title, message, data, created_at)
+                 VALUES (?, 'booking.payment_uploaded', 'Payment Screenshot Uploaded', 
+                         'User has uploaded payment screenshot for booking. Please verify.', 
+                         ?, NOW())`,
+          [
+            booking.owner_id,
+            JSON.stringify({
+              booking_id: booking_id,
+              user_name: req.user.name
+            })
+          ]
         );
       } catch (notifError) {
         console.warn("Could not send notification:", notifError.message);

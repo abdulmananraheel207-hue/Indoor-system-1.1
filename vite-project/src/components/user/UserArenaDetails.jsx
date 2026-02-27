@@ -177,7 +177,8 @@ const UserArenaDetails = () => {
     }
   };
 
-  // Replace the handleSlotSelect function with this enhanced version
+  // In UserArenaDetails.jsx - Update handleSlotSelect function
+
   const handleSlotSelect = async (slot) => {
     const isSlotAvailable = slot.actually_available ?? slot.is_available;
     if (!isSlotAvailable || slot.is_blocked) return;
@@ -200,6 +201,12 @@ const UserArenaDetails = () => {
         // Release the slot
         setSelectedSlots((prev) => prev.filter((s) => s.slot_id !== slot.slot_id));
         await integrationService.releaseSlot(slot.slot_id);
+
+        // If no slots left, clear lock expiry
+        if (selectedSlots.length === 1) {
+          setLockExpiry(null);
+          setTimeLeft(null);
+        }
         return;
       }
 
@@ -225,11 +232,17 @@ const UserArenaDetails = () => {
       }
 
       // Lock the slot
-      await integrationService.lockSlot(slot.slot_id);
+      const lockResponse = await integrationService.lockSlot(slot.slot_id);
+
+      // Calculate lock expiry time
       const nextExpiry = new Date(Date.now() + 10 * 60 * 1000);
       setLockExpiry(nextExpiry);
       setTimeLeft("10:00");
+
+      // Add to selected slots
       setSelectedSlots((prev) => [...prev, slot]);
+
+      console.log(`🔒 Slot ${slot.slot_id} locked until ${nextExpiry}`);
     } catch (error) {
       console.error("Error handling slot selection:", error);
       alert(error.response?.data?.message || "Slot is no longer available.");

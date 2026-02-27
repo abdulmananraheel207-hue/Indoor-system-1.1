@@ -1427,26 +1427,25 @@ const ownerController = {
       // FIRST: Clean up any expired locks for these slots
       await connection.execute(
         `UPDATE time_slots 
-       SET locked_until = NULL,
-           locked_by_user_id = NULL
-       WHERE locked_until IS NOT NULL 
-         AND locked_until <= NOW()`
+             SET locked_until = NULL,
+                 locked_by_user_id = NULL
+             WHERE locked_until IS NOT NULL 
+               AND locked_until <= NOW()`
       );
       console.log("🧹 Cleaned up expired locks");
 
       // Get booking details with all fields
       const [bookingDetails] = await connection.execute(
         `SELECT b.*, a.owner_id, a.arena_id, a.require_advance,
-              a.advance_type, a.advance_percentage, a.advance_fixed_amount
-       FROM bookings b
-       JOIN arenas a ON b.arena_id = a.arena_id
-       WHERE b.booking_id = ?`,
+                    a.advance_type, a.advance_percentage, a.advance_fixed_amount
+             FROM bookings b
+             JOIN arenas a ON b.arena_id = a.arena_id
+             WHERE b.booking_id = ?`,
         [booking_id]
       );
 
       if (bookingDetails.length === 0) {
         await connection.rollback();
-        console.log("❌ Booking not found");
         return res.status(404).json({
           success: false,
           message: "Booking not found"
@@ -1467,7 +1466,6 @@ const ownerController = {
       // Check if owner owns this arena
       if (booking.owner_id !== ownerId) {
         await connection.rollback();
-        console.log("❌ Access denied - owner doesn't own this arena");
         return res.status(403).json({
           success: false,
           message: "Access denied - you don't own this arena"
@@ -1478,7 +1476,6 @@ const ownerController = {
       const acceptableStatuses = ['pending', 'pending_advance'];
       if (!acceptableStatuses.includes(booking.status)) {
         await connection.rollback();
-        console.log(`❌ Booking cannot be accepted - current status: ${booking.status}`);
         return res.status(400).json({
           success: false,
           message: `Booking cannot be accepted. Current status: ${booking.status}`,
@@ -1503,8 +1500,6 @@ const ownerController = {
         slotIds = booking.slot_id ? [booking.slot_id] : [];
       }
 
-      console.log("🎯 Slot IDs to process:", slotIds);
-
       if (slotIds.length === 0) {
         await connection.rollback();
         return res.status(400).json({
@@ -1515,40 +1510,37 @@ const ownerController = {
 
       const placeholders = slotIds.map(() => '?').join(',');
 
-
+      // Check if slots are already booked by OTHER bookings (excluding this one)
       const [existingBookings] = await connection.execute(
         `SELECT ts.slot_id, b.booking_id, b.status, b.user_id
-       FROM time_slots ts
-       LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
-         AND b.status IN ('accepted', 'completed', 'pending', 'pending_advance', 'awaiting_payment', 'payment_verification')
-         AND b.booking_id != ?
-       WHERE ts.slot_id IN (${placeholders})`,
+             FROM time_slots ts
+             LEFT JOIN bookings b ON ts.slot_id = b.slot_id 
+               AND b.status IN ('accepted', 'completed', 'pending', 'pending_advance', 'awaiting_payment', 'payment_verification')
+               AND b.booking_id != ?
+             WHERE ts.slot_id IN (${placeholders})`,
         [booking_id, ...slotIds]
       );
 
-      // remove any rows where the join produced no booking
+      // Filter out nulls and check for conflicts
       const conflicts = existingBookings.filter(r => r.booking_id != null);
 
       if (conflicts.length > 0) {
-        // if even one of the conflicts is already accepted/completed, we
-        // cannot proceed and should return the original error message
+        // If any conflict is already accepted/completed, we cannot proceed
         const serious = conflicts.filter(r => ['accepted', 'completed'].includes(r.status));
         if (serious.length > 0) {
           await connection.rollback();
-          console.log("❌ Slots already booked by other bookings:", conflicts);
           return res.status(400).json({
             success: false,
             message: "One or more slots are already booked by another booking",
-            unavailable_slots: conflicts.map(s => ({
+            unavailable_slots: serious.map(s => ({
               slot_id: s.slot_id,
               booking_id: s.booking_id,
-              status: s.status,
-              user_id: s.user_id
+              status: s.status
             }))
           });
         }
 
-
+        // Cancel pending bookings that conflict
         const idsToCancel = [...new Set(conflicts.map(r => r.booking_id))];
         console.log("⚠️ Cancelling pending bookings before accepting:", idsToCancel);
 
@@ -1556,21 +1548,11 @@ const ownerController = {
           const cancelPlaceholders = idsToCancel.map(() => '?').join(',');
           await connection.execute(
             `UPDATE bookings 
-               SET status = 'cancelled',
-                   cancelled_by = 'system',
-                   cancellation_time = NOW()
-             WHERE booking_id IN (${cancelPlaceholders})`,
+                     SET status = 'cancelled',
+                         cancelled_by = 'system',
+                         cancellation_time = NOW()
+                     WHERE booking_id IN (${cancelPlaceholders})`,
             idsToCancel
-          );
-
-          // free up the slots that belonged to those bookings
-          await connection.execute(
-            `UPDATE time_slots 
-               SET is_available = TRUE,
-                   locked_until = NULL,
-                   locked_by_user_id = NULL
-             WHERE slot_id IN (${placeholders})`,
-            [...slotIds]
           );
         }
       }
@@ -1578,14 +1560,13 @@ const ownerController = {
       // Check if slots are blocked by owner or marked as holiday
       const [blockedSlots] = await connection.execute(
         `SELECT slot_id FROM time_slots 
-       WHERE slot_id IN (${placeholders}) 
-       AND (is_blocked_by_owner = TRUE OR is_holiday = TRUE)`,
+             WHERE slot_id IN (${placeholders}) 
+               AND (is_blocked_by_owner = TRUE OR is_holiday = TRUE)`,
         slotIds
       );
 
       if (blockedSlots.length > 0) {
         await connection.rollback();
-        console.log("❌ Slots are blocked or holiday:", blockedSlots);
         return res.status(400).json({
           success: false,
           message: "One or more slots are blocked by owner or marked as holiday",
@@ -1593,21 +1574,20 @@ const ownerController = {
         });
       }
 
-      // Check if slots are locked by ANOTHER user (only check non-expired locks)
+      // Check if slots are locked by ANOTHER user
       const [lockedSlots] = await connection.execute(
         `SELECT slot_id, locked_by_user_id, locked_until 
-   FROM time_slots 
-   WHERE slot_id IN (${placeholders}) 
-   AND locked_until IS NOT NULL 
-   AND locked_until > NOW()
-   AND locked_by_user_id IS NOT NULL
-   AND locked_by_user_id != ?`,  // Only block if different user
+             FROM time_slots 
+             WHERE slot_id IN (${placeholders}) 
+               AND locked_until IS NOT NULL 
+               AND locked_until > NOW()
+               AND locked_by_user_id IS NOT NULL
+               AND locked_by_user_id != ?`,
         [booking.user_id, ...slotIds]
       );
 
       if (lockedSlots.length > 0) {
         await connection.rollback();
-        console.log("❌ Slots locked by other users:", lockedSlots);
         return res.status(400).json({
           success: false,
           message: "One or more slots are locked by another user",
@@ -1619,14 +1599,13 @@ const ownerController = {
         });
       }
 
-      // At this point, slots are available - they might have expired locks from the same user
-      // But we need to update the time_slots table to clear any expired locks for these specific slots
+      // Clear any expired locks for these slots
       await connection.execute(
         `UPDATE time_slots 
-       SET locked_until = NULL,
-           locked_by_user_id = NULL
-       WHERE slot_id IN (${placeholders})
-         AND locked_until <= NOW()`,
+             SET locked_until = NULL,
+                 locked_by_user_id = NULL
+             WHERE slot_id IN (${placeholders})
+               AND locked_until <= NOW()`,
         slotIds
       );
       console.log("🧹 Cleaned up expired locks for specific slots");
@@ -1642,21 +1621,22 @@ const ownerController = {
         // Update booking status to awaiting_payment
         await connection.execute(
           `UPDATE bookings 
-         SET status = ?,
-             lock_expires_at = ?
-         WHERE booking_id = ?`,
+                 SET status = ?,
+                     lock_expires_at = ?
+                 WHERE booking_id = ?`,
           [bookingStatus.AWAITING_PAYMENT, lockExpiresAt, booking_id]
         );
 
         console.log("✅ Booking status updated to awaiting_payment");
 
-        // Lock the slots for this booking (prevent others from booking)
+        // IMPORTANT: Lock the slots for this user only
+        // This prevents others from booking while user pays advance
         await connection.execute(
           `UPDATE time_slots 
-         SET locked_until = ?,
-             locked_by_user_id = ?,
-             is_available = FALSE
-         WHERE slot_id IN (${placeholders})`,
+                 SET locked_until = ?,
+                     locked_by_user_id = ?,
+                     is_available = FALSE
+                 WHERE slot_id IN (${placeholders})`,
           [lockExpiresAt, booking.user_id, ...slotIds]
         );
 
@@ -1668,8 +1648,8 @@ const ownerController = {
         try {
           await connection.execute(
             `INSERT INTO notifications (user_id, type, title, message, data, created_at)
-           VALUES (?, 'booking.advance_payment_required', 'Advance Payment Required', 
-                   ?, ?, NOW())`,
+                     VALUES (?, 'booking.advance_payment_required', 'Advance Payment Required', 
+                             ?, ?, NOW())`,
             [
               booking.user_id,
               `Your booking has been approved. Please pay advance amount of Rs. ${booking.advance_amount} within ${lockDuration} minutes.`,
@@ -1705,8 +1685,8 @@ const ownerController = {
         // Update booking status to accepted
         await connection.execute(
           `UPDATE bookings 
-         SET status = 'accepted'
-         WHERE booking_id = ?`,
+                 SET status = 'accepted'
+                 WHERE booking_id = ?`,
           [booking_id]
         );
 
@@ -1715,10 +1695,10 @@ const ownerController = {
         // Mark slots as permanently unavailable
         await connection.execute(
           `UPDATE time_slots 
-         SET is_available = FALSE,
-             locked_until = NULL,
-             locked_by_user_id = NULL
-         WHERE slot_id IN (${placeholders})`,
+                 SET is_available = FALSE,
+                     locked_until = NULL,
+                     locked_by_user_id = NULL
+                 WHERE slot_id IN (${placeholders})`,
           slotIds
         );
 
@@ -1726,15 +1706,14 @@ const ownerController = {
 
         await connection.commit();
 
-        // Calculate slot count for response
         const slotCount = slotIds.length;
 
         // Send notification to user
         try {
           await connection.execute(
             `INSERT INTO notifications (user_id, type, title, message, data, created_at)
-           VALUES (?, 'booking.accepted', 'Booking Accepted', 
-                   ?, ?, NOW())`,
+                     VALUES (?, 'booking.accepted', 'Booking Accepted', 
+                             ?, ?, NOW())`,
             [
               booking.user_id,
               `Your booking for ${booking.date} ${booking.start_time}-${booking.end_time} (${slotCount} slots) has been accepted.`,
@@ -1777,112 +1756,126 @@ const ownerController = {
     }
   },
 
+  // In ownerController.js - Fixed rejectBooking function without cancellation_reason
 
   rejectBooking: async (req, res) => {
     const connection = await pool.getConnection();
     try {
       const { booking_id } = req.params;
       const ownerId = req.user.id;
+      const { reason } = req.body;
+
+      console.log("=".repeat(50));
+      console.log("📝 REJECT BOOKING REQUEST");
+      console.log("Booking ID:", booking_id);
+      console.log("Owner ID:", ownerId);
+      console.log("Reason:", reason);
 
       await connection.beginTransaction();
 
       // Get booking details with multi-slot info
       const [bookingCheck] = await connection.execute(
-        `SELECT b.*, a.owner_id, b.is_multi_slot, b.slot_ids, b.slot_id
-       FROM bookings b
-       JOIN arenas a ON b.arena_id = a.arena_id
-       WHERE b.booking_id = ? AND a.owner_id = ? AND b.status = 'pending'`,
+        `SELECT b.*, a.owner_id, a.arena_id,
+                    b.is_multi_slot, b.slot_ids, b.slot_id,
+                    b.user_id, b.date, b.start_time, b.end_time,
+                    u.name as user_name, u.email as user_email
+             FROM bookings b
+             JOIN arenas a ON b.arena_id = a.arena_id
+             JOIN users u ON b.user_id = u.user_id
+             WHERE b.booking_id = ? 
+               AND a.owner_id = ? 
+               AND b.status IN ('pending', 'pending_advance')`,
         [booking_id, ownerId]
       );
 
       if (bookingCheck.length === 0) {
         await connection.rollback();
         return res.status(404).json({
-          message: "Booking not found, already processed, or access denied",
+          success: false,
+          message: "Booking not found, already processed, or access denied"
         });
       }
 
       const booking = bookingCheck[0];
 
-      // Update booking status
-      await connection.execute(
-        `UPDATE bookings 
-       SET status = 'rejected',
-           cancelled_by = 'owner',
-           cancellation_time = NOW()
-       WHERE booking_id = ?`,
-        [booking_id]
-      );
-
-      // Make slots available again
+      // Get all slot IDs for this booking
+      let slotIds = [];
       if (booking.is_multi_slot && booking.slot_ids) {
-        let slotIds = [];
         try {
           slotIds = typeof booking.slot_ids === 'string'
             ? JSON.parse(booking.slot_ids)
             : booking.slot_ids;
         } catch (e) {
-          slotIds = [booking.slot_id];
-        }
-
-        if (slotIds.length > 0) {
-          const placeholders = slotIds.map(() => '?').join(',');
-          await connection.execute(
-            `UPDATE time_slots 
-           SET is_available = TRUE,
-               locked_until = NULL,
-               locked_by_user_id = NULL
-           WHERE slot_id IN (${placeholders})`,
-            slotIds
-          );
+          slotIds = booking.slot_id ? [booking.slot_id] : [];
         }
       } else {
+        slotIds = booking.slot_id ? [booking.slot_id] : [];
+      }
+
+      // Update booking status to rejected - FIX: Store reason in cancelled_by column or as a note
+      // Since you don't have cancellation_reason, you can store reason in cancelled_by or add a note
+      await connection.execute(
+        `UPDATE bookings 
+             SET status = 'rejected',
+                 cancelled_by = ?,
+                 cancellation_time = NOW()
+             WHERE booking_id = ?`,
+        [reason ? `owner: ${reason}` : 'owner', booking_id]
+      );
+
+      // Make slots available again
+      if (slotIds.length > 0) {
+        const placeholders = slotIds.map(() => '?').join(',');
         await connection.execute(
           `UPDATE time_slots 
-         SET is_available = TRUE,
-             locked_until = NULL,
-             locked_by_user_id = NULL
-         WHERE slot_id = ?`,
-          [booking.slot_id]
+                 SET is_available = TRUE,
+                     locked_until = NULL,
+                     locked_by_user_id = NULL
+                 WHERE slot_id IN (${placeholders})`,
+          slotIds
         );
       }
 
       await connection.commit();
 
-      // Send notification
+      // Send notification to user - Using your notifications table structure
       try {
-        const slotCount = booking.is_multi_slot && booking.slot_ids
-          ? (typeof booking.slot_ids === 'string'
-            ? JSON.parse(booking.slot_ids).length
-            : booking.slot_ids.length)
-          : 1;
+        const slotCount = slotIds.length;
+        const messageText = `Your booking for ${booking.date} ${booking.start_time}-${booking.end_time} (${slotCount} slots) has been rejected. ${reason ? 'Reason: ' + reason : ''}`;
 
         await pool.execute(
-          `INSERT INTO notifications (user_id, notification_type, title, message)
-         VALUES (?, 'booking.rejected', 'Booking Rejected', 
-                 'Your booking for ${booking.date} ${booking.start_time}-${booking.end_time} (${slotCount} slots) has been rejected.')`,
-          [booking.user_id]
+          `INSERT INTO notifications 
+                 (user_id, type, title, message, booking_id, created_at) 
+                 VALUES (?, ?, ?, ?, ?, NOW())`,
+          [
+            booking.user_id,
+            'booking.rejected',
+            'Booking Rejected',
+            messageText,
+            booking_id
+          ]
         );
       } catch (notifError) {
         console.warn("Could not send notification:", notifError.message);
       }
 
       res.json({
+        success: true,
         message: "Booking rejected successfully",
         booking_id: booking_id,
         status: "rejected",
         is_multi_slot: booking.is_multi_slot,
-        slot_count: booking.is_multi_slot && booking.slot_ids
-          ? (typeof booking.slot_ids === 'string'
-            ? JSON.parse(booking.slot_ids).length
-            : booking.slot_ids.length)
-          : 1
+        slot_count: slotIds.length
       });
 
     } catch (error) {
       await connection.rollback();
-      console.error("Error rejecting booking:", error);
-      res.status(500).json({ message: "Server error", error: error.message });
+      console.error("❌ Error rejecting booking:", error);
+      res.status(500).json({
+        success: false,
+        message: "Server error while rejecting booking",
+        error: error.message
+      });
     } finally {
       connection.release();
     }
@@ -1903,10 +1896,10 @@ const ownerController = {
       // Get booking details
       const [bookings] = await connection.execute(
         `SELECT b.*, a.owner_id, a.arena_id,
-              b.is_multi_slot, b.slot_ids, b.slot_id
-       FROM bookings b
-       JOIN arenas a ON b.arena_id = a.arena_id
-       WHERE b.booking_id = ? AND a.owner_id = ? AND b.status = 'payment_verification'`,
+                    b.is_multi_slot, b.slot_ids, b.slot_id
+             FROM bookings b
+             JOIN arenas a ON b.arena_id = a.arena_id
+             WHERE b.booking_id = ? AND a.owner_id = ? AND b.status = 'payment_verification'`,
         [booking_id, ownerId]
       );
 
@@ -1923,14 +1916,13 @@ const ownerController = {
       // Update booking status to accepted
       await connection.execute(
         `UPDATE bookings 
-       SET status = 'accepted',
-           payment_status = 'completed'
-       WHERE booking_id = ?`,
+             SET status = 'accepted',
+                 payment_status = 'completed'
+             WHERE booking_id = ?`,
         [booking_id]
       );
 
-      // Slots are already locked/blocked from previous step, so no need to update again
-      // But ensure they are properly marked as unavailable
+      // Get all slot IDs
       let slotIds = [];
       if (booking.is_multi_slot && booking.slot_ids) {
         try {
@@ -1944,15 +1936,15 @@ const ownerController = {
         slotIds = [booking.slot_id];
       }
 
-      // Make sure slots are set as unavailable (locked_until can be null now)
+      // Make sure slots are permanently booked
       if (slotIds.length > 0) {
         const placeholders = slotIds.map(() => '?').join(',');
         await connection.execute(
           `UPDATE time_slots 
-         SET is_available = FALSE,
-             locked_until = NULL,
-             locked_by_user_id = NULL
-         WHERE slot_id IN (${placeholders})`,
+                 SET is_available = FALSE,
+                     locked_until = NULL,
+                     locked_by_user_id = NULL
+                 WHERE slot_id IN (${placeholders})`,
           slotIds
         );
       }
@@ -1960,8 +1952,8 @@ const ownerController = {
       // Update arena commission
       await connection.execute(
         `UPDATE arenas 
-       SET total_commission_due = total_commission_due + ?
-       WHERE arena_id = ?`,
+             SET total_commission_due = total_commission_due + ?
+             WHERE arena_id = ?`,
         [booking.commission_amount, booking.arena_id]
       );
 
@@ -1971,8 +1963,8 @@ const ownerController = {
       try {
         await pool.execute(
           `INSERT INTO notifications (user_id, notification_type, title, message)
-         VALUES (?, 'booking.payment_confirmed', 'Payment Confirmed', 
-                 'Your advance payment has been confirmed. Booking is now confirmed.')`,
+                 VALUES (?, 'booking.payment_confirmed', 'Payment Confirmed', 
+                         'Your advance payment has been confirmed. Booking is now confirmed.')`,
           [booking.user_id]
         );
       } catch (notifError) {
@@ -1999,7 +1991,6 @@ const ownerController = {
     }
   },
 
-  // Reject advance payment (if screenshot is invalid)
   rejectAdvancePayment: async (req, res) => {
     const connection = await pool.getConnection();
     try {
@@ -2014,9 +2005,9 @@ const ownerController = {
       // Get booking details
       const [bookings] = await connection.execute(
         `SELECT b.*, a.owner_id
-       FROM bookings b
-       JOIN arenas a ON b.arena_id = a.arena_id
-       WHERE b.booking_id = ? AND a.owner_id = ? AND b.status = 'payment_verification'`,
+             FROM bookings b
+             JOIN arenas a ON b.arena_id = a.arena_id
+             WHERE b.booking_id = ? AND a.owner_id = ? AND b.status = 'payment_verification'`,
         [booking_id, ownerId]
       );
 
@@ -2030,7 +2021,7 @@ const ownerController = {
 
       const booking = bookings[0];
 
-      // Get all slot IDs for this booking
+      // Get all slot IDs
       let slotIds = [];
       if (booking.is_multi_slot && booking.slot_ids) {
         try {
@@ -2049,10 +2040,10 @@ const ownerController = {
         const placeholders = slotIds.map(() => '?').join(',');
         await connection.execute(
           `UPDATE time_slots 
-         SET is_available = TRUE,
-             locked_until = NULL,
-             locked_by_user_id = NULL
-         WHERE slot_id IN (${placeholders})`,
+                 SET is_available = TRUE,
+                     locked_until = NULL,
+                     locked_by_user_id = NULL
+                 WHERE slot_id IN (${placeholders})`,
           slotIds
         );
       }
@@ -2060,11 +2051,11 @@ const ownerController = {
       // Update booking status to rejected
       await connection.execute(
         `UPDATE bookings 
-       SET status = 'rejected',
-           cancelled_by = 'owner',
-           cancellation_time = NOW(),
-           cancellation_reason = ?
-       WHERE booking_id = ?`,
+             SET status = 'rejected',
+                 cancelled_by = 'owner',
+                 cancellation_time = NOW(),
+                 cancellation_reason = ?
+             WHERE booking_id = ?`,
         [reason || 'Payment verification failed', booking_id]
       );
 
@@ -2074,8 +2065,8 @@ const ownerController = {
       try {
         await pool.execute(
           `INSERT INTO notifications (user_id, notification_type, title, message)
-         VALUES (?, 'booking.payment_rejected', 'Payment Rejected', 
-                 'Your advance payment was rejected. Reason: ' || ?)`,
+                 VALUES (?, 'booking.payment_rejected', 'Payment Rejected', 
+                         'Your advance payment was rejected. Reason: ' || ?)`,
           [booking.user_id, reason || 'Invalid payment screenshot']
         );
       } catch (notifError) {
@@ -2102,7 +2093,6 @@ const ownerController = {
     }
   },
 
-
   getPaymentScreenshot: async (req, res) => {
     try {
       const { booking_id } = req.params;
@@ -2113,13 +2103,13 @@ const ownerController = {
       // Get booking details with payment screenshot
       const [bookings] = await pool.execute(
         `SELECT b.payment_screenshot_url, b.bank_account_details, 
-              b.booking_id, b.user_id, b.arena_id, b.total_amount, b.advance_amount,
-              u.name as user_name, u.email as user_email,
-              a.name as arena_name
-       FROM bookings b
-       JOIN users u ON b.user_id = u.user_id
-       JOIN arenas a ON b.arena_id = a.arena_id
-       WHERE b.booking_id = ? AND b.status = 'payment_verification'`,
+                    b.booking_id, b.user_id, b.arena_id, b.total_amount, b.advance_amount,
+                    u.name as user_name, u.email as user_email,
+                    a.name as arena_name
+             FROM bookings b
+             JOIN users u ON b.user_id = u.user_id
+             JOIN arenas a ON b.arena_id = a.arena_id
+             WHERE b.booking_id = ? AND b.status = 'payment_verification'`,
         [booking_id]
       );
 
