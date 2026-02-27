@@ -96,4 +96,11 @@ router.get(
   userController.checkAdvancePaymentStatus
 );
 
+router.get(
+  "/payments/pending",
+  auth.verifyToken,
+  auth.isUser,
+  userController.getPendingPayments
+);
+
 module.exports = router;

@@ -14,14 +14,14 @@ import UserHome from "./components/user/UserHome";
 import UserTeams from "./components/user/UserTeams";
 import UserBooking from "./components/user/UserBooking";
 import UserProfile from "./components/user/UserProfile";
-import OwnerDashboard from "./components/owner/OwnerDashboard"; // THIS NOW WORKS FOR BOTH OWNER AND MANAGER
+import OwnerDashboard from "./components/owner/OwnerDashboard";
 import OwnerRegistration from "./components/owner/OwnerRegistration";
 import UserArenaDetails from "./components/user/UserArenaDetails";
 import UserBookingChat from "./components/user/UserBookingChat";
 import integrationService from "./services/integrationService";
-import ReviewReminderModal from "./components/user/ReviewReminderModal";
 import SuperAdminDashboard from "./components/superadmin/superAdminDashboard";
 import ManagerLogin from "./components/auth/ManagerAuth";
+import PaymentScreenshotModal from "./components/shared/PaymentScreenshotModal";
 
 const useAuth = () => {
   const [authState, setAuthState] = useState({
@@ -78,10 +78,8 @@ const useAuth = () => {
   };
 
   const login = (token, role, userData = null) => {
-    // Clear guest flag when logging in
     localStorage.removeItem("isGuest");
 
-    // Clear admin tokens when logging in as non-admin
     if (role !== "admin" && role !== "super_admin") {
       localStorage.removeItem("adminToken");
       localStorage.removeItem("adminUser");
@@ -117,7 +115,10 @@ const useAuth = () => {
     localStorage.removeItem("userRole");
     localStorage.removeItem("userData");
     localStorage.removeItem("isGuest");
-    localStorage.removeItem("dashboardStats"); // Clear cached stats
+    localStorage.removeItem("dashboardStats");
+    // Clear payment modal session flag on logout
+    sessionStorage.removeItem("payment_modal_shown");
+
     setAuthState({
       isAuthenticated: false,
       userRole: null,
@@ -164,6 +165,80 @@ const useAuth = () => {
 function App() {
   const auth = useAuth();
 
+  // Payment Modal State
+  const [paymentModal, setPaymentModal] = useState({
+    isOpen: false,
+    booking: null,
+    timeRemaining: 600 // 10 minutes in seconds
+  });
+
+  // Check for pending payments when user logs in
+  useEffect(() => {
+    if (auth.isAuthenticated && !auth.isGuest && auth.userRole === "user") {
+      checkPendingPayments();
+    }
+  }, [auth.isAuthenticated, auth.userRole, auth.isGuest]);
+
+  const checkPendingPayments = async () => {
+    try {
+      // Check if modal was already shown for this session
+      const modalShown = sessionStorage.getItem('payment_modal_shown');
+      if (modalShown) {
+        console.log("Payment modal already shown in this session");
+        return;
+      }
+
+      console.log("Checking for pending payments...");
+      const response = await integrationService.getPendingPayments();
+
+      console.log("Pending payments response:", response);
+
+      if (response?.pending_payments?.length > 0) {
+        console.log("Showing payment modal for booking:", response.pending_payments[0]);
+
+        // Mark as shown for this session
+        sessionStorage.setItem('payment_modal_shown', 'true');
+
+        // Show modal for the first pending payment
+        setPaymentModal({
+          isOpen: true,
+          booking: response.pending_payments[0],
+          timeRemaining: 600
+        });
+      } else {
+        console.log("No pending payments found");
+      }
+    } catch (error) {
+      console.error("Error checking pending payments:", error);
+    }
+  };
+
+  // Handle payment submission
+  const handlePaymentSubmit = async (paymentData) => {
+    try {
+      console.log("Submitting payment for booking:", paymentData.booking_id);
+
+      // Use your existing uploadPaymentScreenshot method
+      await integrationService.uploadPaymentScreenshot(
+        paymentData.booking_id,
+        {
+          screenshot: paymentData.payment_screenshot_url,
+          bank_details: paymentData.bank_account_details
+        }
+      );
+
+      // Close modal after successful submission
+      setPaymentModal({ isOpen: false, booking: null, timeRemaining: 600 });
+
+      // Show success message
+      alert("Payment screenshot uploaded successfully! The owner will verify your payment.");
+    } catch (error) {
+      console.error("Error uploading payment:", error);
+      alert(error.message || "Failed to upload payment screenshot");
+      throw error; // Re-throw so modal knows submission failed
+    }
+  };
+
   // User auth wrapper
   const UserAuthWrapper = () => {
     const navigate = useNavigate();
@@ -200,7 +275,7 @@ function App() {
     return <OwnerAuth onLogin={handleLogin} />;
   };
 
-  // Manager auth wrapper - USING THE SAME OwnerAuth COMPONENT
+  // Manager auth wrapper
   const ManagerAuthWrapper = () => {
     const navigate = useNavigate();
 
@@ -610,10 +685,19 @@ function App() {
 
   return (
     <Router>
-      {/* Only show review modal for authenticated non-guest users */}
-      {auth.isAuthenticated && !auth.isGuest && auth.userRole === "user" && (
-        <ReviewReminderModal />
-      )}
+      {/* Payment Screenshot Modal - Shows when user has pending advance payment */}
+      <PaymentScreenshotModal
+        isOpen={paymentModal.isOpen}
+        onClose={() => {
+          setPaymentModal({ isOpen: false, booking: null, timeRemaining: 600 });
+        }}
+        booking={paymentModal.booking}
+        timeRemaining={paymentModal.timeRemaining}
+        onSubmit={handlePaymentSubmit}
+      />
+
+      {/* Review Reminder Modal - REMOVED - Now only in UserBooking page */}
+
       <Routes>
         {/* Public Routes */}
         <Route path="/" element={<LoginSelection />} />
@@ -652,7 +736,7 @@ function App() {
           }
         />
 
-        {/* Protected Owner Routes - Uses OwnerDashboard component */}
+        {/* Protected Owner Routes */}
         <Route
           path="/owner/dashboard"
           element={
@@ -662,12 +746,12 @@ function App() {
           }
         />
 
-        {/* Protected Manager Routes - USES THE SAME OwnerDashboard COMPONENT */}
+        {/* Protected Manager Routes */}
         <Route
           path="/manager/dashboard"
           element={
             <ProtectedRoute requiredRole="manager">
-              <OwnerDashboard /> {/* Same component, different role */}
+              <OwnerDashboard />
             </ProtectedRoute>
           }
         />

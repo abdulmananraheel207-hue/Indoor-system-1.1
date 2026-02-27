@@ -1,19 +1,53 @@
-// File: PaymentScreenshotModal.jsx - NEW FILE
-import React, { useState, useRef } from 'react';
+// File: PaymentScreenshotModal.jsx - UPDATED with actual upload functionality
+import React, { useState, useRef, useEffect } from 'react';
+import paymentService from '../../services/paymentService';
 
 const PaymentScreenshotModal = ({
     isOpen,
     onClose,
-    onSubmit,
     booking,
-    timeRemaining
+    timeRemaining,
+    onSubmit
 }) => {
     const [selectedFile, setSelectedFile] = useState(null);
     const [preview, setPreview] = useState(null);
-    const [bankDetails, setBankDetails] = useState('');
+    const [notes, setNotes] = useState('');
     const [uploading, setUploading] = useState(false);
     const [error, setError] = useState('');
+    const [localTimeRemaining, setLocalTimeRemaining] = useState(timeRemaining || 600);
     const fileInputRef = useRef(null);
+    const timerRef = useRef(null);
+
+    useEffect(() => {
+        if (!isOpen) return;
+
+        // Start timer
+        timerRef.current = setInterval(() => {
+            setLocalTimeRemaining((prev) => {
+                if (prev <= 1) {
+                    clearInterval(timerRef.current);
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+
+        return () => {
+            if (timerRef.current) clearInterval(timerRef.current);
+        };
+    }, [isOpen]);
+
+    useEffect(() => {
+        // Reset time when booking changes
+        setLocalTimeRemaining(timeRemaining || 600);
+        // Reset form when modal opens with new booking
+        if (isOpen) {
+            setSelectedFile(null);
+            setPreview(null);
+            setNotes('');
+            setError('');
+        }
+    }, [booking, timeRemaining, isOpen]);
 
     if (!isOpen) return null;
 
@@ -46,8 +80,6 @@ const PaymentScreenshotModal = ({
         setPreview(URL.createObjectURL(file));
     };
 
-    // In PaymentScreenshotModal.jsx - Update the handleSubmit function
-
     const handleSubmit = async () => {
         if (!selectedFile) {
             setError('Please select a payment screenshot');
@@ -58,43 +90,53 @@ const PaymentScreenshotModal = ({
         setError('');
 
         try {
-            // Convert file to base64
-            const reader = new FileReader();
+            // Upload the screenshot
+            const result = await paymentService.uploadScreenshot(
+                booking.booking_id,
+                selectedFile,
+                notes
+            );
 
-            reader.onloadend = async () => {
-                const base64Image = reader.result;
+            // Clear timer
+            if (timerRef.current) clearInterval(timerRef.current);
 
-                // Submit to parent component
+            // Call onSubmit callback if provided
+            if (onSubmit) {
                 await onSubmit({
-                    payment_screenshot_url: base64Image,
-                    bank_account_details: bankDetails,
-                    notes: bankDetails // Additional notes
+                    booking_id: booking.booking_id,
+                    screenshot: result.screenshot
                 });
-            };
+            }
 
-            reader.onerror = () => {
-                setError('Failed to read file');
-                setUploading(false);
-            };
+            // Show success message
+            alert('✅ Payment screenshot uploaded successfully! The owner will verify your payment.');
 
-            reader.readAsDataURL(selectedFile);
+            // Close modal
+            onClose();
 
         } catch (err) {
+            console.error('Upload error:', err);
             setError(err.message || 'Failed to upload screenshot');
+        } finally {
             setUploading(false);
         }
     };
 
     const handleCancel = () => {
+        // Clean up preview URL
         if (preview) URL.revokeObjectURL(preview);
+
+        // Reset form
         setSelectedFile(null);
         setPreview(null);
-        setBankDetails('');
+        setNotes('');
         setError('');
+
+        // Close modal
         onClose();
     };
 
-    const isExpired = timeRemaining === 0;
+    const isExpired = localTimeRemaining === 0;
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -107,7 +149,7 @@ const PaymentScreenshotModal = ({
                                 <span className="text-3xl">💰</span>
                             </div>
                             <div>
-                                <h2 className="text-2xl font-bold">Advance Payment</h2>
+                                <h2 className="text-2xl font-bold">Advance Payment Required</h2>
                                 <p className="text-blue-100 text-sm mt-1">
                                     Booking #{booking?.booking_id}
                                 </p>
@@ -128,7 +170,7 @@ const PaymentScreenshotModal = ({
                         <div className="mt-4 bg-white bg-opacity-20 rounded-lg p-3 text-center">
                             <p className="text-sm opacity-90">Time remaining to upload payment:</p>
                             <p className="text-2xl font-mono font-bold">
-                                {formatTimeRemaining(timeRemaining)}
+                                {formatTimeRemaining(localTimeRemaining)}
                             </p>
                         </div>
                     )}
@@ -136,7 +178,7 @@ const PaymentScreenshotModal = ({
                     {isExpired && (
                         <div className="mt-4 bg-red-500 bg-opacity-30 rounded-lg p-3 text-center">
                             <p className="font-bold">⏰ Payment window expired</p>
-                            <p className="text-sm mt-1">Please create a new booking</p>
+                            <p className="text-sm mt-1">You can still pay from the Bookings page</p>
                         </div>
                     )}
                 </div>
@@ -153,7 +195,7 @@ const PaymentScreenshotModal = ({
                             </div>
                             <div className="flex justify-between">
                                 <span className="text-gray-600">Court:</span>
-                                <span className="font-medium">{booking?.court_name}</span>
+                                <span className="font-medium">{booking?.court_name || `Court ${booking?.court_number}`}</span>
                             </div>
                             <div className="flex justify-between">
                                 <span className="text-gray-600">Date:</span>
@@ -185,9 +227,9 @@ const PaymentScreenshotModal = ({
                             Payment Instructions
                         </h4>
                         <p className="text-sm text-yellow-700">
-                            1. Make payment to the following bank account<br />
+                            1. Make advance payment to the bank account below<br />
                             2. Take a screenshot of the transaction<br />
-                            3. Upload the screenshot below<br />
+                            3. Upload the screenshot here<br />
                             4. Owner will verify and confirm your booking
                         </p>
                         <div className="mt-3 p-3 bg-white rounded-lg border border-yellow-200">
@@ -207,14 +249,21 @@ const PaymentScreenshotModal = ({
 
                         {!preview ? (
                             <div
-                                onClick={() => fileInputRef.current?.click()}
-                                className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-blue-500 transition-colors"
+                                onClick={() => !isExpired && !uploading && fileInputRef.current?.click()}
+                                className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${isExpired || uploading
+                                        ? 'border-gray-200 bg-gray-50 cursor-not-allowed'
+                                        : 'border-gray-300 hover:border-blue-500'
+                                    }`}
                             >
                                 <svg className="w-12 h-12 mx-auto text-gray-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                                 </svg>
                                 <p className="text-sm text-gray-600">
-                                    Click to select screenshot
+                                    {isExpired
+                                        ? 'Payment window expired'
+                                        : uploading
+                                            ? 'Upload in progress...'
+                                            : 'Click to select screenshot'}
                                 </p>
                                 <p className="text-xs text-gray-400 mt-1">
                                     PNG, JPG up to 5MB
@@ -228,12 +277,14 @@ const PaymentScreenshotModal = ({
                                     className="w-full h-48 object-cover rounded-xl border border-gray-300"
                                 />
                                 <button
+                                    type="button"
                                     onClick={() => {
                                         URL.revokeObjectURL(preview);
                                         setPreview(null);
                                         setSelectedFile(null);
                                     }}
                                     className="absolute top-2 right-2 p-1 bg-red-600 text-white rounded-full hover:bg-red-700"
+                                    disabled={isExpired || uploading}
                                 >
                                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -248,22 +299,22 @@ const PaymentScreenshotModal = ({
                             accept="image/*"
                             onChange={handleFileSelect}
                             className="hidden"
-                            disabled={isExpired}
+                            disabled={isExpired || uploading}
                         />
                     </div>
 
-                    {/* Bank Details (Optional) */}
+                    {/* Notes (Optional) */}
                     <div className="mb-6">
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                             Additional Notes (Optional)
                         </label>
                         <textarea
-                            value={bankDetails}
-                            onChange={(e) => setBankDetails(e.target.value)}
+                            value={notes}
+                            onChange={(e) => setNotes(e.target.value)}
                             placeholder="Any additional information about the payment..."
                             rows="3"
                             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            disabled={isExpired}
+                            disabled={isExpired || uploading}
                         />
                     </div>
 
@@ -279,11 +330,12 @@ const PaymentScreenshotModal = ({
                         {!isExpired ? (
                             <>
                                 <button
+                                    type="button"
                                     onClick={handleSubmit}
                                     disabled={uploading || !selectedFile}
                                     className={`w-full py-3 rounded-lg font-semibold flex items-center justify-center ${uploading || !selectedFile
-                                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                        : 'bg-blue-600 text-white hover:bg-blue-700'
+                                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                            : 'bg-blue-600 text-white hover:bg-blue-700'
                                         }`}
                                 >
                                     {uploading ? (
@@ -299,15 +351,17 @@ const PaymentScreenshotModal = ({
                                     )}
                                 </button>
                                 <button
+                                    type="button"
                                     onClick={handleCancel}
                                     disabled={uploading}
                                     className="border border-gray-300 text-gray-700 font-medium py-3 rounded-lg hover:bg-gray-50"
                                 >
-                                    Cancel
+                                    Pay Later
                                 </button>
                             </>
                         ) : (
                             <button
+                                type="button"
                                 onClick={handleCancel}
                                 className="w-full py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
                             >

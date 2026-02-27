@@ -1465,7 +1465,93 @@ const userController = {
         error: error.message
       });
     }
-  }
+  },
+  // Add this to userController.js - Get pending payments for user
+  getPendingPayments: async (req, res) => {
+    try {
+      const userId = req.user.id;
+
+      console.log(`🔍 Fetching pending payments for user: ${userId}`);
+
+      // First, check if the payment_reminder_shown table exists, if not create it
+      await pool.execute(`
+      CREATE TABLE IF NOT EXISTS payment_reminder_shown (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        booking_id INT NOT NULL,
+        user_id INT NOT NULL,
+        shown_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_booking (booking_id),
+        FOREIGN KEY (booking_id) REFERENCES bookings(booking_id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+      )
+    `);
+
+      // Find bookings that need advance payment and haven't had payment modal shown
+      const [pendingPayments] = await pool.execute(`
+      SELECT 
+        b.booking_id,
+        b.arena_id,
+        b.court_id,
+        COALESCE(b.advance_amount, b.total_amount) as advance_amount,
+        b.total_amount,
+        b.status,
+        b.payment_status,
+        b.requires_advance,
+        ts.date,
+        ts.start_time,
+        ts.end_time,
+        a.name as arena_name,
+        a.address as arena_address,
+        cd.court_name,
+        cd.court_number
+      FROM bookings b
+      JOIN time_slots ts ON b.slot_id = ts.slot_id
+      JOIN arenas a ON b.arena_id = a.arena_id
+      JOIN court_details cd ON b.court_id = cd.court_id
+      WHERE b.user_id = ?
+        AND b.status IN ('awaiting_payment', 'pending_advance')
+        AND b.payment_status = 'pending'
+        AND b.requires_advance = 1
+        AND (b.payment_screenshot_url IS NULL OR b.payment_screenshot_url = '')
+        AND NOT EXISTS (
+          SELECT 1 FROM payment_reminder_shown pr 
+          WHERE pr.booking_id = b.booking_id
+        )
+      ORDER BY b.booking_date DESC
+      LIMIT 1
+    `, [userId]);
+
+      console.log(`📦 Found ${pendingPayments.length} pending payments for user ${userId}`);
+
+      // If we found a pending payment, mark it as shown immediately
+      // This ensures it won't be returned again
+      if (pendingPayments.length > 0) {
+        for (const payment of pendingPayments) {
+          await pool.execute(
+            `INSERT INTO payment_reminder_shown (booking_id, user_id) 
+           VALUES (?, ?)
+           ON DUPLICATE KEY UPDATE shown_at = CURRENT_TIMESTAMP`,
+            [payment.booking_id, userId]
+          );
+          console.log(`✅ Marked payment reminder as shown for booking: ${payment.booking_id}`);
+        }
+      }
+
+      res.json({
+        pending_payments: pendingPayments,
+        count: pendingPayments.length
+      });
+
+    } catch (error) {
+      console.error("❌ Error in getPendingPayments:", error);
+      res.status(500).json({
+        message: "Server error",
+        error: error.message,
+        pending_payments: [],
+        count: 0
+      });
+    }
+  },
 
 };
 

@@ -1466,6 +1466,39 @@ export const integrationService = {
     }
   },
 
+  // Add this to your integrationService.js (you already have getPendingReviews, now add getPendingPayments)
+
+  getPendingPayments: async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(
+        "http://localhost:5000/api/users/payments/pending",
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        if (response.status >= 500) {
+          console.warn("Server error fetching pending payments, returning empty array");
+          return { pending_payments: [], count: 0 };
+        }
+        throw new Error(responseData.message || "Failed to fetch pending payments");
+      }
+
+      return responseData;
+    } catch (error) {
+      console.error("Error fetching pending payments:", error);
+      return { pending_payments: [], count: 0 };
+    }
+  },
+
   // ===== NOTIFICATIONS =====
   getUserNotifications: async () => {
     try {
